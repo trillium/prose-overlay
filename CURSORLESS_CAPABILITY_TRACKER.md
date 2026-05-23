@@ -319,18 +319,27 @@ For each scope modifier, does it resolve correctly?
 - **Actual:** cap becomes "hello" (only first token copied)
 - **Reason:** `replace_token()` uses `words[0]` after splitting on whitespace
 - **Impact:** Multi-word phrases can't be fully copied via bring/move; lose everything after first word
+- **Fix available:** Switch from word-split to character-range replace. Cursorless's
+  `ProseTextEditorEdit.replace(range, text)` in `proseShim.ts` handles multi-word correctly
+  by treating the source as a character range, not individual tokens. Small adaptation.
 
 ### ListTarget multi-target AND expressions
 - **Command:** "chuck air and bat"
 - **Expected:** Deletes both air and bat
 - **Actual:** Logs error "multi-target 'and' expressions are not supported", no-ops
 - **Workaround:** Execute as two separate commands: "chuck air" then "chuck bat"
+- **Fix available:** Cursorless's `TargetPipelineRunner.ts:90–95` handles ListTarget with a
+  simple `target.elements.flatMap(...)`. Drop-in: iterate elements, resolve each to a token
+  range, apply action to each independently.
 
 ### RangeTarget with implicit anchor
 - **Command:** "chuck past this" (no explicit anchor, implicit range from current to target)
 - **Expected (real Cursorless):** Range from cursor to target
 - **Actual:** Logs error "RangeTarget with implicit anchor is not supported", returns None
 - **Reason:** Code explicitly rejects `anchor.type == "implicit"` in range resolution
+- **Fix available:** Cursorless's `ImplicitStage.ts` resolves implicit anchor by reading
+  current selection from `ide()`. For prose overlay, replace that with `_resolve_state.cursor`.
+  Small adaptation — one guard removal + cursor lookup.
 
 ### Unrecognized scope types (silent fail)
 - **Command:** "chuck statement"
@@ -338,6 +347,15 @@ For each scope modifier, does it resolve correctly?
 - **Actual:** Logs "unrecognized scope type 'statement'", returns None, command is no-op
 - **Reason:** Only 8 scope types hardcoded; Cursorless has 50+
 - **User experience:** No error feedback visible in overlay; only in Talon logs
+- **Partial fix available (text-only scopes):** Several Cursorless scope types are pure regex
+  with no language server dependency — extractable from `RegexScopeHandler.ts`:
+  - `nonWhitespaceSequence` — regex `/\S+/g`
+  - `url` — full URL regex
+  - `character` — Unicode-aware `/\p{L}\p{M}*|.../gu`
+  - `glyph` — arbitrary char match
+  - `customRegex` — user-provided regex
+  These are drop-in bundles. Parse-tree scopes (statement, function, class) can never be
+  supported without a language server — those stay ❌.
 
 ### Non-ASCII hat allocation (Python fallback)
 - **Command:** Using cursor position to trigger hat allocation for accented text (café, Zürich, etc.)

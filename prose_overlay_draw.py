@@ -5,8 +5,6 @@ hat dots above the first letter of each token (up to 26 tokens).
 Uses overlay_kit shared primitives for panel frame, separator, and close hint.
 """
 
-import random
-import time
 from typing import Optional
 
 from talon import settings, ui
@@ -19,6 +17,8 @@ from ...utils.overlay_kit import (
     draw_rounded_rect,
     draw_separator,
 )
+from .prose_overlay_help import draw_help_panel, rotate_help_ring_buffer, HELP_COMMAND_POOL
+from .prose_overlay_history_panel import draw_history_panel, HISTORY_PAGE_SIZE
 
 # Hat alphabet: the 26 letter values from user.letter (a-z).
 # Tokens beyond index 25 render without hats.
@@ -79,10 +79,6 @@ CURSOR_WIDTH = 2
 CURSOR_CHANGE_ZONE_WIDTH = 24        # width of faint amber insertion-zone rect
 CURSOR_CHANGE_ZONE_ALPHA = "4d"      # ~30% alpha
 
-# Full command pool — flattened from HELP_PAGES (defined below) after module load.
-# Populated by _build_command_pool() at the bottom of this file.
-HELP_COMMAND_POOL: list[tuple[str, str]] = []
-
 # Anchor rect — when set, the overlay panel is scoped to this window's
 # x/width instead of the full screen. Set by prose_overlay.py on show
 # or via the 'overlay anchor' command.
@@ -110,80 +106,6 @@ def set_anchor_position(position: str) -> None:
     global _anchor_position
     if position in ("top", "bottom"):
         _anchor_position = position
-
-
-# Help side panel rotating display.
-# Ring buffer: _help_side_cmds holds N entries at fixed list indices.
-# _help_side_head tracks which slot to replace next (oldest).
-# Replacing in-place at _help_side_head keeps all other slots visually stable.
-# _help_side_last_replace tracks when the last slot replacement happened (monotonic seconds).
-# Only one slot is replaced per HELP_ROTATE_INTERVAL_MS, regardless of draw rate.
-HELP_ROTATE_INTERVAL_MS: int = 5000  # ms between hint replacements
-_help_side_cmds: list[tuple[str, str]] = []
-_help_side_head: int = 0
-_help_side_last_replace: float = 0.0
-
-# ---------------------------------------------------------------------------
-# Paginated help panel data
-# ---------------------------------------------------------------------------
-# entries are either section headers (str) or (command, description) tuples
-HelpEntry = tuple[str, str] | str
-HelpPage = tuple[str, list[HelpEntry]]  # (page_title, entries)
-
-HELP_PAGES: list[HelpPage] = [
-    ("Basics", [
-        ('"bravely"', "confirm + paste"),
-        ('"overlay dismiss"', "dismiss overlay"),
-        ('"overlay auto"', "toggle auto-mode"),
-        ('"overlay speak"', "read buffer aloud"),
-        ('"overlay undo"', "undo last edit"),
-        ('"overlay help"', "toggle this panel"),
-    ]),
-    ("Delete", [
-        ('"chuck <hat>"', "delete word at hat"),
-        ('"chuck past <hat>"', "delete hat through end"),
-        ('"chuck head <hat>"', "delete start through hat"),
-        ('"chuck tail <hat>"', "delete hat through end"),
-        "hat colors (on any command)",
-        ('"chuck blue <hat>"', "target colored hat"),
-        ('"chuck red <hat>"', "target colored hat"),
-    ]),
-    ("Cursor & Edit", [
-        ('"pre <hat>"', "cursor before hat"),
-        ('"post <hat>"', "cursor after hat"),
-        ('"pre file"', "cursor to start"),
-        ('"post file"', "cursor to end"),
-        ('"change <hat>"', "delete word + insert mode"),
-        ('"change head <hat>"', "delete start→hat + insert"),
-        ('"change tail <hat>"', "delete hat→end + insert"),
-    ]),
-    ("Move & History", [
-        ('"bring <hat> to <hat>"', "copy word to position"),
-        ('"move <hat> to <hat>"', "move word to position"),
-        ('"prose history"', "show history panel"),
-        ('"history pick <N>"', "reload history entry N"),
-        ('"<window> bravely"', "retarget + confirm"),
-    ]),
-    ("Layout", [
-        ('"overlay anchor"', "scope panel to window"),
-        ('"overlay anchor clear"', "full-screen panel"),
-        ('"overlay top"', "attach panel to top"),
-        ('"overlay bottom"', "attach panel to bottom"),
-    ]),
-]
-
-
-def _build_command_pool() -> list[tuple[str, str]]:
-    """Flatten all (cmd, desc) pairs from HELP_PAGES into one pool."""
-    pool = []
-    for _, entries in HELP_PAGES:
-        for e in entries:
-            if isinstance(e, tuple):
-                pool.append(e)
-    return pool
-
-
-HELP_COMMAND_POOL = _build_command_pool()
 
 
 def set_scroll_offset(offset: int) -> None:
@@ -359,19 +281,13 @@ def draw_overlay(
     else:
         _hints_hidden_by_overflow = False
 
-    # === Step 2 — scrolling window if still overflowing ===
+    # === Step 2 — terminal-pinned viewport if still overflowing ===
+    # Always show the most recent (bottom) rows. Oldest lines drop off the top silently.
     max_visible_rows = max(1, int(usable_h / LINE_HEIGHT))
     _last_rows = list(rows)  # cache for auto-scroll
 
-    # Initialize scroll indicator counts — always defined before drawing
-    rows_above = 0
-    rows_below = 0
-
-    if len(rows) * LINE_HEIGHT > usable_h:
-        _scroll_offset = max(0, min(_scroll_offset, len(rows) - max_visible_rows))
-        rows_above = _scroll_offset
-        rows_below = max(0, len(rows) - (_scroll_offset + max_visible_rows))
-        rows = rows[_scroll_offset : _scroll_offset + max_visible_rows]
+    if len(rows) > max_visible_rows:
+        rows = rows[len(rows) - max_visible_rows:]
 
     panel_rect = Rect(panel_x, panel_y, panel_w, panel_h)
     hint_row_h = HINT_FONT_SIZE + 6
@@ -478,15 +394,6 @@ def draw_overlay(
 
             y_base += LINE_HEIGHT
 
-    # Scroll indicators — drawn over token area when viewport is active
-    if rows_above > 0:
-        c.paint.textsize = HINT_FONT_SIZE
-        c.paint.color = HINT_CMD_COLOR
-        c.draw_text(f"↑ {rows_above} more", panel_x + PANEL_PAD, panel_y + PANEL_PAD + HINT_FONT_SIZE)
-    if rows_below > 0:
-        c.paint.textsize = HINT_FONT_SIZE
-        c.paint.color = HINT_CMD_COLOR
-        c.draw_text(f"↓ {rows_below} more", panel_x + PANEL_PAD, panel_y + panel_h - PANEL_PAD)
 
     # Target window label — bottom-left of content zone
     # Hidden when overflow is active (hints already hidden, space is tight)
@@ -505,34 +412,16 @@ def draw_overlay(
         c.draw_line(help_x, panel_y + PANEL_PAD, help_x, panel_y + panel_h - PANEL_PAD)
         c.paint.style = c.paint.Style.FILL
 
-        # Help zone: stable rotating display — one entry replaced per render (oldest first).
-        # _help_side_cmds is a queue: [oldest, ..., newest]. Each render pops index 0
-        # and appends a new random entry not already in the visible set.
+        # Help zone: stable rotating display — delegates to rotate_help_ring_buffer().
         hint_pad_x = help_x + PANEL_PAD
         cmd_col_w = (help_w - PANEL_PAD * 2) * 0.48
         max_rows = max(1, int((panel_h - PANEL_PAD * 2) / hint_row_h))
         n = min(max_rows, len(HELP_COMMAND_POOL))
 
-        global _help_side_head, _help_side_last_replace
-        now = time.monotonic()
-        if len(_help_side_cmds) != n:
-            # First draw or panel resized: initialize with a fresh random sample.
-            _help_side_cmds[:] = random.sample(HELP_COMMAND_POOL, n)
-            _help_side_head = 0
-            _help_side_last_replace = now
-        elif (now - _help_side_last_replace) * 1000 >= HELP_ROTATE_INTERVAL_MS:
-            # Enough time has passed — rotate one slot in-place (ring buffer).
-            # All other indices stay put — no visual shift.
-            current_set = set(_help_side_cmds)
-            entry_candidates = [e for e in HELP_COMMAND_POOL if e not in current_set]
-            if entry_candidates:
-                new_entry = random.choice(entry_candidates)
-                _help_side_head = (_help_side_head + 1) % n
-                _help_side_cmds[_help_side_head] = new_entry
-            _help_side_last_replace = now
+        side_cmds = rotate_help_ring_buffer(n)
 
         hint_y = panel_y + PANEL_PAD
-        for cmd, desc in _help_side_cmds:
+        for cmd, desc in side_cmds:
             hint_y += hint_row_h
             if hint_y > panel_y + panel_h - PANEL_PAD:
                 break
@@ -541,215 +430,5 @@ def draw_overlay(
             c.draw_text(cmd, hint_pad_x, hint_y)
             c.paint.color = HINT_COLOR
             c.draw_text(desc, hint_pad_x + cmd_col_w, hint_y)
-
-    return panel_rect
-
-
-def draw_help_panel(
-    c: SkiaCanvas,
-    main_rect: Rect,
-    page_index: int,
-) -> Optional[Rect]:
-    """Draw the paginated help panel below the main panel.
-
-    Returns the help panel Rect for click-outside detection, or None if
-    page_index is out of range.
-    """
-    if page_index < 0 or page_index >= len(HELP_PAGES):
-        return None
-
-    page_title, entries = HELP_PAGES[page_index]
-    total_pages = len(HELP_PAGES)
-
-    # Measure content height
-    hint_row_h = HINT_FONT_SIZE + 6
-    section_row_h = HINT_FONT_SIZE + 4 + 4  # 4px padding top + bottom around header
-    title_row_h = HINT_FONT_SIZE + 2 + 8  # title slightly larger gap below
-    footer_h = hint_row_h  # navigation footer: one row
-
-    content_h = title_row_h
-    for entry in entries:
-        if isinstance(entry, str):
-            content_h += section_row_h
-        else:
-            content_h += hint_row_h
-
-    sep_gap = 12
-    panel_h = PANEL_PAD + content_h + sep_gap + footer_h + PANEL_PAD
-    panel_w = PANEL_WIDTH
-    panel_x = main_rect.x  # same x as main panel
-    panel_y = main_rect.y + main_rect.height + HELP_PANEL_GAP
-    panel_rect = Rect(panel_x, panel_y, panel_w, panel_h)
-
-    # Panel background + border via overlay_kit
-    draw_panel_frame(c, panel_rect, PANEL_RADIUS, BG_COLOR, BORDER_COLOR)
-
-    max_content_w = panel_w - PANEL_PAD * 2
-    cmd_col_w = max_content_w * 0.55
-    cx = panel_x + PANEL_PAD
-    cy = panel_y + PANEL_PAD
-
-    # Page title
-    c.paint.textsize = HINT_FONT_SIZE
-    c.paint.color = HELP_TITLE_COLOR
-    c.paint.font.embolden = True
-    c.draw_text(page_title, cx, cy + HINT_FONT_SIZE)
-    c.paint.font.embolden = False
-    cy += title_row_h
-
-    # Entries: section headers (str) or command/description tuples
-    for entry in entries:
-        if isinstance(entry, str):
-            # Section header — same pattern as settings_overlay.py
-            cy += 4
-            c.paint.textsize = HINT_FONT_SIZE
-            c.paint.color = BORDER_COLOR
-            c.paint.font.embolden = True
-            c.draw_text(f"\u2500\u2500 {entry} \u2500\u2500", cx, cy + HINT_FONT_SIZE)
-            c.paint.font.embolden = False
-            cy += HINT_FONT_SIZE + 4
-        else:
-            cmd, desc = entry
-            cy += hint_row_h
-            c.paint.textsize = HINT_FONT_SIZE
-            c.paint.color = HINT_CMD_COLOR
-            c.draw_text(cmd, cx, cy)
-            c.paint.color = HINT_COLOR
-            c.draw_text(desc, cx + cmd_col_w, cy)
-
-    # Separator above navigation footer
-    sep_y = panel_y + panel_h - PANEL_PAD - footer_h - sep_gap / 2
-    draw_separator(c, cx, cx + max_content_w, sep_y, SEP_COLOR)
-
-    # Navigation footer: "help next"  ·  "help back"  ·  page N of M
-    footer_y = sep_y + sep_gap / 2 + hint_row_h
-    c.paint.textsize = HINT_FONT_SIZE
-    c.paint.color = HINT_CMD_COLOR
-    nav_text = '"help next"'
-    c.draw_text(nav_text, cx, footer_y)
-    nav_w = c.paint.measure_text(nav_text)[1].width
-
-    c.paint.color = HINT_COLOR
-    dot1 = "  \u00b7  "
-    c.draw_text(dot1, cx + nav_w, footer_y)
-    dot1_w = c.paint.measure_text(dot1)[1].width
-
-    c.paint.color = HINT_CMD_COLOR
-    back_text = '"help back"'
-    c.draw_text(back_text, cx + nav_w + dot1_w, footer_y)
-    back_w = c.paint.measure_text(back_text)[1].width
-
-    c.paint.color = HINT_COLOR
-    dot2 = "  \u00b7  "
-    c.draw_text(dot2, cx + nav_w + dot1_w + back_w, footer_y)
-    dot2_w = c.paint.measure_text(dot2)[1].width
-
-    page_text = f"page {page_index + 1} of {total_pages}"
-    c.draw_text(page_text, cx + nav_w + dot1_w + back_w + dot2_w, footer_y)
-
-    return panel_rect
-
-
-# ---------------------------------------------------------------------------
-# History panel
-# ---------------------------------------------------------------------------
-
-HISTORY_PAGE_SIZE = 10
-
-
-def draw_history_panel(
-    c: SkiaCanvas,
-    overlay: DismissibleOverlay,
-    history: list[str],
-    page_index: int,
-) -> Optional[Rect]:
-    """Draw the prose history panel centered on screen.
-
-    Shows up to HISTORY_PAGE_SIZE phrases per page, newest first.
-    Each entry is numbered for use with 'history pick <N>'.
-    """
-    screen = ui.main_screen()
-    sr = screen.rect
-
-    c.paint.typeface = "Menlo"
-
-    entries = history[page_index * HISTORY_PAGE_SIZE:(page_index + 1) * HISTORY_PAGE_SIZE]
-    total_pages = max(1, (len(history) + HISTORY_PAGE_SIZE - 1) // HISTORY_PAGE_SIZE)
-
-    row_h = HINT_FONT_SIZE + 10
-    title_h = HINT_FONT_SIZE + 16
-    sep_h = 14
-    footer_h = row_h
-
-    n_content_rows = max(1, len(entries))
-    panel_w = min(int(sr.width * 0.64), 880)
-    panel_h = PANEL_PAD + title_h + n_content_rows * row_h + sep_h + footer_h + PANEL_PAD
-    panel_x = sr.x + (sr.width - panel_w) / 2
-    panel_y = sr.y + (sr.height - panel_h) / 2
-    panel_rect = Rect(panel_x, panel_y, panel_w, panel_h)
-
-    draw_panel_frame(c, panel_rect, PANEL_RADIUS, BG_COLOR, BORDER_COLOR)
-    overlay.draw_close_hint(c, panel_x, panel_y, panel_w, PANEL_PAD)
-
-    cx = panel_x + PANEL_PAD
-    cy = panel_y + PANEL_PAD
-
-    # Title + page info on same row
-    c.paint.textsize = HINT_FONT_SIZE + 1
-    c.paint.color = HELP_TITLE_COLOR
-    c.paint.font.embolden = True
-    c.draw_text("Prose History", cx, cy + HINT_FONT_SIZE)
-    c.paint.font.embolden = False
-
-    if history:
-        page_label = f"page {page_index + 1} of {total_pages}  ·  {len(history)} entr{'y' if len(history) == 1 else 'ies'}"
-        c.paint.textsize = HINT_FONT_SIZE
-        c.paint.color = HINT_COLOR
-        label_w = c.paint.measure_text(page_label)[1].width
-        c.draw_text(page_label, panel_x + panel_w - PANEL_PAD - label_w, cy + HINT_FONT_SIZE)
-
-    cy += title_h
-    draw_separator(c, cx, panel_x + panel_w - PANEL_PAD, cy - 4, SEP_COLOR)
-
-    if not history:
-        c.paint.textsize = HINT_FONT_SIZE
-        c.paint.color = HINT_COLOR
-        c.draw_text('No history yet. Confirm a phrase with an ender word.', cx, cy + row_h)
-    else:
-        num_col_w = 32
-        # Menlo at HINT_FONT_SIZE ≈ 0.62× font size per character (monospace estimate)
-        max_text_w = panel_w - PANEL_PAD * 2 - num_col_w
-        approx_char_w = HINT_FONT_SIZE * 0.62
-        max_chars = max(10, int(max_text_w / approx_char_w))
-
-        for i, entry in enumerate(entries):
-            global_num = page_index * HISTORY_PAGE_SIZE + i + 1
-            cy += row_h
-
-            c.paint.textsize = HINT_FONT_SIZE
-            c.paint.color = HINT_CMD_COLOR
-            c.draw_text(str(global_num), cx, cy)
-
-            display = entry if len(entry) <= max_chars else entry[:max_chars - 1] + "\u2026"
-            c.paint.color = TOKEN_COLOR
-            c.draw_text(display, cx + num_col_w, cy)
-
-    # Footer
-    sep_y = panel_y + panel_h - PANEL_PAD - footer_h - sep_h / 2
-    draw_separator(c, cx, panel_x + panel_w - PANEL_PAD, sep_y, SEP_COLOR)
-
-    fy = panel_y + panel_h - PANEL_PAD
-    c.paint.textsize = HINT_FONT_SIZE
-    fx = cx
-    for txt, col in [
-        ('"history back"',     HINT_CMD_COLOR),
-        ("  \u00b7  ",         HINT_COLOR),
-        ('"history next"',     HINT_CMD_COLOR),
-        ("  \u00b7  ",         HINT_COLOR),
-        ('"history pick <N>"', HINT_CMD_COLOR),
-    ]:
-        c.paint.color = col
-        c.draw_text(txt, fx, fy)
-        fx += c.paint.measure_text(txt)[1].width
 
     return panel_rect

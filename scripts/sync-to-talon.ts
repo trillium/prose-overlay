@@ -28,6 +28,7 @@ const EXCLUDE = [
   "--exclude=CLAUDE.md",
   "--exclude=CURSORLESS_REIMPLEMENTATIONS.md",
   "--exclude=CURSORLESS_DEPENDENCIES.md",
+  "--exclude=CURSORLESS_CAPABILITY_TRACKER.md",
   "--exclude=.git/",
   "--exclude=__pycache__/",
   "--exclude=*.pyc",
@@ -48,7 +49,8 @@ function isExcluded(filename: string): boolean {
     filename === "README.md" ||
     filename === "CLAUDE.md" ||
     filename === "CURSORLESS_REIMPLEMENTATIONS.md" ||
-    filename === "CURSORLESS_DEPENDENCIES.md"
+    filename === "CURSORLESS_DEPENDENCIES.md" ||
+    filename === "CURSORLESS_CAPABILITY_TRACKER.md"
   );
 }
 

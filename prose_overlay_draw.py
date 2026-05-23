@@ -256,7 +256,13 @@ def draw_overlay(
     # === Hybrid overflow: Step 1 — auto-hide hints if content overflows ===
     global _hints_hidden_by_overflow, _scroll_offset, _last_rows
     usable_h = panel_h - PANEL_PAD * 2
-    content_fits_with_hints = len(rows) * LINE_HEIGHT <= usable_h
+    hint_row_h = HINT_FONT_SIZE + 6
+
+    # In non-overflow mode, the target label sits at the bottom of the panel and
+    # consumes hint_row_h of the usable height. The overflow check must account
+    # for that reserved space so we don't render rows that visually overlap the label.
+    label_reserve = hint_row_h if target_label else 0
+    content_fits_with_hints = len(rows) * LINE_HEIGHT <= (usable_h - label_reserve)
 
     if not content_fits_with_hints:
         # Reflow with full panel width (hints hidden)
@@ -283,14 +289,16 @@ def draw_overlay(
 
     # === Step 2 — terminal-pinned viewport if still overflowing ===
     # Always show the most recent (bottom) rows. Oldest lines drop off the top silently.
-    max_visible_rows = max(1, int(usable_h / LINE_HEIGHT))
+    # In overflow mode the label is also hidden, so the full usable_h is available.
+    # In normal mode the label still reserves space at the bottom.
+    effective_h = usable_h if _hints_hidden_by_overflow else (usable_h - label_reserve)
+    max_visible_rows = max(1, int(effective_h / LINE_HEIGHT))
     _last_rows = list(rows)  # cache for auto-scroll
 
     if len(rows) > max_visible_rows:
         rows = rows[len(rows) - max_visible_rows:]
 
     panel_rect = Rect(panel_x, panel_y, panel_w, panel_h)
-    hint_row_h = HINT_FONT_SIZE + 6
 
     # Panel background + border via overlay_kit
     draw_panel_frame(c, panel_rect, PANEL_RADIUS, BG_COLOR, BORDER_COLOR)

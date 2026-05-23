@@ -9,6 +9,8 @@ holds a reference to the same object and keeps its fields current whenever
 _hat_to_token, _buffer, or _cursor change.
 """
 
+import re
+
 from talon import actions  # noqa: F401  (available for future use; kept for symmetry)
 
 
@@ -72,10 +74,45 @@ _WORD_SCOPE_TYPES = frozenset({
     "character",   # spoken "char"
 })
 
+# Regex-based scope types: pattern is applied to the full buffer text and the
+# match overlapping the cursor is returned as a token span.
+_REGEX_SCOPE_PATTERNS: "dict[str, re.Pattern[str]]" = {
+    "nonWhitespaceSequence": re.compile(r"\S+"),
+    "url": re.compile(
+        r"(http(s)?://.)?(\bwww\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}"
+        r"\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)"
+    ),
+}
+
 
 # ---------------------------------------------------------------------------
 # Resolution helpers
 # ---------------------------------------------------------------------------
+
+def _char_range_to_token_range(
+    char_start: int, char_end: int, tokens: "list[str]"
+) -> "tuple[int, int] | None":
+    """Convert a character range in space-joined text to (first_token, last_token).
+
+    char_start and char_end are offsets into ``" ".join(tokens)``.
+    Returns the inclusive token index range covering those characters,
+    or None if the range doesn't overlap any token.
+    """
+    pos = 0
+    first_tok: "int | None" = None
+    last_tok: "int | None" = None
+    for i, tok in enumerate(tokens):
+        tok_end = pos + len(tok)
+        # Token occupies [pos, tok_end) in the joined string.
+        if tok_end > char_start and pos < char_end:
+            if first_tok is None:
+                first_tok = i
+            last_tok = i
+        pos = tok_end + 1  # +1 for space separator
+    if first_tok is not None and last_tok is not None:
+        return (first_tok, last_tok)
+    return None
+
 
 def _cursorless_symbol_to_token_index(decorated_symbol: dict) -> int:
     """Resolve a cursorless_decorated_symbol dict to a token index.
@@ -175,6 +212,27 @@ def _resolve_primitive_to_token_range(target) -> "tuple[int, int] | None":
                     return None
                 tok_idx = min(max(_state.cursor, 0), len(tokens) - 1)
                 return (tok_idx, tok_idx)
+            if scope_type in _REGEX_SCOPE_PATTERNS:
+                if _state.cursor is None:
+                    print(
+                        f"prose_overlay: scope '{scope_type}' requires an active cursor"
+                    )
+                    return None
+                text = " ".join(tokens)
+                # Convert cursor gap index to a character position inside text.
+                cursor_char = 0
+                if _state.cursor > 0:
+                    for ci in range(_state.cursor):
+                        if ci < len(tokens):
+                            cursor_char += len(tokens[ci]) + (1 if ci < len(tokens) - 1 else 0)
+                pattern = _REGEX_SCOPE_PATTERNS[scope_type]
+                for m in pattern.finditer(text):
+                    if m.start() <= cursor_char <= m.end():
+                        result = _char_range_to_token_range(m.start(), m.end(), tokens)
+                        if result is not None:
+                            return result
+                print(f"prose_overlay: no '{scope_type}' match at cursor position")
+                return None
             print(f"prose_overlay: unrecognized scope type '{scope_type}'")
             return None
 
@@ -189,21 +247,22 @@ def _resolve_primitive_to_token_range(target) -> "tuple[int, int] | None":
     return None
 
 
-def _resolve_target_to_token_range(target) -> "tuple[int, int] | None":
-    """Resolve any CursorlessTarget to (start_token_idx, end_token_idx) inclusive.
+def _resolve_target_to_token_range(target) -> "list[tuple[int, int]] | None":
+    """Resolve any CursorlessTarget to a list of (start, end) inclusive ranges.
 
     Dispatches by target type:
-    - PrimitiveTarget → _resolve_primitive_to_token_range
-    - RangeTarget     → resolve anchor + active, return spanning range
-    - ListTarget      → not supported (log and return None)
-    - ImplicitTarget  → not supported (log and return None)
+    - PrimitiveTarget → single-element list from _resolve_primitive_to_token_range
+    - RangeTarget     → single-element list spanning anchor..active
+    - ListTarget      → list of ranges, one per element
+    - ImplicitTarget  → single-element list at cursor position
 
     Returns None if the target cannot be resolved.
     """
     target_type = target.type  # class attribute, not instance dict
 
     if target_type == "primitive":
-        return _resolve_primitive_to_token_range(target)
+        r = _resolve_primitive_to_token_range(target)
+        return [r] if r is not None else None
 
     if target_type == "range":
         # anchor may be ImplicitTarget (type == "implicit") when the user says
@@ -212,12 +271,21 @@ def _resolve_target_to_token_range(target) -> "tuple[int, int] | None":
         active = target.active
 
         if anchor.type == "implicit":
-            print(
-                "prose_overlay: RangeTarget with implicit anchor is not supported"
-            )
-            return None
+            # Implicit anchor means "from the cursor".  Convert the cursor
+            # gap index to the nearest token index.
+            if _state.cursor is None:
+                print(
+                    "prose_overlay: RangeTarget with implicit anchor requires "
+                    "an active cursor"
+                )
+                return None
+            tokens = _state.buffer.get_tokens()
+            anchor_tok = max(0, _state.cursor - 1) if _state.cursor > 0 else 0
+            anchor_tok = min(anchor_tok, len(tokens) - 1) if tokens else 0
+            anchor_range = (anchor_tok, anchor_tok)
+        else:
+            anchor_range = _resolve_primitive_to_token_range(anchor)
 
-        anchor_range = _resolve_primitive_to_token_range(anchor)
         active_range = _resolve_primitive_to_token_range(active)
 
         if anchor_range is None or active_range is None:
@@ -225,14 +293,16 @@ def _resolve_target_to_token_range(target) -> "tuple[int, int] | None":
 
         first = min(anchor_range[0], active_range[0])
         last = max(anchor_range[1], active_range[1])
-        return (first, last)
+        return [(first, last)]
 
     if target_type == "list":
-        print(
-            "prose_overlay: ListTarget (multi-target 'and' expressions) are not "
-            "supported — operate on targets individually"
-        )
-        return None
+        ranges: "list[tuple[int, int]]" = []
+        for element in target.elements:
+            resolved = _resolve_target_to_token_range(element)
+            if resolved is None:
+                return None
+            ranges.extend(resolved)
+        return ranges if ranges else None
 
     if target_type == "implicit":
         # "this" in Cursorless — resolve to the token at the cursor position.
@@ -243,7 +313,7 @@ def _resolve_target_to_token_range(target) -> "tuple[int, int] | None":
         tok_idx = min(_state.cursor, len(tokens) - 1)
         if tok_idx < 0:
             tok_idx = 0
-        return (tok_idx, tok_idx)
+        return [(tok_idx, tok_idx)]
 
     print(f"prose_overlay: unknown target type '{target_type}'")
     return None

@@ -182,39 +182,40 @@ class Actions:
             print(f"prose_overlay: unsupported action '{action_name}' (VS Code-only?)")
             return
 
-        token_range = _resolve_target_to_token_range(cursorless_target)
-        if token_range is None:
+        token_ranges = _resolve_target_to_token_range(cursorless_target)
+        if token_ranges is None:
             print(f"prose_overlay: unresolvable target for action '{action_name}'")
             return
 
-        first_idx, last_idx = token_range
-        tokens = instance.buffer.get_tokens()
-        text = " ".join(tokens)
-        src_start, _ = _token_char_range(first_idx, tokens)
-        _, src_end = _token_char_range(last_idx, tokens)
-
-        # Cursor position for context (anchor == active == collapsed cursor).
-        cursor_char = _cursor_to_char(instance.cursor, tokens, text)
-
-        range_indices = list(range(first_idx, last_idx + 1))
+        # Collect all token indices for flashing, then execute each range.
+        all_indices: list[int] = []
+        for first_idx, last_idx in token_ranges:
+            all_indices.extend(range(first_idx, last_idx + 1))
 
         def _execute():
-            plan = _js.run_action(
-                action_name,
-                src_start,
-                src_end,
-                text,
-                cursor_anchor_char=cursor_char,
-                cursor_active_char=cursor_char,
-            )
-            _apply_edit_plan(plan)
-            # Set selection tracking for selection-type actions.
-            if action_name in ("setSelection", "clearAndSetSelection"):
-                instance.buffer.set_selection(first_idx, last_idx)
+            # Apply action to each range in reverse order so earlier indices
+            # stay valid after edits delete/modify later tokens.
+            for first_idx, last_idx in sorted(token_ranges, reverse=True):
+                tokens = instance.buffer.get_tokens()
+                text = " ".join(tokens)
+                src_start, _ = _token_char_range(first_idx, tokens)
+                _, src_end = _token_char_range(last_idx, tokens)
+                cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+                plan = _js.run_action(
+                    action_name,
+                    src_start,
+                    src_end,
+                    text,
+                    cursor_anchor_char=cursor_char,
+                    cursor_active_char=cursor_char,
+                )
+                _apply_edit_plan(plan)
+                if action_name in ("setSelection", "clearAndSetSelection"):
+                    instance.buffer.set_selection(first_idx, last_idx)
             _recompute_hats()
             instance.canvas.refresh()
 
-        _flash_tokens(range_indices, _action_color(action_name), _execute)
+        _flash_tokens(all_indices, _action_color(action_name), _execute)
 
     def prose_overlay_run_action_range(
         action_name: str, anchor: dict, active: dict
@@ -287,33 +288,34 @@ class Actions:
             print("prose_overlay: bring/move requires an active cursor position")
             return
 
-        token_range = _resolve_target_to_token_range(cursorless_target)
-        if token_range is None:
+        token_ranges = _resolve_target_to_token_range(cursorless_target)
+        if token_ranges is None:
             print(f"prose_overlay: unresolvable target for action '{action_name}'")
             return
 
-        first_idx, last_idx = token_range
-        tokens = instance.buffer.get_tokens()
-        text = " ".join(tokens)
-        src_start, _ = _token_char_range(first_idx, tokens)
-        _, src_end = _token_char_range(last_idx, tokens)
-
-        # Destination = collapsed cursor: both anchor and active at cursor char.
-        cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+        all_indices: list[int] = []
+        for first_idx, last_idx in token_ranges:
+            all_indices.extend(range(first_idx, last_idx + 1))
 
         def _execute():
-            plan = _js.run_action(
-                action_name,
-                src_start,
-                src_end,
-                text,
-                dest_start_char=cursor_char,
-                dest_end_char=cursor_char,
-                cursor_anchor_char=cursor_char,
-                cursor_active_char=cursor_char,
-            )
-            _apply_edit_plan(plan)
+            for first_idx, last_idx in sorted(token_ranges, reverse=True):
+                tokens = instance.buffer.get_tokens()
+                text = " ".join(tokens)
+                src_start, _ = _token_char_range(first_idx, tokens)
+                _, src_end = _token_char_range(last_idx, tokens)
+                cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+                plan = _js.run_action(
+                    action_name,
+                    src_start,
+                    src_end,
+                    text,
+                    dest_start_char=cursor_char,
+                    dest_end_char=cursor_char,
+                    cursor_anchor_char=cursor_char,
+                    cursor_active_char=cursor_char,
+                )
+                _apply_edit_plan(plan)
             _recompute_hats()
             instance.canvas.refresh()
 
-        _flash_tokens(list(range(first_idx, last_idx + 1)), _action_color(action_name), _execute)
+        _flash_tokens(all_indices, _action_color(action_name), _execute)

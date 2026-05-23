@@ -26,6 +26,8 @@ const EXCLUDE = [
   "--exclude=scripts/",
   "--exclude=README.md",
   "--exclude=CLAUDE.md",
+  "--exclude=CURSORLESS_REIMPLEMENTATIONS.md",
+  "--exclude=CURSORLESS_DEPENDENCIES.md",
   "--exclude=.git/",
   "--exclude=__pycache__/",
   "--exclude=*.pyc",
@@ -44,7 +46,9 @@ function isExcluded(filename: string): boolean {
     filename.startsWith("scripts/") ||
     filename === "prose_overlay_prefs.json" ||
     filename === "README.md" ||
-    filename === "CLAUDE.md"
+    filename === "CLAUDE.md" ||
+    filename === "CURSORLESS_REIMPLEMENTATIONS.md" ||
+    filename === "CURSORLESS_DEPENDENCIES.md"
   );
 }
 

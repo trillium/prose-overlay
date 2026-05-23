@@ -1,7 +1,6 @@
 """Flash helpers and flash-state getter actions for the prose overlay.
 
-Extracted from prose_overlay.py. Uses the same module-level globals as
-prose_overlay.py — state migration to instance.* happens in wave 2.
+Migrated to use instance.* in wave 2. Never imports prose_overlay.py.
 
 Contains:
   _clear_flash              — clear flash state and redraw
@@ -13,44 +12,36 @@ Contains:
 
 from talon import Module, cron
 
-mod = Module()
+from .prose_overlay_instance import instance
 
-# ---------------------------------------------------------------------------
-# Module-level globals (mirrors prose_overlay.py — wave 2 migrates to instance)
-# ---------------------------------------------------------------------------
-_flash_state: dict = {}   # keys: "indices" (list[int]), "color" (str, 6-char hex)
-_flash_callback = None    # pending callable to run after flash delay
-_canvas = None            # set by prose_overlay.py after canvas is created
+mod = Module()
 
 
 def _clear_flash():
     """Clear flash state and trigger a canvas redraw."""
-    global _flash_state
-    _flash_state = {}
-    if _canvas is not None:
-        _canvas.refresh()
+    instance.flash_state = {}
+    if instance.canvas is not None:
+        instance.canvas.refresh()
 
 
 def _flash_tokens(indices: list, color: str, callback, duration_ms: int = 150):
     """Highlight the given token indices briefly, then call callback.
 
-    Sets _flash_state so draw_overlay renders the colored highlight rect,
+    Sets instance.flash_state so draw_overlay renders the colored highlight rect,
     freezes the canvas for an immediate redraw, then schedules a cron job
     to clear the flash and execute the actual action callback.
     """
-    global _flash_state, _flash_callback
-    _flash_state = {"indices": indices, "color": color}
-    _flash_callback = callback
-    if _canvas is not None:
-        _canvas.refresh()  # redraw with highlight
+    instance.flash_state = {"indices": indices, "color": color}
+    instance.flash_callback = callback
+    if instance.canvas is not None:
+        instance.canvas.refresh()  # redraw with highlight
 
     def _after_flash():
-        global _flash_state, _flash_callback
-        _flash_state = {}
-        cb = _flash_callback
-        _flash_callback = None
-        if _canvas is not None:
-            _canvas.refresh()  # redraw without highlight
+        instance.flash_state = {}
+        cb = instance.flash_callback
+        instance.flash_callback = None
+        if instance.canvas is not None:
+            instance.canvas.refresh()  # redraw without highlight
         if cb is not None:
             cb()
 
@@ -79,8 +70,8 @@ def _action_color(action_name: str) -> str:
 class Actions:
     def prose_overlay_get_flash_indices() -> list:
         """Return the list of token indices currently being flashed (empty if none)."""
-        return list(_flash_state.get("indices", []))
+        return list(instance.flash_state.get("indices", []))
 
     def prose_overlay_get_flash_color() -> str:
         """Return the current flash color hex (6 chars), or '' if no flash."""
-        return _flash_state.get("color", "")
+        return instance.flash_state.get("color", "")

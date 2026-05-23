@@ -13,7 +13,6 @@ Drop-in replacement: same input/output contract, better algorithm.
 import json
 import os
 import talon.lib.js as js
-import talon.scripting.js as sjs
 
 from .prose_overlay_state import compute_hat_assignments as _py_compute_hat_assignments
 

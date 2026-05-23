@@ -93,6 +93,11 @@ _anchor_rect: Optional[Rect] = None
 # "bottom" → panel_y = bottom of anchor (or screen bottom) minus panel height
 _anchor_position: str = "top"
 
+# Overflow state — set during each draw, read by auto-scroll helper in prose_overlay.py
+_hints_hidden_by_overflow: bool = False
+_scroll_offset: int = 0
+_last_rows: list = []  # cached row layout from last draw, used by compute_scroll_for_cursor
+
 
 def set_anchor_rect(rect: Optional[Rect]) -> None:
     """Set (or clear) the anchor window rect used for window-scoped layout."""
@@ -179,6 +184,49 @@ def _build_command_pool() -> list[tuple[str, str]]:
 
 
 HELP_COMMAND_POOL = _build_command_pool()
+
+
+def set_scroll_offset(offset: int) -> None:
+    """Set the scroll row offset for the token viewport."""
+    global _scroll_offset
+    _scroll_offset = offset
+
+
+def get_max_visible_rows() -> int:
+    """Return the maximum number of token rows that fit in the panel."""
+    screen = ui.main_screen()
+    panel_h = screen.rect.height * PANEL_H_FRACTION
+    usable_h = panel_h - PANEL_PAD * 2
+    return max(1, int(usable_h / LINE_HEIGHT))
+
+
+def _find_cursor_row(rows: list, cursor: "int | None") -> "int | None":
+    """Return the row index that contains the given cursor gap index, or None."""
+    if cursor is None:
+        return None
+    for row_idx, row in enumerate(rows):
+        first_tok = row[0][0]
+        last_tok = row[-1][0]
+        if first_tok <= cursor <= last_tok + 1:
+            return row_idx
+    return None
+
+
+def compute_scroll_for_cursor(
+    rows: list,
+    cursor: "int | None",
+    scroll_offset: int,
+    max_visible_rows: int,
+) -> int:
+    """Return the scroll offset needed to keep the cursor row visible."""
+    row_idx = _find_cursor_row(rows, cursor)
+    if row_idx is None:
+        return scroll_offset
+    if row_idx < scroll_offset:
+        return row_idx
+    if row_idx >= scroll_offset + max_visible_rows:
+        return row_idx - max_visible_rows + 1
+    return scroll_offset
 
 
 def draw_cursor(c: SkiaCanvas, x: float, y_top: float, height: float, change_mode: bool, blink_on: bool):
@@ -282,6 +330,48 @@ def draw_overlay(
             current_row_w += needed
     if current_row:
         rows.append(current_row)
+
+    # === Hybrid overflow: Step 1 — auto-hide hints if content overflows ===
+    global _hints_hidden_by_overflow, _scroll_offset, _last_rows
+    usable_h = panel_h - PANEL_PAD * 2
+    content_fits_with_hints = len(rows) * LINE_HEIGHT <= usable_h
+
+    if not content_fits_with_hints:
+        # Reflow with full panel width (hints hidden)
+        max_content_w_full = panel_w - PANEL_PAD * 2
+        rows_full: list[list[tuple[int, str, float]]] = []
+        cur_row_f: list[tuple[int, str, float]] = []
+        cur_row_w_f = 0.0
+        for i, (token, tw) in enumerate(token_metrics):
+            needed = tw + (TOKEN_GAP_X if cur_row_f else 0)
+            if cur_row_f and cur_row_w_f + needed > max_content_w_full:
+                rows_full.append(cur_row_f)
+                cur_row_f = [(i, token, tw)]
+                cur_row_w_f = tw
+            else:
+                cur_row_f.append((i, token, tw))
+                cur_row_w_f += needed
+        if cur_row_f:
+            rows_full.append(cur_row_f)
+        _hints_hidden_by_overflow = True
+        rows = rows_full
+        max_content_w = max_content_w_full
+    else:
+        _hints_hidden_by_overflow = False
+
+    # === Step 2 — scrolling window if still overflowing ===
+    max_visible_rows = max(1, int(usable_h / LINE_HEIGHT))
+    _last_rows = list(rows)  # cache for auto-scroll
+
+    # Initialize scroll indicator counts — always defined before drawing
+    rows_above = 0
+    rows_below = 0
+
+    if len(rows) * LINE_HEIGHT > usable_h:
+        _scroll_offset = max(0, min(_scroll_offset, len(rows) - max_visible_rows))
+        rows_above = _scroll_offset
+        rows_below = max(0, len(rows) - (_scroll_offset + max_visible_rows))
+        rows = rows[_scroll_offset : _scroll_offset + max_visible_rows]
 
     panel_rect = Rect(panel_x, panel_y, panel_w, panel_h)
     hint_row_h = HINT_FONT_SIZE + 6
@@ -388,56 +478,69 @@ def draw_overlay(
 
             y_base += LINE_HEIGHT
 
+    # Scroll indicators — drawn over token area when viewport is active
+    if rows_above > 0:
+        c.paint.textsize = HINT_FONT_SIZE
+        c.paint.color = HINT_CMD_COLOR
+        c.draw_text(f"↑ {rows_above} more", panel_x + PANEL_PAD, panel_y + PANEL_PAD + HINT_FONT_SIZE)
+    if rows_below > 0:
+        c.paint.textsize = HINT_FONT_SIZE
+        c.paint.color = HINT_CMD_COLOR
+        c.draw_text(f"↓ {rows_below} more", panel_x + PANEL_PAD, panel_y + panel_h - PANEL_PAD)
+
     # Target window label — bottom-left of content zone
-    if target_label:
+    # Hidden when overflow is active (hints already hidden, space is tight)
+    if target_label and not _hints_hidden_by_overflow:
         c.paint.textsize = HINT_FONT_SIZE
         c.paint.color = HINT_CMD_COLOR
         label_y = panel_y + panel_h - PANEL_PAD
         c.draw_text(target_label, panel_x + PANEL_PAD, label_y)
 
-    # Vertical separator between content and help zones
-    c.paint.style = c.paint.Style.STROKE
-    c.paint.stroke_width = 1
-    c.paint.color = SEP_COLOR
-    c.draw_line(help_x, panel_y + PANEL_PAD, help_x, panel_y + panel_h - PANEL_PAD)
-    c.paint.style = c.paint.Style.FILL
+    # Vertical separator and help zone — only when hints are not hidden by overflow
+    if not _hints_hidden_by_overflow:
+        # Vertical separator between content and help zones
+        c.paint.style = c.paint.Style.STROKE
+        c.paint.stroke_width = 1
+        c.paint.color = SEP_COLOR
+        c.draw_line(help_x, panel_y + PANEL_PAD, help_x, panel_y + panel_h - PANEL_PAD)
+        c.paint.style = c.paint.Style.FILL
 
-    # Help zone: stable rotating display — one entry replaced per render (oldest first).
-    # _help_side_cmds is a queue: [oldest, ..., newest]. Each render pops index 0
-    # and appends a new random entry not already in the visible set.
-    hint_pad_x = help_x + PANEL_PAD
-    cmd_col_w = (help_w - PANEL_PAD * 2) * 0.48
-    max_rows = max(1, int((panel_h - PANEL_PAD * 2) / hint_row_h))
-    n = min(max_rows, len(HELP_COMMAND_POOL))
+        # Help zone: stable rotating display — one entry replaced per render (oldest first).
+        # _help_side_cmds is a queue: [oldest, ..., newest]. Each render pops index 0
+        # and appends a new random entry not already in the visible set.
+        hint_pad_x = help_x + PANEL_PAD
+        cmd_col_w = (help_w - PANEL_PAD * 2) * 0.48
+        max_rows = max(1, int((panel_h - PANEL_PAD * 2) / hint_row_h))
+        n = min(max_rows, len(HELP_COMMAND_POOL))
 
-    global _help_side_head, _help_side_last_replace
-    now = time.monotonic()
-    if len(_help_side_cmds) != n:
-        # First draw or panel resized: initialize with a fresh random sample.
-        _help_side_cmds[:] = random.sample(HELP_COMMAND_POOL, n)
-        _help_side_head = 0
-        _help_side_last_replace = now
-    elif (now - _help_side_last_replace) * 1000 >= HELP_ROTATE_INTERVAL_MS:
-        # Enough time has passed — rotate one slot in-place (ring buffer).
-        # All other indices stay put — no visual shift.
-        current_set = set(_help_side_cmds)
-        entry_candidates = [e for e in HELP_COMMAND_POOL if e not in current_set]
-        if entry_candidates:
-            new_entry = random.choice(entry_candidates)
-            _help_side_head = (_help_side_head + 1) % n
-            _help_side_cmds[_help_side_head] = new_entry
-        _help_side_last_replace = now
+        global _help_side_head, _help_side_last_replace
+        now = time.monotonic()
+        if len(_help_side_cmds) != n:
+            # First draw or panel resized: initialize with a fresh random sample.
+            _help_side_cmds[:] = random.sample(HELP_COMMAND_POOL, n)
+            _help_side_head = 0
+            _help_side_last_replace = now
+        elif (now - _help_side_last_replace) * 1000 >= HELP_ROTATE_INTERVAL_MS:
+            # Enough time has passed — rotate one slot in-place (ring buffer).
+            # All other indices stay put — no visual shift.
+            current_set = set(_help_side_cmds)
+            entry_candidates = [e for e in HELP_COMMAND_POOL if e not in current_set]
+            if entry_candidates:
+                new_entry = random.choice(entry_candidates)
+                _help_side_head = (_help_side_head + 1) % n
+                _help_side_cmds[_help_side_head] = new_entry
+            _help_side_last_replace = now
 
-    hint_y = panel_y + PANEL_PAD
-    for cmd, desc in _help_side_cmds:
-        hint_y += hint_row_h
-        if hint_y > panel_y + panel_h - PANEL_PAD:
-            break
-        c.paint.textsize = HINT_FONT_SIZE
-        c.paint.color = HINT_CMD_COLOR
-        c.draw_text(cmd, hint_pad_x, hint_y)
-        c.paint.color = HINT_COLOR
-        c.draw_text(desc, hint_pad_x + cmd_col_w, hint_y)
+        hint_y = panel_y + PANEL_PAD
+        for cmd, desc in _help_side_cmds:
+            hint_y += hint_row_h
+            if hint_y > panel_y + panel_h - PANEL_PAD:
+                break
+            c.paint.textsize = HINT_FONT_SIZE
+            c.paint.color = HINT_CMD_COLOR
+            c.draw_text(cmd, hint_pad_x, hint_y)
+            c.paint.color = HINT_COLOR
+            c.draw_text(desc, hint_pad_x + cmd_col_w, hint_y)
 
     return panel_rect
 

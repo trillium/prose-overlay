@@ -197,6 +197,22 @@ def _blink_tick():
     _canvas.refresh()
 
 
+def _auto_scroll_to_cursor():
+    """Snap the scroll viewport to keep the cursor row visible.
+
+    Reads the cached row layout from the last draw and adjusts _scroll_offset
+    in the draw module so the next frame shows the cursor.
+    """
+    cached_rows = _draw_mod._last_rows
+    if not cached_rows:
+        return
+    max_vis = _draw_mod.get_max_visible_rows()
+    new_offset = _draw_mod.compute_scroll_for_cursor(
+        cached_rows, _cursor, _draw_mod._scroll_offset, max_vis
+    )
+    _draw_mod.set_scroll_offset(new_offset)
+
+
 def _prose_overlay_set_cursor(gap_index: int, change_mode: bool = False):
     """Internal helper: set cursor position and start blink job."""
     global _cursor, _change_mode, _blink_on, _blink_job
@@ -570,6 +586,7 @@ def _apply_edit_plan(plan: dict) -> None:
             _prose_overlay_set_cursor(gap)
         else:
             _prose_overlay_clear_cursor()
+    _auto_scroll_to_cursor()
 
 
 # ---------------------------------------------------------------------------
@@ -679,6 +696,7 @@ class Actions:
 
         _buffer.clear()
         _target_recall_name = None
+        _draw_mod.set_scroll_offset(0)
         _recompute_hats()
         _canvas.show()
         _sync_tags()  # canvas.is_showing is now True
@@ -692,6 +710,7 @@ class Actions:
         _prose_overlay_clear_cursor()
         _flash_state = {}
         _flash_callback = None
+        _draw_mod.set_scroll_offset(0)
         _canvas.hide()
         _buffer.clear()
         _sync_tags()  # canvas.is_showing is now False
@@ -729,10 +748,12 @@ class Actions:
             _cursor += len(words)
             _change_mode = False
             _recompute_hats()
+            _auto_scroll_to_cursor()
             _canvas.refresh()
         else:
             _buffer.add_text(text)
             _recompute_hats()
+            _auto_scroll_to_cursor()
             _canvas.refresh()
 
     def prose_overlay_delete_hat(letter: str, color: str = "gray"):
@@ -951,6 +972,7 @@ class Actions:
         _buffer.delete_token(index)
         _recompute_hats()
         _prose_overlay_set_cursor(index, change_mode=True)
+        _auto_scroll_to_cursor()
         _canvas.refresh()
 
     def prose_overlay_set_cursor_before_hat(letter: str, color: str = "gray"):
@@ -959,6 +981,7 @@ class Actions:
         if index < 0:
             return
         _prose_overlay_set_cursor(index, change_mode=False)
+        _auto_scroll_to_cursor()
         _canvas.refresh()
 
     def prose_overlay_set_cursor_after_hat(letter: str, color: str = "gray"):
@@ -967,6 +990,7 @@ class Actions:
         if index < 0:
             return
         _prose_overlay_set_cursor(index + 1, change_mode=False)
+        _auto_scroll_to_cursor()
         _canvas.refresh()
 
     def prose_overlay_get_cursor() -> int:
@@ -987,11 +1011,13 @@ class Actions:
     def prose_overlay_cursor_start():
         """Move cursor to before the first token (pre file)."""
         _prose_overlay_set_cursor(0)
+        _auto_scroll_to_cursor()
         _canvas.refresh()
 
     def prose_overlay_cursor_end():
         """Move cursor to after the last token (post file)."""
         _prose_overlay_set_cursor(len(_buffer))
+        _auto_scroll_to_cursor()
         _canvas.refresh()
 
     # ---------------------------------------------------------------------------
@@ -1261,6 +1287,7 @@ class Actions:
     def prose_overlay_undo():
         """Undo the last prose overlay edit."""
         if _buffer.undo():
+            _draw_mod.set_scroll_offset(0)
             _recompute_hats()
             _canvas.refresh()
 

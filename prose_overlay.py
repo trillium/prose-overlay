@@ -4,12 +4,10 @@ Coordinates the buffer, canvas, and window focus tracking to provide
 a voice-first dictation buffer with hat-targeted editing.
 """
 
-import json
 import os
-import subprocess
 from typing import Any, Optional
 
-from talon import Context, Module, actions, cron, settings, ui
+from talon import Context, Module, actions, settings, ui
 
 from .prose_overlay_canvas import OverlayCanvas
 from . import prose_overlay_draw as _draw_mod_ref
@@ -94,62 +92,92 @@ _ctx_shim.matches = r"""
 tag: user.prose_overlay_auto
 """
 
-# History constants
-_HISTORY_MAX = 50
+_ctx_history = Context()
+instance.ctx_history = _ctx_history
 
-# Auto-dictation toggle state — persisted to disk so it survives Talon restarts.
-_PREFS_PATH = os.path.join(os.path.dirname(__file__), "prose_overlay_prefs.json")
+# ---------------------------------------------------------------------------
+# Canvas setup
+# ---------------------------------------------------------------------------
 
+instance.canvas = OverlayCanvas(instance.buffer)
 
-def _set_cursor(gap: Optional[int], change_mode: bool = False) -> None:
-    """Set cursor and sync to resolve state atomically.
+# Wire canvas into flash module — flash needs canvas ref for refresh calls.
+# (flash module reads from instance.canvas directly)
 
-    This is the ONLY place that assigns to instance.cursor.
-    Also manages change_mode and blink state.
-    """
-    instance.cursor = gap
-    instance.change_mode = change_mode
-    _resolve_state.cursor = gap
+# ---------------------------------------------------------------------------
+# History overlay setup
+# ---------------------------------------------------------------------------
+# Import helpers from history module now that instance.canvas and
+# instance.draw_mod are set.
+from .prose_overlay_actions_history import _on_draw_history, _on_history_overlay_hide  # noqa: E402
 
+instance.history_overlay = DismissibleOverlay(
+    on_draw=_on_draw_history,
+    on_hide=_on_history_overlay_hide,
+    close_hint_text='"overlay dismiss"',
+    close_hint_size=12,
+    close_hint_color="888899cc",
+    blocks_mouse=False,
+)
 
-def _prose_overlay_set_cursor(gap_index: int, change_mode: bool = False):
-    """Internal helper: set cursor position and start blink job."""
-    _set_cursor(gap_index, change_mode)
-    instance.blink_on = True
-    if instance.blink_job is None:
-        instance.blink_job = cron.interval("500ms", _blink_tick)
-
-
-def _prose_overlay_clear_cursor():
-    """Internal helper: clear cursor and cancel blink job."""
-    _set_cursor(None)
-    instance.blink_on = True
-    if instance.blink_job is not None:
-        cron.cancel(instance.blink_job)
-        instance.blink_job = None
-
-
-def _blink_tick():
-    """Cron callback: toggle blink state and refresh canvas."""
-    instance.blink_on = not instance.blink_on
-    instance.canvas.refresh()
+# ---------------------------------------------------------------------------
+# Load persisted preferences
+# ---------------------------------------------------------------------------
+from .prose_overlay_actions_visibility import _load_prefs  # noqa: E402
+_load_prefs()
 
 
-def _auto_scroll_to_cursor():
-    """Snap the scroll viewport to keep the cursor row visible.
+# ---------------------------------------------------------------------------
+# Shim: route all dictation_insert / insert_formatted calls to the overlay
+# ---------------------------------------------------------------------------
 
-    Reads the cached row layout from the last draw and adjusts _scroll_offset
-    in the draw module so the next frame shows the cursor.
-    """
-    cached_rows = _draw_mod_ref._last_rows
-    if not cached_rows:
-        return
-    max_vis = _draw_mod_ref.get_max_visible_rows()
-    new_offset = _draw_mod_ref.compute_scroll_for_cursor(
-        cached_rows, instance.cursor, _draw_mod_ref._scroll_offset, max_vis
-    )
-    _draw_mod_ref.set_scroll_offset(new_offset)
+# Active when overlay is showing — intercepts insert_formatted while overlay is open.
+_ctx_overlay_active = Context()
+_ctx_overlay_active.matches = r"""
+tag: user.prose_overlay_active
+"""
 
+@_ctx_overlay_active.action_class("user")
+class _OverlayActiveActions:
+    def insert_formatted(phrase, formatters: str):
+        """Route formatter output (e.g. 'say <prose>') to the overlay buffer."""
+        text = actions.user.formatted_text(phrase, formatters)
+        actions.user.prose_overlay_add_text(text)
+
+
+@_ctx_shim.action_class("user")
+class _ShimActions:
+    def dictation_insert(text: str, auto_cap: bool = True):
+        """Shim: route dictated text to the prose overlay instead of inserting directly.
+
+        Intercepts every path that ends in dictation_insert — community enders,
+        punctuation enders, window-switch rules, etc. — so the overlay is the
+        single destination for all spoken prose when auto mode is active.
+        """
+        if instance.canvas.is_showing:
+            actions.user.prose_overlay_add_text(text)
+        else:
+            actions.user.prose_overlay_show()
+            actions.user.prose_overlay_add_text(text)
+
+    def insert_formatted(phrase, formatters: str):
+        """Route formatter output (e.g. 'say <prose>') to the overlay buffer.
+
+        insert_formatted calls actions.insert() directly, bypassing dictation_insert,
+        so it needs its own shim. Uses user.formatted_text to get the formatted string
+        without re-importing format_phrase.
+        """
+        text = actions.user.formatted_text(phrase, formatters)
+        if instance.canvas.is_showing:
+            actions.user.prose_overlay_add_text(text)
+        else:
+            actions.user.prose_overlay_show()
+            actions.user.prose_overlay_add_text(text)
+
+
+# ---------------------------------------------------------------------------
+# Actions — cursorless / JS shim path (not moved to sub-files)
+# ---------------------------------------------------------------------------
 
 def _token_char_range(token_index: int, tokens: list[str]) -> tuple[int, int]:
     """Return (start_char, end_char) for the token at token_index in space-joined text.
@@ -180,6 +208,12 @@ def _apply_edit_plan(plan: dict) -> None:
     After all edits, the buffer is rebuilt from the modified flat string.
     newSelections is used to update the cursor gap position (line=0, char offset).
     """
+    from .prose_overlay_actions_cursor import (
+        _prose_overlay_set_cursor,
+        _prose_overlay_clear_cursor,
+        _auto_scroll_to_cursor,
+    )
+
     if "error" in plan:
         print(f"prose_overlay: JS action error: {plan['error']}")
         return
@@ -252,444 +286,8 @@ def _apply_edit_plan(plan: dict) -> None:
     _auto_scroll_to_cursor()
 
 
-# ---------------------------------------------------------------------------
-# Preferences persistence
-# ---------------------------------------------------------------------------
-
-def _save_prefs() -> None:
-    """Write current preferences to disk."""
-    try:
-        with open(_PREFS_PATH, "w") as f:
-            json.dump({
-                "auto_dictation": instance.auto_dictation,
-                "anchor_position": _draw_mod_ref._anchor_position,
-            }, f)
-    except Exception as e:
-        print(f"prose_overlay: could not save prefs: {e}")
-
-
-def _load_prefs() -> None:
-    """Load persisted preferences and apply them (called once at module init)."""
-    try:
-        with open(_PREFS_PATH) as f:
-            prefs = json.load(f)
-        instance.auto_dictation = bool(prefs.get("auto_dictation", False))
-        _sync_tags()  # canvas is not showing at init, so tags derive cleanly
-        print(f"prose_overlay: auto-dictation restored to {'ON' if instance.auto_dictation else 'OFF'}")
-        pos = prefs.get("anchor_position", "top")
-        _draw_mod_ref.set_anchor_position(pos)
-        print(f"prose_overlay: anchor position restored to '{pos}'")
-    except FileNotFoundError:
-        pass  # first run — no prefs file yet
-    except Exception as e:
-        print(f"prose_overlay: could not load prefs: {e}")
-
-
-def _on_draw_history(c, overlay):
-    rect = _draw_mod_ref.draw_history_panel(c, overlay, instance.history, instance.history_page)
-    if rect:
-        overlay.set_panel_rect(rect)
-
-
-def _on_history_overlay_hide():
-    """Called by DismissibleOverlay when dismissed via click-outside or escape."""
-    actions.user.prose_overlay_hide_history()
-
-
-instance.history_overlay = DismissibleOverlay(
-    on_draw=_on_draw_history,
-    on_hide=_on_history_overlay_hide,
-    close_hint_text='"overlay dismiss"',
-    close_hint_size=12,
-    close_hint_color="888899cc",
-    blocks_mouse=False,
-)
-
-_ctx_history = Context()
-instance.ctx_history = _ctx_history
-
-# ---------------------------------------------------------------------------
-# Canvas setup
-# ---------------------------------------------------------------------------
-
-instance.canvas = OverlayCanvas(instance.buffer)
-
-# Wire canvas into flash module — flash needs canvas ref for refresh calls.
-# (flash module reads from instance.canvas directly)
-
-
-def _on_win_focus(win):
-    """Track active window — updates target label while overlay is open.
-    Ignored when a recall window has been explicitly set as target.
-    """
-    if not instance.canvas.is_showing:
-        return
-    if instance.target_recall_name is not None:
-        return  # explicit recall target — don't override
-    try:
-        instance.target_window_title = win.title or ""
-    except Exception:
-        pass
-    instance.canvas.refresh()
-
-
-ui.register("win_focus", _on_win_focus)
-
-_load_prefs()
-
-
-# ---------------------------------------------------------------------------
-# Shim: route all dictation_insert / insert_formatted calls to the overlay
-# ---------------------------------------------------------------------------
-
-# Active when overlay is showing — intercepts insert_formatted while overlay is open.
-_ctx_overlay_active = Context()
-_ctx_overlay_active.matches = r"""
-tag: user.prose_overlay_active
-"""
-
-@_ctx_overlay_active.action_class("user")
-class _OverlayActiveActions:
-    def insert_formatted(phrase, formatters: str):
-        """Route formatter output (e.g. 'say <prose>') to the overlay buffer."""
-        text = actions.user.formatted_text(phrase, formatters)
-        actions.user.prose_overlay_add_text(text)
-
-
-@_ctx_shim.action_class("user")
-class _ShimActions:
-    def dictation_insert(text: str, auto_cap: bool = True):
-        """Shim: route dictated text to the prose overlay instead of inserting directly.
-
-        Intercepts every path that ends in dictation_insert — community enders,
-        punctuation enders, window-switch rules, etc. — so the overlay is the
-        single destination for all spoken prose when auto mode is active.
-        """
-        if instance.canvas.is_showing:
-            actions.user.prose_overlay_add_text(text)
-        else:
-            actions.user.prose_overlay_show()
-            actions.user.prose_overlay_add_text(text)
-
-    def insert_formatted(phrase, formatters: str):
-        """Route formatter output (e.g. 'say <prose>') to the overlay buffer.
-
-        insert_formatted calls actions.insert() directly, bypassing dictation_insert,
-        so it needs its own shim. Uses user.formatted_text to get the formatted string
-        without re-importing format_phrase.
-        """
-        text = actions.user.formatted_text(phrase, formatters)
-        if instance.canvas.is_showing:
-            actions.user.prose_overlay_add_text(text)
-        else:
-            actions.user.prose_overlay_show()
-            actions.user.prose_overlay_add_text(text)
-
-
-# ---------------------------------------------------------------------------
-# Actions
-# ---------------------------------------------------------------------------
 @mod.action_class
 class Actions:
-    def prose_overlay_show():
-        """Show the prose dictation overlay. Inserts into whatever window is active at confirm time."""
-        if not settings.get("user.prose_overlay_enabled"):
-            return
-
-        # Record window title and capture anchor rect for window-scoped layout.
-        try:
-            win = ui.active_window()
-            instance.target_window_title = win.title or ""
-            _draw_mod_ref.set_anchor_rect(win.rect)
-        except Exception:
-            instance.target_window_title = ""
-            _draw_mod_ref.set_anchor_rect(None)
-
-        instance.buffer.clear()
-        instance.target_recall_name = None
-        _draw_mod_ref.set_scroll_offset(0)
-        _recompute_hats()
-        instance.canvas.show()
-        _sync_tags()  # canvas.is_showing is now True
-        # Auto-enable dictation so <user.raw_prose> routes to the buffer.
-        # prose_overlay_dictation.talon requires mode: dictation to fire.
-        actions.mode.enable("dictation")
-
-    def prose_overlay_hide():
-        """Hide the prose overlay and clear the buffer."""
-        _prose_overlay_clear_cursor()
-        instance.flash_state = {}
-        instance.flash_callback = None
-        _draw_mod_ref.set_scroll_offset(0)
-        instance.canvas.hide()
-        instance.buffer.clear()
-        _sync_tags()  # canvas.is_showing is now False
-        instance.target_window_title = ""
-        instance.target_recall_name = None
-        instance.help_visible = False
-        instance.help_page = 0
-        # Return to command mode — paired with the enable in prose_overlay_show.
-        actions.mode.enable("command")
-        # In auto mode, keep dictation active so the next phrase routes through
-        # the dictation_insert shim and re-opens the overlay automatically.
-        # Without this, the hide would drop dictation and the next phrase would
-        # land in command mode where the shim never fires.
-        if not instance.auto_dictation:
-            actions.mode.disable("dictation")
-
-    def prose_overlay_toggle_auto_dictation():
-        """Toggle auto-show prose overlay on any dictation phrase."""
-        instance.auto_dictation = not instance.auto_dictation
-        _sync_tags()  # derives correct tag state from canvas + instance.auto_dictation
-        _save_prefs()
-        print(f"prose_overlay: auto-dictation {'ON' if instance.auto_dictation else 'OFF'}")
-
-    def prose_overlay_add_text(text: str):
-        """Add dictated text to the overlay buffer and refresh display.
-
-        If the cursor is active, inserts at the cursor gap position and
-        advances the cursor past the inserted tokens. Otherwise appends.
-        """
-        if instance.cursor is not None:
-            words = text.strip().split()
-            instance.buffer.insert_at(instance.cursor, text)
-            _set_cursor(instance.cursor + len(words), False)
-            _recompute_hats()
-            _auto_scroll_to_cursor()
-            instance.canvas.refresh()
-        else:
-            instance.buffer.add_text(text)
-            _recompute_hats()
-            _auto_scroll_to_cursor()
-            instance.canvas.refresh()
-
-    def prose_overlay_confirm():
-        """Insert buffer text into the target window (or active window), then hide."""
-        if not instance.canvas.is_showing:
-            return  # overlay not open — ignore stale ender
-        _prose_overlay_clear_cursor()
-        instance.flash_state = {}
-        instance.flash_callback = None
-        text = instance.buffer.get_text()
-        if not text:
-            actions.user.prose_overlay_hide()
-            return
-
-        # Push to history before hide clears the buffer
-        instance.history.insert(0, text)
-        if len(instance.history) > _HISTORY_MAX:
-            instance.history.pop()
-
-        if instance.target_recall_name:
-            actions.user.recall_window(instance.target_recall_name)
-            actions.sleep("80ms")
-
-        actions.insert(text)
-        actions.key("enter")
-        actions.user.prose_overlay_hide()
-
-    def prose_overlay_speak():
-        """Speak the current buffer contents via the speak TTS tool."""
-        text = instance.buffer.get_text()
-        if not text:
-            return
-        _speak_env = __import__("os").environ.copy()
-        _speak_env["PATH"] = ":".join([
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/Users/trilliumsmith/.local/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-            _speak_env.get("PATH", ""),
-        ])
-        subprocess.Popen(
-            ["/Users/trilliumsmith/code/speak/bin/speak", "--caller", "prose-overlay", text],
-            start_new_session=True,
-            env=_speak_env,
-        )
-
-    def prose_overlay_help_bigger():
-        """Increase the help footer font size by 2pt and refresh."""
-        _draw_mod_ref.HINT_FONT_SIZE = min(_draw_mod_ref.HINT_FONT_SIZE + 2, 28)
-        instance.canvas.refresh()
-
-    def prose_overlay_help_smaller():
-        """Decrease the help footer font size by 2pt and refresh."""
-        _draw_mod_ref.HINT_FONT_SIZE = max(_draw_mod_ref.HINT_FONT_SIZE - 2, 8)
-        instance.canvas.refresh()
-
-    def prose_overlay_is_active() -> bool:
-        """Check if the prose overlay is currently showing."""
-        return instance.canvas.is_showing
-
-    def prose_overlay_help_toggle():
-        """Toggle the help panel visibility."""
-        instance.help_visible = not instance.help_visible
-        instance.canvas.refresh()
-
-    def prose_overlay_help_next():
-        """Advance to next help page (wraps)."""
-        from .prose_overlay_draw import HELP_PAGES
-        instance.help_page = (instance.help_page + 1) % len(HELP_PAGES)
-        instance.canvas.refresh()
-
-    def prose_overlay_help_back():
-        """Go to previous help page (wraps)."""
-        from .prose_overlay_draw import HELP_PAGES
-        instance.help_page = (instance.help_page - 1) % len(HELP_PAGES)
-        instance.canvas.refresh()
-
-    def prose_overlay_help_visible() -> bool:
-        """Return whether the help panel is currently visible."""
-        return instance.help_visible
-
-    def prose_overlay_help_page() -> int:
-        """Return the current help page index."""
-        return instance.help_page
-
-    # ---------------------------------------------------------------------------
-    # History panel
-    # ---------------------------------------------------------------------------
-    def prose_overlay_toggle_history():
-        """Toggle the prose history panel."""
-        if instance.history_overlay.is_showing:
-            actions.user.prose_overlay_hide_history()
-        else:
-            instance.history_page = 0
-            instance.history_overlay.show()
-            instance.ctx_history.tags = ["user.prose_history_active"]
-
-    def prose_overlay_hide_history():
-        """Hide the prose history panel."""
-        instance.history_overlay.hide()
-        instance.ctx_history.tags = []
-
-    def prose_overlay_history_next():
-        """Advance to the next history page."""
-        total_pages = max(1, (len(instance.history) + _draw_mod_ref.HISTORY_PAGE_SIZE - 1) // _draw_mod_ref.HISTORY_PAGE_SIZE)
-        instance.history_page = min(instance.history_page + 1, total_pages - 1)
-        instance.history_overlay.freeze()
-
-    def prose_overlay_history_back():
-        """Go to the previous history page."""
-        instance.history_page = max(0, instance.history_page - 1)
-        instance.history_overlay.freeze()
-
-    def prose_overlay_history_pick(n: int):
-        """Load the nth history entry (1-based) into the overlay buffer."""
-        if 1 <= n <= len(instance.history):
-            entry = instance.history[n - 1]
-            actions.user.prose_overlay_hide_history()
-            actions.user.prose_overlay_show()
-            actions.user.prose_overlay_add_text(entry)
-
-    # ---------------------------------------------------------------------------
-    # Window anchor
-    # ---------------------------------------------------------------------------
-    def prose_overlay_set_anchor():
-        """Anchor the overlay to the currently active window's rect.
-
-        Updates the layout anchor immediately if the overlay is showing.
-        """
-        try:
-            win = ui.active_window()
-            _draw_mod_ref.set_anchor_rect(win.rect)
-            if instance.canvas.is_showing:
-                instance.canvas.refresh()
-        except Exception:
-            pass
-
-    def prose_overlay_clear_anchor():
-        """Remove the window anchor — overlay reverts to full-screen width."""
-        _draw_mod_ref.set_anchor_rect(None)
-        if instance.canvas.is_showing:
-            instance.canvas.refresh()
-
-    def prose_overlay_set_anchor_position(position: str):
-        """Set the vertical attachment point: 'top' or 'bottom'. Persisted to prefs."""
-        _draw_mod_ref.set_anchor_position(position)
-        _save_prefs()
-        if instance.canvas.is_showing:
-            instance.canvas.refresh()
-
-    def prose_overlay_change_hat(letter: str, color: str = "gray"):
-        """Delete the token at the given hat and enter change mode at that position."""
-        index = _hat_to_index(letter, color)
-        if index < 0:
-            return
-        instance.buffer.delete_token(index)
-        _recompute_hats()
-        _prose_overlay_set_cursor(index, change_mode=True)
-        _auto_scroll_to_cursor()
-        instance.canvas.refresh()
-
-    def prose_overlay_set_cursor_before_hat(letter: str, color: str = "gray"):
-        """Set the cursor before the token at the given hat."""
-        index = _hat_to_index(letter, color)
-        if index < 0:
-            return
-        _prose_overlay_set_cursor(index, change_mode=False)
-        _auto_scroll_to_cursor()
-        instance.canvas.refresh()
-
-    def prose_overlay_set_cursor_after_hat(letter: str, color: str = "gray"):
-        """Set the cursor after the token at the given hat."""
-        index = _hat_to_index(letter, color)
-        if index < 0:
-            return
-        _prose_overlay_set_cursor(index + 1, change_mode=False)
-        _auto_scroll_to_cursor()
-        instance.canvas.refresh()
-
-    def prose_overlay_get_cursor() -> int:
-        """Return the current cursor gap index, or -1 if no cursor."""
-        return instance.cursor if instance.cursor is not None else -1
-
-    def prose_overlay_get_change_mode() -> bool:
-        """Return whether the cursor is in change (replace) mode."""
-        return instance.change_mode
-
-    def prose_overlay_get_blink_on() -> bool:
-        """Return the current blink state for cursor rendering."""
-        return instance.blink_on
-
-    # ---------------------------------------------------------------------------
-    # Cursor navigation — pre/post file
-    # ---------------------------------------------------------------------------
-    def prose_overlay_cursor_start():
-        """Move cursor to before the first token (pre file)."""
-        _prose_overlay_set_cursor(0)
-        _auto_scroll_to_cursor()
-        instance.canvas.refresh()
-
-    def prose_overlay_cursor_end():
-        """Move cursor to after the last token (post file)."""
-        _prose_overlay_set_cursor(len(instance.buffer))
-        _auto_scroll_to_cursor()
-        instance.canvas.refresh()
-
-    # ---------------------------------------------------------------------------
-    # Head/tail modifiers
-    # ---------------------------------------------------------------------------
-    def prose_overlay_change_head_hat(letter: str, color: str = "gray"):
-        """Delete start through hat, enter change mode at position 0 (change head)."""
-        index = _hat_to_index(letter, color)
-        if index >= 0:
-            instance.buffer.delete_head(index)
-            _recompute_hats()
-            _prose_overlay_set_cursor(0, change_mode=True)
-            instance.canvas.refresh()
-
-    def prose_overlay_change_tail_hat(letter: str, color: str = "gray"):
-        """Delete hat through end, enter change mode at hat position (change tail)."""
-        index = _hat_to_index(letter, color)
-        if index >= 0:
-            instance.buffer.delete_through(index)
-            _recompute_hats()
-            _prose_overlay_set_cursor(index, change_mode=True)
-            instance.canvas.refresh()
-
     # ---------------------------------------------------------------------------
     # Cursorless-grammar actions (JS shim path)
     # ---------------------------------------------------------------------------
@@ -871,20 +469,12 @@ class Actions:
 
         _flash_tokens(list(range(first_idx, last_idx + 1)), _action_color(action_name), _execute)
 
-    # ---------------------------------------------------------------------------
-    # Undo
-    # ---------------------------------------------------------------------------
 
-    def prose_overlay_undo():
-        """Undo the last prose overlay edit."""
-        if instance.buffer.undo():
-            _draw_mod_ref.set_scroll_offset(0)
-            _recompute_hats()
-            instance.canvas.refresh()
-
-    def prose_overlay_get_selection() -> list:
-        """Return [start, end] selection indices, or [] if no selection."""
-        sel = instance.buffer.get_selection()
-        if sel is None:
-            return []
-        return list(sel)
+# ---------------------------------------------------------------------------
+# Import action sub-modules so Talon registers their action classes
+# ---------------------------------------------------------------------------
+from . import prose_overlay_actions_cursor      # noqa: F401, E402
+from . import prose_overlay_actions_layout      # noqa: F401, E402
+from . import prose_overlay_actions_history     # noqa: F401, E402
+from . import prose_overlay_actions_help        # noqa: F401, E402
+from . import prose_overlay_actions_visibility  # noqa: F401, E402

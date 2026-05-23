@@ -54,6 +54,8 @@ def compute_hat_assignments(
             for ci, ch in enumerate(token)
             if ch.lower().isalpha()
         ]
+        if not candidates and token:
+            candidates = [(0, token[0])]
         if not candidates:
             continue
 
@@ -90,6 +92,25 @@ class ProseBuffer:
     """Manages a list of word tokens captured from dictation."""
 
     _HISTORY_MAX = 20
+    TRAILING_PUNCT = ".?!,;:)"
+
+    def _split_trailing_punct(self, word: str) -> list[str]:
+        """Split trailing punctuation off a word into a separate token.
+
+        e.g. "hello." -> ["hello", "."]
+             "wait!" -> ["wait", "!"]
+             "..." -> ["..."]  # pure punctuation, kept as-is
+        """
+        if not word or word[-1] not in self.TRAILING_PUNCT:
+            return [word]
+        i = len(word) - 1
+        while i >= 0 and word[i] in self.TRAILING_PUNCT:
+            i -= 1
+        root = word[:i + 1]
+        punct = word[i + 1:]
+        if not root:
+            return [word]  # pure punctuation, keep as-is
+        return [root, punct]
 
     def __init__(self):
         self._tokens: list[str] = []
@@ -135,11 +156,19 @@ class ProseBuffer:
     # ---------------------------------------------------------------------------
 
     def add_text(self, text: str):
-        """Split text on whitespace and append each word as a token."""
+        """Split text on whitespace and append each word as a token.
+
+        Trailing punctuation is split off each word into its own token,
+        e.g. "hello world." -> ["hello", "world", "."].
+        """
         self.snapshot()
         self._selection = None
         words = text.strip().split()
-        self._tokens.extend(words)
+        split_tokens = []
+        for word in words:
+            if word:
+                split_tokens.extend(self._split_trailing_punct(word))
+        self._tokens.extend(split_tokens)
 
     def delete_token(self, index: int):
         """Delete the token at the given index. No-op if out of range."""

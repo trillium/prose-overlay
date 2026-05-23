@@ -90,10 +90,10 @@ class Actions:
     def prose_overlay_hide():
         """Hide the prose overlay and clear the buffer."""
         from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
+        from .prose_overlay_actions_flash import _clear_flash
         draw_mod = instance.draw_mod
         _prose_overlay_clear_cursor()
-        instance.flash_state = {}
-        instance.flash_callback = None
+        _clear_flash()
         draw_mod.set_scroll_offset(0)
         instance.canvas.hide()
         instance.buffer.clear()

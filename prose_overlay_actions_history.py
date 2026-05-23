@@ -118,11 +118,11 @@ class Actions:
     def prose_overlay_confirm():
         """Insert buffer text into the target window (or active window), then hide."""
         from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
+        from .prose_overlay_actions_flash import _clear_flash
         if not instance.canvas.is_showing:
             return  # overlay not open — ignore stale ender
         _prose_overlay_clear_cursor()
-        instance.flash_state = {}
-        instance.flash_callback = None
+        _clear_flash()
         text = instance.buffer.get_text()
         if not text:
             actions.user.prose_overlay_hide()

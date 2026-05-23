@@ -10,7 +10,7 @@ Contains:
   prose_overlay_delete_tail_hat   — delete from hat through end of buffer
 """
 
-from talon import Module
+from talon import Module, actions
 
 from .prose_overlay_instance import instance
 from .prose_overlay_actions_core import _hat_to_index, _recompute_hats
@@ -55,11 +55,4 @@ class Actions:
 
     def prose_overlay_delete_tail_hat(letter: str, color: str = "gray"):
         """Delete from the token at the given hat through end of buffer (chuck tail)."""
-        index = _hat_to_index(letter, color)
-        if index >= 0:
-            flash_indices = list(range(index, len(instance.buffer.get_tokens())))
-            def _do():
-                instance.buffer.delete_through(index)
-                _recompute_hats()
-                instance.canvas.refresh()
-            _flash_tokens(flash_indices, _action_color("remove"), _do)
+        actions.user.prose_overlay_delete_past_hat(letter, color)

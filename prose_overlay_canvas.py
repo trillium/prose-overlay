@@ -33,7 +33,6 @@ class OverlayCanvas:
             close_hint_text='"overlay dismiss"',
             close_hint_size=12,
             close_hint_color="888899cc",
-            on_hide=self._handle_hide,
             blocks_mouse=False,
         )
 
@@ -59,13 +58,6 @@ class OverlayCanvas:
     def hide(self):
         """Tear down the canvas."""
         self._overlay.hide()
-
-    def _handle_hide(self):
-        """Called by DismissibleOverlay when dismissed (click-outside or escape).
-
-        Delegates to prose_overlay_hide to clear the tag and buffer.
-        """
-        actions.user.prose_overlay_hide()
 
     def _on_draw(self, c: SkiaCanvas, overlay: DismissibleOverlay):
         """Draw callback: delegates to the draw module, reports panel rect(s).

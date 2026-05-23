@@ -41,7 +41,7 @@ def _prose_overlay_set_cursor(gap_index: int, change_mode: bool = False):
 def _prose_overlay_clear_cursor():
     """Internal helper: clear cursor and cancel blink job."""
     _set_cursor(None)
-    instance.blink_on = True
+    instance.blink_on = False
     if instance.blink_job is not None:
         cron.cancel(instance.blink_job)
         instance.blink_job = None

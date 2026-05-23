@@ -18,8 +18,9 @@ mod = Module()
 
 
 def _clear_flash():
-    """Clear flash state and trigger a canvas redraw."""
+    """Clear flash state + pending callback and trigger a canvas redraw."""
     instance.flash_state = {}
+    instance.flash_callback = None
     if instance.canvas is not None:
         instance.canvas.refresh()
 

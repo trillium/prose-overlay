@@ -161,7 +161,7 @@ def draw_help_panel(
 
     sep_gap = 12
     panel_h = PANEL_PAD + content_h + sep_gap + footer_h + PANEL_PAD
-    panel_w = PANEL_WIDTH
+    panel_w = main_rect.width
     panel_x = main_rect.x  # same x as main panel
     panel_y = main_rect.y + main_rect.height + HELP_PANEL_GAP
     panel_rect = Rect(panel_x, panel_y, panel_w, panel_h)

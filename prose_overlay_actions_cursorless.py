@@ -7,6 +7,7 @@ Contains:
   _apply_edit_plan        — apply JS shim edit plan to instance.buffer
   prose_overlay_run_action         — action method
   prose_overlay_run_action_range   — action method
+  prose_overlay_apply_formatter    — action method (reformat tokens via community formatters)
   prose_overlay_bring_move         — action method
 
 All state access uses instance.*. Never imports prose_overlay.py.
@@ -163,21 +164,30 @@ def _apply_edit_plan(plan: dict) -> None:
 
 @mod.action_class
 class Actions:
-    def prose_overlay_run_action(action_name: str, cursorless_target: Any):
+    def prose_overlay_run_action(
+        cursorless_simple_action: str, cursorless_target: Any
+    ):
         """Run a prose overlay action via the JS shim for any CursorlessTarget.
 
-        Resolves cursorless_target (PrimitiveTarget, RangeTarget, or ListTarget)
-        to a (start_token_idx, end_token_idx) inclusive token range using
-        _resolve_target_to_token_range, computes the corresponding character
-        range in the flat buffer string, calls the JS shim to get an edit plan,
-        applies the edits, and redraws.
+        Bound to `{user.cursorless_simple_action} <user.cursorless_target>` in
+        prose_overlay_cursorless.talon. The LIST + CAPTURE shape beats
+        cursorless's CAPTURE + CAPTURE rule on grammar specificity, so this
+        action runs instead of cursorless's command-server dispatch whenever
+        the prose overlay context is active. Cursorless's context excludes
+        `user.prose_overlay_active`, so mutual exclusion is enforced upstream.
 
-        Flashes all tokens in the resolved range before executing. Tracks
-        selection for setSelection and clearAndSetSelection actions.
+        Resolves cursorless_target (PrimitiveTarget, RangeTarget, or
+        ListTarget) to a token range, computes the corresponding character
+        range in the flat buffer string, calls the JS shim to get an edit
+        plan, applies the edits, and redraws. Flashes all tokens in the
+        resolved range before executing. Tracks selection for setSelection
+        and clearAndSetSelection actions.
 
-        Supported action_names: remove, setSelection, clearAndSetSelection,
+        Supported action values: remove, setSelection, clearAndSetSelection,
         setSelectionBefore, setSelectionAfter.
         """
+        action_name = cursorless_simple_action
+
         if action_name not in _SUPPORTED_SIMPLE_ACTIONS:
             print(f"prose_overlay: unsupported action '{action_name}' (VS Code-only?)")
             return
@@ -268,6 +278,55 @@ class Actions:
             instance.canvas.refresh()
 
         _flash_tokens(range_indices, _action_color(action_name), _execute)
+
+    def prose_overlay_apply_formatter(cursorless_target: Any, formatters: str):
+        """Apply text formatter(s) to the resolved target tokens.
+
+        Resolves the cursorless_target to a token range, extracts the text,
+        runs it through the community formatter pipeline (user.reformat_text),
+        and replaces the original tokens with the formatted result.
+
+        formatters is a comma-separated string of formatter IDs (e.g.
+        'SNAKE_CASE', 'ALL_CAPS,SNAKE_CASE' for CONSTANT_CASE).
+
+        Flashes the target tokens before executing the reformat.
+        """
+        token_ranges = _resolve_target_to_token_range(cursorless_target)
+        if token_ranges is None:
+            print("prose_overlay: unresolvable target for applyFormatter")
+            return
+
+        all_indices: list[int] = []
+        for first_idx, last_idx in token_ranges:
+            all_indices.extend(range(first_idx, last_idx + 1))
+
+        def _execute():
+            # Apply to each range in reverse order so earlier indices stay valid.
+            for first_idx, last_idx in sorted(token_ranges, reverse=True):
+                tokens = instance.buffer.get_tokens()
+                # Extract the raw token text for the range.
+                source_tokens = tokens[first_idx : last_idx + 1]
+                source_text = " ".join(source_tokens)
+
+                # Use the community reformat_text action which handles
+                # splitting (de-camel, de-snake, etc.) and re-joining.
+                formatted = actions.user.reformat_text(source_text, formatters)
+
+                # Snapshot before mutation for undo support.
+                instance.buffer.snapshot()
+
+                # Replace the token range with the formatted result.
+                # The formatted text may be a single joined token (snake_case,
+                # camelCase) or multiple space-separated words (title case).
+                new_tokens = formatted.split() if formatted else []
+                current_tokens = list(instance.buffer.get_tokens())
+                current_tokens[first_idx : last_idx + 1] = new_tokens
+                instance.buffer.set_tokens_raw(current_tokens)
+
+            _recompute_hats()
+            instance.canvas.refresh()
+
+        _flash_tokens(all_indices, _action_color("applyFormatter"), _execute)
 
     def prose_overlay_bring_move(action_name: str, cursorless_target: Any):
         """Bring or move: replaceWithTarget / moveToTarget to the cursor position.

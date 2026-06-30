@@ -6,7 +6,7 @@ Owns: _blink_tick, _set_cursor, _prose_overlay_set_cursor,
 Never imports prose_overlay.py.
 """
 
-from talon import Module, actions, cron
+from talon import Module, actions, cron, ui
 
 from .prose_overlay_instance import instance
 from .prose_overlay_cursorless_resolve import _state as _resolve_state
@@ -14,6 +14,15 @@ from .prose_overlay_actions_core import _recompute_hats, _hat_to_index
 from .prose_overlay_actions_flash import _flash_tokens, _action_color
 
 mod = Module()
+
+
+def _screen_height() -> float:
+    """Host-environment adapter for the pure-Python viewport.
+
+    Viewport math is environment-agnostic (INTERNAL layer); "what's the
+    screen size?" is a Talon question, so it lives here in the UI layer.
+    """
+    return ui.main_screen().rect.height
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +92,7 @@ def _auto_scroll_to_cursor(strategy: str = "nearest") -> None:
     if not cached_rows:
         return
     if strategy == "nearest":
-        max_vis = viewport.get_max_visible_rows()
+        max_vis = viewport.get_max_visible_rows(_screen_height())
         new_offset = viewport.compute_scroll_for_cursor(
             cached_rows, instance.cursor, viewport.get_scroll_offset(), max_vis
         )
@@ -95,7 +104,7 @@ def _auto_scroll_to_cursor(strategy: str = "nearest") -> None:
     row = viewport._find_cursor_row(cached_rows, instance.cursor)
     if row is None:
         return
-    viewport.align(row, align_where)
+    viewport.align(row, align_where, _screen_height())
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +199,7 @@ class Actions:
         viewport, row = _viewport_cursor_row()
         if row is None:
             return
-        viewport.align(row, "top")
+        viewport.align(row, "top", _screen_height())
         instance.canvas.refresh()
 
     def prose_overlay_align_center():
@@ -198,7 +207,7 @@ class Actions:
         viewport, row = _viewport_cursor_row()
         if row is None:
             return
-        viewport.align(row, "center")
+        viewport.align(row, "center", _screen_height())
         instance.canvas.refresh()
 
     def prose_overlay_align_bottom():
@@ -206,7 +215,7 @@ class Actions:
         viewport, row = _viewport_cursor_row()
         if row is None:
             return
-        viewport.align(row, "bottom")
+        viewport.align(row, "bottom", _screen_height())
         instance.canvas.refresh()
 
     def prose_overlay_recenter():
@@ -214,5 +223,5 @@ class Actions:
         viewport, row = _viewport_cursor_row()
         if row is None:
             return
-        viewport.recenter(row)
+        viewport.recenter(row, _screen_height())
         instance.canvas.refresh()

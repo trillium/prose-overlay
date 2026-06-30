@@ -11,10 +11,37 @@ the same instance at draw time.
 from dataclasses import dataclass, field
 from typing import Optional
 
-from talon import ui
-from talon.ui import Rect
-
 from .prose_overlay_draw_constants import PANEL_H_FRACTION, PANEL_PAD, LINE_HEIGHT
+
+
+@dataclass(frozen=True)
+class Rect:
+    """Pure-Python Rect — field-compatible with talon.ui.Rect.
+
+    INTERNAL layer must not import talon; this is the substrate's own
+    geometric primitive. The SHIM/UI layer can convert to/from talon.ui.Rect
+    (or any other host environment's rect) by reading x/y/width/height.
+    """
+    x: float
+    y: float
+    width: float
+    height: float
+
+    @property
+    def left(self) -> float:
+        return self.x
+
+    @property
+    def right(self) -> float:
+        return self.x + self.width
+
+    @property
+    def top(self) -> float:
+        return self.y
+
+    @property
+    def bottom(self) -> float:
+        return self.y + self.height
 
 
 @dataclass
@@ -35,8 +62,18 @@ class Viewport:
     def set_scroll_offset(self, offset: int) -> None:
         self._scroll_offset = offset
 
-    def set_anchor_rect(self, rect: Optional[Rect]) -> None:
-        self._anchor_rect = rect
+    def set_anchor_rect(self, rect) -> None:
+        """Set the anchor rect from any object exposing x/y/width/height.
+
+        Duck-typed: accepts talon.ui.Rect, this module's pure-Python Rect,
+        or any host-environment rect with the same four fields. The value
+        is copied into a frozen pure-Python Rect so the viewport state
+        stays Talon-free at the type level.
+        """
+        if rect is None:
+            self._anchor_rect = None
+        else:
+            self._anchor_rect = Rect(rect.x, rect.y, rect.width, rect.height)
 
     def set_anchor_position(self, position: str) -> None:
         if position in ("top", "bottom"):
@@ -46,10 +83,13 @@ class Viewport:
     # Layout helpers
     # ------------------------------------------------------------------
 
-    def get_max_visible_rows(self) -> int:
-        """Return the maximum number of token rows that fit in the panel."""
-        screen = ui.main_screen()
-        panel_h = screen.rect.height * PANEL_H_FRACTION
+    def get_max_visible_rows(self, screen_height: float) -> int:
+        """Return the maximum number of token rows that fit in the panel.
+
+        Caller passes screen_height (the host environment owns "what's the
+        screen size" — viewport layer is pure math).
+        """
+        panel_h = screen_height * PANEL_H_FRACTION
         usable_h = panel_h - PANEL_PAD * 2
         return max(1, int(usable_h / LINE_HEIGHT))
 
@@ -84,9 +124,9 @@ class Viewport:
     # Alignment (Task 3 — Helix align + Emacs recenter cycling)
     # ------------------------------------------------------------------
 
-    def align(self, cursor_row: int, where: str) -> None:
+    def align(self, cursor_row: int, where: str, screen_height: float) -> None:
         """Where in {'top','center','bottom'}: hard-align cursor row at anchor."""
-        max_vis = self.get_max_visible_rows()
+        max_vis = self.get_max_visible_rows(screen_height)
         if where == "top":
             self._scroll_offset = max(0, cursor_row)
         elif where == "center":
@@ -95,8 +135,8 @@ class Viewport:
             self._scroll_offset = max(0, cursor_row - max_vis + 1)
         self._recenter_state = 0
 
-    def recenter(self, cursor_row: int) -> None:
+    def recenter(self, cursor_row: int, screen_height: float) -> None:
         """Emacs recenter-top-bottom: center -> top -> bottom on repeats."""
         cycle = ("center", "top", "bottom")
-        self.align(cursor_row, cycle[self._recenter_state])
+        self.align(cursor_row, cycle[self._recenter_state], screen_height)
         self._recenter_state = (self._recenter_state + 1) % 3

@@ -69,6 +69,28 @@ HOMOPHONE_SHAPE_SCALE = 0.75
 HOMOPHONE_SHAPE_COLOR_HEX = "ffb74d"        # amber base (no alpha) — matches HOMOPHONE_UNDERLINE_COLOR
 HOMOPHONE_SHAPE_OUTLINE_HEX = "ffb74d"      # same amber for the stroke — no contrasting black outline
 
+# Slice C addendum (2026-06-30 redesign) — bubble panel layout.
+# Replaces the original flat chip row that packed under each token. The
+# bubble is `[chip][shape][chip]` (one or two chips around the homophone
+# shape glyph) centered horizontally on its token, anchored below the
+# segmented underline. The shape glyph re-renders INSIDE the bubble at a
+# reduced scale (BUBBLE_SHAPE_SCALE) so the user can identify which
+# token the bubble belongs to even when adjacent bubbles wrap.
+#
+# Chips size to their actual text content (no truncation). Bubble width =
+# left_chip_w + INNER_GAP + SHAPE_W + INNER_GAP + right_chip_w (or just
+# left_chip_w + INNER_GAP + SHAPE_W for 2-member groups). Adjacent
+# bubbles separate by at least OUTER_GAP; if that's impossible on the
+# same horizontal band the right-hand bubble wraps to a second row below.
+BUBBLE_CHIP_FONT_SIZE = 11
+BUBBLE_CHIP_PAD_X = 4
+BUBBLE_CHIP_PAD_Y = 2
+BUBBLE_CHIP_RADIUS = 3
+BUBBLE_INNER_GAP = 4           # gap between chip and shape, and shape and chip
+BUBBLE_OUTER_GAP = 8           # gap between adjacent tokens' bubbles
+BUBBLE_TOP_GAP = 6             # gap between segmented underline and bubble top
+BUBBLE_SHAPE_SCALE = 0.55      # smaller than the normal hat shape (0.75)
+
 # Hat dot colors — matches Cursorless palette
 HAT_COLOR_HEX: dict[str, str] = {
     "gray":   "999999ff",

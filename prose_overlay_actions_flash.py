@@ -59,6 +59,7 @@ def _action_color(action_name: str) -> str:
         "moveToTarget":         "36b33f",
         "setSelectionBefore":   "ffffff",
         "setSelectionAfter":    "ffffff",
+        "applyFormatter":       "a855f7",
     }
     return _ACTION_COLORS.get(action_name, "089ad3")
 

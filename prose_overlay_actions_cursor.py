@@ -11,6 +11,7 @@ from talon import Module, actions, cron
 from .prose_overlay_instance import instance
 from .prose_overlay_cursorless_resolve import _state as _resolve_state
 from .prose_overlay_actions_core import _recompute_hats, _hat_to_index
+from .prose_overlay_actions_flash import _flash_tokens, _action_color
 
 mod = Module()
 
@@ -129,26 +130,36 @@ class Actions:
         index = _hat_to_index(letter, color)
         if index < 0:
             return
-        instance.buffer.delete_token(index)
-        _recompute_hats()
-        _prose_overlay_set_cursor(index, change_mode=True)
-        _auto_scroll_to_cursor()
-        instance.canvas.refresh()
+        def _do():
+            instance.buffer.delete_token(index)
+            _recompute_hats()
+            _prose_overlay_set_cursor(index, change_mode=True)
+            _auto_scroll_to_cursor()
+            instance.canvas.refresh()
+        _flash_tokens([index], _action_color("clearAndSetSelection"), _do)
 
     def prose_overlay_change_head_hat(letter: str, color: str = "gray"):
         """Delete start through hat, enter change mode at position 0 (change head)."""
         index = _hat_to_index(letter, color)
-        if index >= 0:
+        if index < 0:
+            return
+        flash_indices = list(range(0, index + 1))
+        def _do():
             instance.buffer.delete_head(index)
             _recompute_hats()
             _prose_overlay_set_cursor(0, change_mode=True)
             instance.canvas.refresh()
+        _flash_tokens(flash_indices, _action_color("clearAndSetSelection"), _do)
 
     def prose_overlay_change_tail_hat(letter: str, color: str = "gray"):
         """Delete hat through end, enter change mode at hat position (change tail)."""
         index = _hat_to_index(letter, color)
-        if index >= 0:
+        if index < 0:
+            return
+        flash_indices = list(range(index, len(instance.buffer.get_tokens())))
+        def _do():
             instance.buffer.delete_through(index)
             _recompute_hats()
             _prose_overlay_set_cursor(index, change_mode=True)
             instance.canvas.refresh()
+        _flash_tokens(flash_indices, _action_color("clearAndSetSelection"), _do)

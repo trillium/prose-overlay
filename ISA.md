@@ -3,7 +3,7 @@ task: Voice-first prose editor for Talon — Cursorless verbs on a floating buff
 slug: prose-overlay-v2
 effort: E4
 phase: build
-progress: 11/24
+progress: 18/24
 mode: build
 started: 2026-05-21T00:00:00Z
 updated: 2026-06-30T08:30:00Z
@@ -145,8 +145,9 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 
 ## Changelog
 
-- **2026-06-30** — Loop turn 2 (autonomous): ISC-23 (undo/redo) flipped green — Phases 1+2 of UNDO_REDO_PLAN landed via Forge worktree (commits `ec52d32`, `7eb3e56`); Cato critical #3 fixed inline (commit `1a618a3`); coalescing OFF default + voice toggle. 11/24.
-- **2026-06-30** — Loop turn 1 (autonomous): ISC-15 (scope-preview flash) flipped green by audit + observability close. 10/24.
+- **2026-06-30** — Frontmatter reconcile: `progress` was 11/24 after turn 2 but actual `^- [x]` checkbox count is 18/24. Pre-existing drift from the v2 rewrite (claimed 9/24 baseline but actual was 16/24). Counter is now ground-truth. Loop turn deltas were correct (turn 1: +1, turn 2: +1) — only the starting baseline was off.
+- **2026-06-30** — Loop turn 2 (autonomous): ISC-23 (undo/redo) flipped green — Phases 1+2 of UNDO_REDO_PLAN landed via Forge worktree (commits `ec52d32`, `7eb3e56`); Cato critical #3 fixed inline (commit `1a618a3`); coalescing OFF default + voice toggle. 17→18/24.
+- **2026-06-30** — Loop turn 1 (autonomous): ISC-15 (scope-preview flash) flipped green by audit + observability close. 16→17/24.
 - **2026-06-30** — Phase 2 active. 9/24 ISCs green. Today's session shipped: viewport extraction (ISC-22), buffer rev counter (ISC-21), homophone slice A (ISC-11, ISC-12), hat-shape locate (ISC-14 substrate), stack-overflow trail slice A (ISC-18), always-on debug + draw hook (ISC-16, ISC-17), test driver (ISC-19). Plus three plan docs: `docs/UNDO_REDO_PLAN.md`, `docs/HOMOPHONE_UI_PLAN.md`, `docs/STACK_OVERFLOW_PAPER_TRAIL_PLAN.md`.
 - **2026-06-04** — Cursorless verb surface filled (ISCs 1–7 green via commits `44a01a5`, `46c93fc`, `170a0f7`).
 - **2026-05-31** — Wave 3 refactor (cursor, layout, history, help, visibility action files split out of monolithic prose_overlay.py).

@@ -22,6 +22,7 @@ from ..internal.draw_constants import (
     HOMOPHONE_SHAPE_SCALE, HOMOPHONE_SHAPE_DEFAULT_COLOR,
 )
 from ..shim import shapes as _shapes
+from ..internal.instance import instance as _instance
 
 
 # ---------------------------------------------------------------------------
@@ -122,18 +123,24 @@ def _draw_token_rows(
     x_origin  — leftmost x for each row (typically panel_x + PANEL_PAD)
     y_start   — top of the first row (typically panel_y + PANEL_PAD)
     shape_enabled — when True, paint a Cursorless-style hat shape above each
-                    flagged token (Slice 1 of HOMOPHONE_SHAPES_PLAN.md).
-                    Shape selected by flagged-rank round-robin against
-                    prose_overlay_shapes.HAT_SHAPES. Default off.
+                    flagged token (Slices 1+2 of HOMOPHONE_SHAPES_PLAN.md).
+                    Shape selection comes from ``instance.shape_assignments``
+                    (Slice 2's deterministic per-flag allocator). Tokens
+                    that are flagged but absent from ``shape_assignments``
+                    (pool-overflow case >10 flagged tokens) get no shape;
+                    they still receive the always-on underline at the
+                    bottom of this function per §4.8 spillover semantics.
     """
-    # Pre-compute the flagged-rank lookup once per draw — Slice 1 paints
-    # shape_pool()[rank % 10] above each flagged token, where rank is the
-    # index within sorted(flagged_indices). Round-robin lets us avoid
-    # introducing instance.shape_assignments (Slice 2's job).
-    flagged_rank: dict[int, int] = {}
-    if shape_enabled and flagged_indices:
-        for rank, idx in enumerate(sorted(flagged_indices)):
-            flagged_rank[idx] = rank
+    # Slice 2 of HOMOPHONE_SHAPES_PLAN.md — read pre-computed assignments
+    # from instance.shape_assignments (populated by
+    # shim.actions_core._recompute_hats). Slice 1's round-robin
+    # `flagged_rank % 10` has been retired — stable identity across edits
+    # is the whole point of this slice. Look up via .get(idx) so the
+    # overflow case (>10 flagged tokens, idx omitted from the dict)
+    # falls through cleanly with no shape paint.
+    shape_for_idx: dict[int, str] = (
+        _instance.shape_assignments if shape_enabled else {}
+    )
 
     y_base = y_start
     for row in rows:
@@ -167,16 +174,17 @@ def _draw_token_rows(
                 c.paint.color = dot_color
                 c.draw_circle(dot_cx, dot_cy, DOT_RADIUS)
 
-            # Homophone hat shape (Slice 1 — HOMOPHONE_SHAPES_PLAN.md §3)
-            # Paint above the existing letter-hat dot when the token is
-            # flagged AND shape_enabled is on. Coexists with the underline
-            # (Slice A) — both paint when both flags fire. Shape selected by
-            # round-robin over HAT_SHAPES against flagged-rank. Anchored to
-            # the dot's (dot_cx, dot_cy) so it tracks the hat character; the
-            # SVG renderer takes care of centering against its own viewBox.
-            if has_hat and idx in flagged_rank:
-                pool = _shapes.shape_pool()
-                shape_name = pool[flagged_rank[idx] % len(pool)]
+            # Homophone hat shape (Slice 2 — HOMOPHONE_SHAPES_PLAN.md §3)
+            # Paint above the existing letter-hat dot when the token has a
+            # shape assignment in instance.shape_assignments AND shape_enabled
+            # is on. Coexists with the underline (Slice A) — both paint when
+            # both flags fire; spillover tokens (idx flagged but missing
+            # from shape_assignments because the 10-shape pool exhausted)
+            # get only the underline, no shape. Anchored to the dot's
+            # (dot_cx, dot_cy) so the shape tracks the hat character; the
+            # SVG renderer centers against its own viewBox.
+            shape_name = shape_for_idx.get(idx) if shape_enabled else None
+            if has_hat and shape_name is not None:
                 shape_color_hex = HAT_COLOR_HEX.get(
                     HOMOPHONE_SHAPE_DEFAULT_COLOR, HAT_COLOR,
                 )

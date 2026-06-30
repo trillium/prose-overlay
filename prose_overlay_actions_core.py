@@ -39,6 +39,8 @@ def _recompute_hats():
     _resolve_state.hat_to_token = instance.hat_to_token
     _resolve_state.buffer = instance.buffer
     instance.canvas.set_hat_assignments(instance.hat_assignments)
+    from .prose_overlay_debug import emit_if_changed
+    emit_if_changed("recompute_hats")
 
 
 def _sync_tags():

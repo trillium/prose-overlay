@@ -29,6 +29,8 @@ def _set_cursor(gap, change_mode: bool = False) -> None:
     instance.cursor = gap
     instance.change_mode = change_mode
     _resolve_state.cursor = gap
+    from .prose_overlay_debug import emit_if_changed
+    emit_if_changed("set_cursor")
 
 
 def _prose_overlay_set_cursor(gap_index: int, change_mode: bool = False):

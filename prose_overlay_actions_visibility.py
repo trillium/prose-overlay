@@ -80,9 +80,13 @@ class Actions:
         instance.buffer.clear()
         instance.target_recall_name = None
         draw_mod.set_scroll_offset(0)
+        from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
+        _prose_overlay_clear_cursor()
         _recompute_hats()
         instance.canvas.show()
         _sync_tags()  # canvas.is_showing is now True
+        from .prose_overlay_debug import emit_if_changed
+        emit_if_changed("show")
         # Auto-enable dictation so <user.raw_prose> routes to the buffer.
         # prose_overlay_dictation.talon requires mode: dictation to fire.
         actions.mode.enable("dictation")
@@ -98,6 +102,8 @@ class Actions:
         instance.canvas.hide()
         instance.buffer.clear()
         _sync_tags()  # canvas.is_showing is now False
+        from .prose_overlay_debug import emit_if_changed
+        emit_if_changed("hide")
         instance.target_window_title = ""
         instance.target_recall_name = None
         instance.help_visible = False
@@ -128,3 +134,8 @@ class Actions:
         if sel is None:
             return []
         return list(sel)
+
+    def prose_overlay_debug(enabled: int):
+        """Enable (1) or disable (0) JSONL state-change debug logging."""
+        from .prose_overlay_debug import set_debug_mode
+        set_debug_mode(bool(enabled))

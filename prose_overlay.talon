@@ -9,13 +9,16 @@ mode: dictation
 mode: command
 tag: user.prose_overlay_active
 -
+
 # Delete a single word by its hat (gray = no color prefix)
 chuck <user.letter>: user.prose_overlay_delete_hat(letter)
-chuck <user.prose_hat_color> <user.letter>: user.prose_overlay_delete_hat(letter, prose_hat_color)
+chuck <user.prose_hat_color> <user.letter>:
+    user.prose_overlay_delete_hat(letter, prose_hat_color)
 
 # Delete from the beginning through a hat's word
 chuck past <user.letter>: user.prose_overlay_delete_past_hat(letter)
-chuck past <user.prose_hat_color> <user.letter>: user.prose_overlay_delete_past_hat(letter, prose_hat_color)
+chuck past <user.prose_hat_color> <user.letter>:
+    user.prose_overlay_delete_past_hat(letter, prose_hat_color)
 
 # Confirm and paste to previous window (alternative to line-enders)
 confirm: user.prose_overlay_confirm()
@@ -28,6 +31,10 @@ overlay speak: user.prose_overlay_speak()
 # "overlay cancel" would be swallowed by the abort mechanism (last word = "cancel"
 # triggers abort_update_phrase before the rule can fire). Use "overlay dismiss" instead.
 overlay dismiss: user.prose_overlay_hide()
+
+# Debug: emit JSONL state diffs to ~/.talon/prose_overlay_debug.jsonl
+overlay debug on: user.prose_overlay_debug(1)
+overlay debug off: user.prose_overlay_debug(0)
 
 # Toggle auto-show on all dictation phrases
 overlay auto: user.prose_overlay_toggle_auto_dictation()
@@ -53,15 +60,18 @@ help back: user.prose_overlay_help_back()
 
 # Cursor positioning: before a hat
 pre <user.letter>: user.prose_overlay_set_cursor_before_hat(letter)
-pre <user.prose_hat_color> <user.letter>: user.prose_overlay_set_cursor_before_hat(letter, prose_hat_color)
+pre <user.prose_hat_color> <user.letter>:
+    user.prose_overlay_set_cursor_before_hat(letter, prose_hat_color)
 
 # Cursor positioning: after a hat
 post <user.letter>: user.prose_overlay_set_cursor_after_hat(letter)
-post <user.prose_hat_color> <user.letter>: user.prose_overlay_set_cursor_after_hat(letter, prose_hat_color)
+post <user.prose_hat_color> <user.letter>:
+    user.prose_overlay_set_cursor_after_hat(letter, prose_hat_color)
 
 # Change mode: delete token at hat and enter insertion mode at that position
 change <user.letter>: user.prose_overlay_change_hat(letter)
-change <user.prose_hat_color> <user.letter>: user.prose_overlay_change_hat(letter, prose_hat_color)
+change <user.prose_hat_color> <user.letter>:
+    user.prose_overlay_change_hat(letter, prose_hat_color)
 
 # Symbol keys: capture spoken-form symbols (dot → ".", slash → "/", etc.) into the buffer.
 # Without this, command-mode-only forms like "dot", "point", "semi", "slash", "dash" etc.

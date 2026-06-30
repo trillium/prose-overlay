@@ -186,6 +186,58 @@ For short tokens with many group members (e.g. "I" with a 4-member group), indiv
 
 ## Scenario 4 — Color-addressed direct swap (`<color> <shape>`)
 
+> **Panel layout — REDESIGN per user 2026-06-30 PM after first impl shipped.**
+> The first implementation rendered alts as flat color chips packed under each
+> token, with truncation when chip width was less than the alt text width
+> ("they're" truncated to "t"). The redesign anchors each token's alts in a
+> distinct **bubble** with the homophone shape glyph in the middle as a visual
+> anchor, color-coded chips flanking it:
+>
+> ```
+> Visual layout per token:
+>
+>            ·^                                ← shape hat + letter hat (above token)
+>          there                               ← token text
+>          ─────                               ← segmented amber underline
+>     [their][shape][they're]                  ← BUBBLE: gold chip | shape | blue chip
+>
+> For 3 adjacent tokens, 3 distinct bubbles:
+>
+>            ·^             ·^             ·^
+>          there          there         they're
+>          ─────          ─────          ─────
+>     [their][shape][they're] | [their][shape][they're] | [their][shape][there]
+>     ←   token 1 bubble   →    ←   token 2 bubble   →    ←   token 3 bubble   →
+>
+> The `|` between bubbles is conceptual — render as whitespace separation
+> (no literal pipe glyph) so adjacent bubbles read as distinct units.
+> ```
+>
+> **Why the shape glyph inside the bubble**: visually anchors which token the
+> bubble belongs to. Without it, when bubbles wrap or float below the token
+> row, the user has to infer the mapping from horizontal position. With the
+> shape inside, "the wing-shape's bubble" is unambiguous.
+>
+> **Chip sizing**: each chip sizes to fit its full alt text (no truncation).
+> Use a small chip font (~11px) and pad ~4px each side. Bubble total width
+> is the sum of left chip + shape + right chip + 2 gaps. Bubble height is
+> chip height (~14px).
+>
+> **Bubble anchor**: centered horizontally on the token (so the shape glyph
+> sits roughly below the token's shape hat). Vertically, anchored below the
+> segmented underline with a small gap.
+>
+> **For 2-member groups** (e.g. `your,you're`): only one alt — render as
+> `[chip][shape]` (one chip + shape, no right side). Or `[shape][chip]` —
+> pick one and document. v1 default: `[chip][shape]` (left-side).
+>
+> **For 4+ member groups** (rare): more colors. Extend the color palette
+> `[yellow, blue, green, pink, red, purple, black, white]` and lay out
+> as `[chip1][shape][chip2]` for the first two, or wrap to a second row
+> `[chip1][shape][chip2] / [chip3][chip4]`. v1 proposal: render only the
+> first two alts; extras are reachable via cycling (`phones <shape>`).
+>
+
 ```
 Given a token reads "there" in the buffer
 And its shape hat is "play"

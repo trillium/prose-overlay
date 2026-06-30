@@ -167,12 +167,42 @@ class Actions:
         instance.history_overlay.freeze()
 
     def prose_overlay_history_pick(n: int):
-        """Load the nth history entry (1-based) into the overlay buffer."""
-        if 1 <= n <= len(instance.history):
-            entry = instance.history[n - 1]
-            actions.user.prose_overlay_hide_history()
+        """Load the nth history entry (1-based) into the overlay buffer.
+
+        Order matters: show the main canvas BEFORE hiding the history panel.
+        prose_overlay_show() captures the active window via ui.active_window()
+        to anchor the new canvas; if we hide the history panel first, that
+        query can race and return the history overlay's now-invisible rect,
+        leaving the main canvas anchored to nowhere (symptom: "UI went away").
+        """
+        if not (1 <= n <= len(instance.history)):
+            return
+        entry = instance.history[n - 1]
+        if not instance.canvas.is_showing:
             actions.user.prose_overlay_show()
-            actions.user.prose_overlay_add_text(entry)
+        actions.user.prose_overlay_hide_history()
+        actions.user.prose_overlay_add_text(entry)
+
+    def prose_overlay_history_paste(n: int):
+        """Pick history entry N and paste directly to the target window.
+
+        Bypasses the overlay-editing step — voice-friendly when the user is
+        confident the recovered text is correct. Triggered by `history pick N
+        {dictation_ender}` (e.g. "history pick one bravely"). Mirrors
+        prose_overlay_confirm's paste path but skips canvas show.
+        """
+        if not (1 <= n <= len(instance.history)):
+            return
+        entry = instance.history[n - 1]
+        actions.user.prose_overlay_hide_history()
+        # If the user previously anchored a target window via "overlay anchor",
+        # recall it before pasting; otherwise paste to whatever is currently
+        # focused (which is what the user spoke from).
+        if instance.target_recall_name:
+            actions.user.recall_window(instance.target_recall_name)
+            actions.sleep("80ms")
+        actions.insert(entry)
+        actions.key("enter")
 
     def prose_overlay_confirm():
         """Insert buffer text into the target window (or active window), then hide."""

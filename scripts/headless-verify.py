@@ -54,6 +54,17 @@ def _load_state_module():
 # Layer 1 — pure Python
 # =============================================================================
 
+def _load_instance_module():
+    """Load prose_overlay_instance.py — ProseOverlayState is dependency-free."""
+    spec = importlib.util.spec_from_file_location(
+        "prose_overlay_instance",
+        REPO / "prose_overlay_instance.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def run_layer_1() -> None:
     print(f"\n=== Layer 1 — Pure Python ({DIM}prose_overlay_state.py{RESET}) ===")
     state = _load_state_module()
@@ -154,6 +165,54 @@ def run_layer_1() -> None:
         assert b.get_tokens() == ["abc"]
         assert b.undo() is True
         assert b.get_tokens() == ["a"], f"undo should restore single-letter token; got {b.get_tokens()!r}"
+
+    inst_mod = _load_instance_module()
+    ProseOverlayState = inst_mod.ProseOverlayState
+
+    with test("L1", "L1.13", "ProseOverlayState.reset() wipes all data fields to defaults"):
+        inst = ProseOverlayState()
+        inst.buffer = ProseBuffer()
+        inst.buffer.add_text("contaminated state")
+        inst.cursor = 5
+        inst.change_mode = True
+        inst.target_window_title = "stale-window"
+        inst.target_recall_name = "stale-recall"
+        inst.help_visible = True
+        inst.help_page = 7
+        inst.auto_dictation = True
+        inst.hat_js_fallback = True
+        inst.hat_assignments = {0: (0, "c", "gray")}
+        inst.hat_to_token = {("c", "gray"): 0}
+        inst.flash_state = {"indices": [1], "color": "ff0000"}
+        inst.history = ["old", "stuff"]
+        inst.history_page = 3
+        inst._last_input_source = "letters"
+        inst.reset()
+        assert inst.buffer.get_tokens() == [], "buffer not cleared"
+        assert inst.cursor is None
+        assert inst.change_mode is False
+        assert inst.target_window_title == ""
+        assert inst.target_recall_name is None
+        assert inst.help_visible is False
+        assert inst.help_page == 0
+        assert inst.auto_dictation is False
+        assert inst.hat_js_fallback is False
+        assert inst.hat_assignments == {}
+        assert inst.hat_to_token == {}
+        assert inst.flash_state == {}
+        assert inst.history == []
+        assert inst.history_page == 0
+        assert inst._last_input_source == "init"
+
+    with test("L1", "L1.14", "reset() preserves object identity of buffer/canvas/etc."):
+        # Object refs created at module init should NOT be reassigned.
+        inst = ProseOverlayState()
+        inst.buffer = ProseBuffer()
+        b_id = id(inst.buffer)
+        # canvas and viewport are typically created by prose_overlay.py;
+        # reset() should leave None alone and not reassign existing refs.
+        inst.reset()
+        assert id(inst.buffer) == b_id, "buffer object identity should be preserved"
 
 
 # =============================================================================
@@ -324,6 +383,11 @@ def run_layer_3() -> None:
         actions_log.clear()
         td._dispatch({"cmd": "add_letters", "letters": "abc"})
         assert actions_log == [("prose_overlay_add_letters", ("abc",), {})], actions_log
+
+    with test("L3", "L3.5c", "_dispatch reset → prose_overlay_reset"):
+        actions_log.clear()
+        td._dispatch({"cmd": "reset"})
+        assert actions_log == [("prose_overlay_reset", (), {})], actions_log
 
     with test("L3", "L3.6", "_dispatch bogus cmd does not raise"):
         actions_log.clear()

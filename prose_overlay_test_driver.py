@@ -31,6 +31,7 @@ Commands (one JSON object per line):
   {"cmd": "confirm"}
   {"cmd": "undo"}
   {"cmd": "homophone_hint", "enabled": true}
+  {"cmd": "reset"}              # hard reset all instance state
   {"cmd": "clear_queue"}        # truncate the queue file, reset cursor
 
 Shell shortcut: ``scripts/test-overlay.sh <verb> [args...]`` wraps the JSON.
@@ -133,6 +134,8 @@ def _dispatch(cmd: dict) -> None:
             actions.user.prose_overlay_undo()
         elif name == "homophone_hint":
             actions.user.prose_overlay_set_homophone_hint(1 if cmd.get("enabled") else 0)
+        elif name == "reset":
+            actions.user.prose_overlay_reset()
         elif name == "clear_queue":
             global _pos
             open(_QUEUE, "w").close()

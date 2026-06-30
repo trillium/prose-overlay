@@ -41,5 +41,36 @@ class ProseOverlayState:
         # utterances) or APPEND a new one (letters after dictation).
         self._last_input_source: str = "init"
 
+    def reset(self) -> None:
+        """Wipe per-session mutable state back to ProseOverlayState() defaults.
+
+        Used by the ``overlay reset`` debug command and by the test driver's
+        ``reset`` cmd. Object references created at module init (``buffer``,
+        ``canvas``, ``viewport``, the ``ctx_*`` Contexts, ``history_overlay``,
+        ``draw_mod``) are PRESERVED — only their state is cleared. Pre-existing
+        cron jobs (``blink_job``) are left alone; the caller is responsible for
+        cancelling and clearing those before invoking reset.
+        """
+        if self.buffer is not None:
+            self.buffer.clear()
+        self.hat_assignments = {}
+        self.hat_to_token = {}
+        self.target_window_title = ""
+        self.target_recall_name = None
+        self.help_visible = False
+        self.help_page = 0
+        self.auto_dictation = False
+        self.cursor = None
+        self.change_mode = False
+        self.blink_on = True
+        self.flash_state = {}
+        self.flash_callback = None
+        self.history = []
+        self.history_page = 0
+        self.hat_js_fallback = False
+        self._last_input_source = "init"
+        if self.viewport is not None:
+            self.viewport.set_scroll_offset(0)
+
 
 instance = ProseOverlayState()

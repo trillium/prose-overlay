@@ -50,6 +50,10 @@ to be.
 | L1.8 | `compute_hat_assignments(["123"])` returns a hat (regression: aa2909e) | digit-hat visibility |
 | L1.9 | `compute_hat_assignments(["!"])` returns a hat | punct-hat visibility |
 | L1.10 | `compute_hat_assignments(["testing", "testing", "123"])` returns hats for ALL three | end-to-end user repro |
+| L1.11 | Letter-extend pattern: "air" then "bat cap" → one token `abc` (regression: 0ee89cd) | extends-last-token semantics |
+| L1.12 | Letter-extend then undo restores prior single-letter token | undo round-trip |
+| L1.13 | `ProseOverlayState.reset()` wipes every data field to defaults | debug reset |
+| L1.14 | `reset()` preserves object identity (buffer/canvas refs not reassigned) | safe re-init |
 
 ### Layer 2 — JS bundle via `bun` (no Talon)
 
@@ -76,6 +80,8 @@ queue-dispatch and runtime-toggle behavior.
 | L3.3 | `_dispatch({"cmd": "show"})` invokes `actions.user.prose_overlay_show()` | command routing |
 | L3.4 | `_dispatch({"cmd": "dump"})` invokes `actions.user.prose_overlay_dump_state()` | command routing |
 | L3.5 | `_dispatch({"cmd": "delete_hat", "letter": "a", "color": "blue"})` passes both args | nested kwargs |
+| L3.5b | `_dispatch({"cmd": "add_letters", "letters": "abc"})` → `prose_overlay_add_letters` | letter-extend dispatch |
+| L3.5c | `_dispatch({"cmd": "reset"})` → `prose_overlay_reset` | debug reset dispatch |
 | L3.6 | `_dispatch({"cmd": "bogus"})` prints "unknown cmd" and does not raise | error path |
 | L3.7 | `_dispatch({"cmd": "add"})` with malformed JSON entry is handled by `_tick` | parse-error path |
 | L3.8 | Appending a JSON line to the queue + calling `_tick` advances `_pos` and dispatches | queue tail logic |

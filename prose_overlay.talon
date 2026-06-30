@@ -39,6 +39,11 @@ overlay debug off: user.prose_overlay_debug(0)
 # Dump current buffer + hat state to the Talon log (one-shot, no flag needed)
 overlay dump: user.prose_overlay_dump_state()
 
+# Hard reset — wipe all per-session state. Use when the overlay is stuck
+# in a bad state. Doesn't restart Talon or reload modules; just zeros
+# instance fields and hides the canvas. See prose_overlay_reset docstring.
+overlay reset: user.prose_overlay_reset()
+
 # Headless test driver — enables file-driven dispatch from scripts/test-overlay.sh
 # without needing PROSE_OVERLAY_TEST=1 at Talon launch. Sticky across hot-reload
 # via ~/.talon/prose_overlay_test_enabled.

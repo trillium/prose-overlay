@@ -165,3 +165,44 @@ class Actions:
         if instance.canvas.is_showing:
             instance.canvas.refresh()
         print(f"prose_overlay: homophone hint {'ON' if enabled else 'OFF'}")
+
+    def prose_overlay_reset():
+        """Wipe ALL per-session prose-overlay state back to defaults.
+
+        Debug / recovery escape hatch — use when the overlay state is in an
+        unknown bad state (e.g. mid-flash leftover after a crash, stuck
+        cursor, history full of garbage). Equivalent to a plugin re-init
+        without restarting Talon.
+
+        What this DOES:
+          - Hide canvas + history overlay; cancel any pending flash callback.
+          - Clear buffer tokens + undo/redo history.
+          - Clear hat_assignments + hat_to_token + flash_state.
+          - Reset cursor, change_mode, help_visible, help_page, auto_dictation,
+            hat_js_fallback, _last_input_source.
+          - Reset viewport scroll to 0.
+          - Reset target_window_title + target_recall_name.
+          - Return to command mode.
+
+        What this does NOT do:
+          - Doesn't re-instantiate canvas / viewport / contexts (those are
+            module-init objects; rebuilding them mid-session would orphan
+            the Talon-side handles).
+          - Doesn't clear saved preferences (~/.talon/prose_overlay_prefs.json).
+          - Doesn't re-load any imported modules.
+        """
+        from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
+        from .prose_overlay_actions_flash import _clear_flash
+        _prose_overlay_clear_cursor()
+        _clear_flash()
+        if instance.canvas is not None and instance.canvas.is_showing:
+            instance.canvas.hide()
+        if instance.history_overlay is not None and instance.history_overlay.is_showing:
+            instance.history_overlay.hide()
+        instance.reset()
+        _sync_tags()
+        from .prose_overlay_debug import emit_if_changed
+        emit_if_changed("reset")
+        actions.mode.enable("command")
+        actions.mode.disable("dictation")
+        print("prose_overlay: RESET — all per-session state wiped")

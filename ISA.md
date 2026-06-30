@@ -3,10 +3,10 @@ task: Voice-first prose editor for Talon — Cursorless verbs on a floating buff
 slug: prose-overlay-v2
 effort: E4
 phase: build
-progress: 10/24
+progress: 11/24
 mode: build
 started: 2026-05-21T00:00:00Z
-updated: 2026-06-30T08:00:00Z
+updated: 2026-06-30T08:30:00Z
 project: prose_overlay
 ---
 
@@ -89,7 +89,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 
 - [x] ISC-21: Buffer revision counter (`ProseBuffer.rev`) bumped on every mutation — substrate for paragraph cache + undo plan + debug invalidation
 - [x] ISC-22: Viewport class owns scroll + anchor + recenter state — Helix `align(top/center/bottom)` + Emacs `recenter` cycling via voice — `prose_overlay_viewport.py`
-- [ ] ISC-23: Undo/redo with CM6 two-deque + Helix `(forward, inverse)` delta pairs + Emacs `commit_start`/`commit_end` boundary (per `docs/UNDO_REDO_PLAN.md`)
+- [x] ISC-23: Undo/redo with CM6 two-deque + Helix `(forward, inverse)` delta pairs + Emacs `commit_start`/`commit_end` boundary (per `docs/UNDO_REDO_PLAN.md`) — Phases 1+2 shipped (commits `ec52d32`, `7eb3e56`) with bring/move bracket-fix (commit `1a618a3`). Two-deque + delta+inverse records + commit_start/commit_end + redo + voice command + coalescing toggle. Coalescing defaults OFF (toggle: `overlay undo group on/off`) — slice-discipline call per plan §9.Q1.
 - [ ] ISC-24: SkParagraph-based text measurement + per-line cache keyed by `buffer_rev` (per `docs/VIEWPORT_RESEARCH.md` §1; only if measurable layout wins emerge)
 
 ## Test Strategy
@@ -107,7 +107,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 | 18 | crash | reproduce HAT_ALLOC overflow under PROSE_OVERLAY_TRAIL=1, assert traceback in faulthandler.log | manual repro |
 | 19 | integration | shell pipes 10 commands, debug log shows 10 diffs | test-overlay.sh batch + grep |
 | 20 | crash | last_command.json updated before each JS call | test-overlay.sh + stat preamble file |
-| 21 | code | grep `self.rev +=` returns 9 sites in prose_overlay_state.py | Grep |
+| 21 | behavioral | mutate buffer via add_text / delete_token / commit_end → assert `rev` advances; pre-refactor "9 sites" grep contract is obsolete after the deque refactor (Cato concerns #5, 2026-06-30) | python smoke test |
 | 22 | voice | `overlay show top/bottom/center` + `overlay center` cycle | test-overlay.sh + dump cursor row |
 | 23 | per-plan | per UNDO_REDO_PLAN slice criteria | future slices |
 | 24 | bench | layout-time regression under 16 ms p99 across 200-token buffer | future bench |
@@ -128,7 +128,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 | TestDriver | Headless JSON queue for shell-driven dispatch | ISC-19 | shipped |
 | BufferRev | Monotonic revision counter, cache-invalidation substrate | ISC-21 | shipped |
 | ViewportClass | Scroll/anchor/recenter state, Helix+Emacs voice surface | ISC-22 | shipped |
-| UndoRedo | CM6 two-deque + Helix inversions + Emacs boundary | ISC-23 | planned |
+| UndoRedo | CM6 two-deque + Helix inversions + Emacs boundary | ISC-23 | shipped |
 | ParagraphCache | SkParagraph layout cache keyed by buffer_rev | ISC-24 | researched |
 
 ## Decisions
@@ -139,9 +139,13 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - **2026-06-29 — Cursorless rule shape: LIST + CAPTURE not CAPTURE + CAPTURE** (commit `44a01a5`). Wins specificity tie-break against cursorless.talon's CAPTURE + CAPTURE rule whenever the PO context is active.
 - **2026-06-30 — ISC-15 satisfied by inheritance, not new code.** Audit during loop turn 1 showed `_flash_tokens(indices, color, _execute)` schedules the mutation as a 150ms-deferred callback for every dispatcher (`prose_overlay_run_action`, `_range`, `apply_formatter`, `bring_move`, all hat-delete variants, cursor-setters). Scope verbs route through `prose_overlay_run_action` and resolve through `_resolve_target_to_token_range` which delegates to scope handlers — same callback path, same pre-execution flash. The missing piece was observability: `_snapshot()` didn't include `instance.flash_state`. Closed with two field additions (`flash`, `flash_color`). Doctrine win: prefer recognizing an existing satisfied criterion over building speculative new code.
 - **2026-06-30 — Delegation soft-floor override at E3 (show your math).** The work was a 2-line dict-literal addition plus targeted ISA edits — spawning Forge in a worktree adds ~10× the actual work in setup, context re-derivation, and merge overhead. Inline edit + direct ISA writes. Cato/Anvil not auto-included at E3.
+- **2026-06-30 — ISC-23 shipped with coalescing OFF by default.** Plan `docs/UNDO_REDO_PLAN.md` defaults `_GROUP_DELAY_S = 0.400` (CM6 dictation coalescing on). We ship `_GROUP_DELAY_S = 0.0` with a runtime toggle (`overlay undo group on/off` + `prose_overlay_undo_group_set` action). Per plan §9 open question #1, coalescing-feel is a kill-criterion-grade decision needing user verification — shipping OFF respects the "don't ship past a slice's kill criterion" rule. User can opt in to evaluate.
+- **2026-06-30 — Cato (E4 cross-vendor audit) critical findings disposition.** Cato returned `concerns` verdict with 3 critical findings on the undo/redo landing. (1) `set_tokens_raw` outside bracket bumps rev without clearing `_undone` — KNOWN, no current caller hits this path, follow-up to add guard or hard-error. (2) No-op `set_tokens_raw` inside bracket clears redo + consumes undo slot — KNOWN, low impact (idempotent edits are rare in practice), follow-up to short-circuit on pre==new. (3) bring/move skipped rev bump after manual `_tokens.pop/insert` — FIXED inline (commit `1a618a3`) by converting to bracket API; removes the last remaining `snapshot()` shim caller. Plus 7 non-blocking concerns logged (selection-restore deferred to Phase 3, anti-criterion `_HISTORY_MAX` 20→200 expansion documented, etc.). Findings #1 and #2 left as follow-ups rather than blocking ISC-23 because they don't break the criterion (two-deque + delta-pairs + bracket boundary all hold) and no current call path triggers them. ISC stays green; follow-ups deferred per loop YOLO discipline.
+- **2026-06-30 — Forge worktree commit-per-feature discipline.** Loop turn 2 used Forge in worktree with explicit per-phase commit instruction. Phase 1 (`ec52d32`) + Phase 2 (`7eb3e56`) shipped as two separate commits — if Phase 2 had hit a lint/test failure mid-flight, Phase 1 would still have landed. Worth keeping as a standing rule for any multi-feature autonomous worktree run.
 
 ## Changelog
 
+- **2026-06-30** — Loop turn 2 (autonomous): ISC-23 (undo/redo) flipped green — Phases 1+2 of UNDO_REDO_PLAN landed via Forge worktree (commits `ec52d32`, `7eb3e56`); Cato critical #3 fixed inline (commit `1a618a3`); coalescing OFF default + voice toggle. 11/24.
 - **2026-06-30** — Loop turn 1 (autonomous): ISC-15 (scope-preview flash) flipped green by audit + observability close. 10/24.
 - **2026-06-30** — Phase 2 active. 9/24 ISCs green. Today's session shipped: viewport extraction (ISC-22), buffer rev counter (ISC-21), homophone slice A (ISC-11, ISC-12), hat-shape locate (ISC-14 substrate), stack-overflow trail slice A (ISC-18), always-on debug + draw hook (ISC-16, ISC-17), test driver (ISC-19). Plus three plan docs: `docs/UNDO_REDO_PLAN.md`, `docs/HOMOPHONE_UI_PLAN.md`, `docs/STACK_OVERFLOW_PAPER_TRAIL_PLAN.md`.
 - **2026-06-04** — Cursorless verb surface filled (ISCs 1–7 green via commits `44a01a5`, `46c93fc`, `170a0f7`).

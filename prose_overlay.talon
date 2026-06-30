@@ -101,6 +101,19 @@ phones <user.letter>:
 phones <user.prose_hat_color> <user.letter>:
     user.prose_overlay_phone_letter(letter, prose_hat_color)
 
+# Slice C of docs/PHONES_SPEC.md — color-addressed direct swap.
+# Scenario 4: the user reads a panel chip ('gold play': their) and says
+# the chip's color + the token's shape to land DIRECTLY on that alt.
+# Reuses the existing prose_hat_color capture (gold→yellow, plum→purple
+# normalisation already happens inside the capture).
+#
+# OQ7 verified: this rule (CAPTURE + LIST) does NOT conflict with the
+# `chuck <user.prose_hat_color> <user.letter>` rules above — those are
+# CAPTURE + literal `chuck` + CAPTURE, leading literal disambiguates
+# upstream. Empty intersection on the spoken surface, no shadow.
+<user.prose_hat_color> {user.prose_hat_shape}:
+    user.prose_overlay_phone_color_shape(prose_hat_color, prose_hat_shape)
+
 # Toggle auto-show on all dictation phrases
 overlay auto: user.prose_overlay_toggle_auto_dictation()
 

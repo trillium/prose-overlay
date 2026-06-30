@@ -178,6 +178,31 @@ def shape_pool() -> tuple[str, ...]:
     return HAT_SHAPES
 
 
+def shape_char_position(letter_char_idx: int, token_len: int) -> int:
+    """Return the char index where the homophone shape hat paints.
+
+    The shape MUST NOT visually overlap the letter-hat dot, so it picks a
+    different character in the token. Per user requirement:
+      t[h]{e}re  — bracket = letter-hat (idx 1), curly = shape (idx 2).
+
+    A token may therefore have TWO hats: a default letter hat (gray-h) AND
+    a shape hat (colored shape on a different char). The two are separate
+    addressing namespaces.
+
+    Rules:
+      - len(token) <= 1            → return 0 (collision unavoidable; single
+                                     char tokens can't host both hats apart)
+      - letter_char_idx < 0        → no letter hat assigned, no conflict;
+                                     shape goes on char 0
+      - otherwise                  → (letter_char_idx + 1) % token_len
+    """
+    if token_len <= 1:
+        return 0
+    if letter_char_idx < 0:
+        return 0
+    return (letter_char_idx + 1) % token_len
+
+
 # ---------------------------------------------------------------------------
 # Slice 2 — deterministic per-flag shape allocator
 # ---------------------------------------------------------------------------

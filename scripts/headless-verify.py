@@ -425,6 +425,20 @@ def run_layer_1() -> None:
             f"11th idx (10) should be omitted on pool exhaustion; got {r}"
         )
 
+    with test("L1", "L1.28", "shape_char_position: 'there' letter on idx 1 → shape on idx 2"):
+        # Per user requirement: t[h]{e}re — letter-hat on 'h' (idx 1),
+        # shape on 'e' (idx 2). Same token, both hats, no overlap.
+        assert shapes_mod.shape_char_position(letter_char_idx=1, token_len=5) == 2
+
+    with test("L1", "L1.29", "shape_char_position: letter on last char wraps to 0"):
+        assert shapes_mod.shape_char_position(letter_char_idx=4, token_len=5) == 0
+
+    with test("L1", "L1.30", "shape_char_position: single-char token → 0 (collision unavoidable)"):
+        assert shapes_mod.shape_char_position(letter_char_idx=0, token_len=1) == 0
+
+    with test("L1", "L1.31", "shape_char_position: no letter hat (-1) → 0"):
+        assert shapes_mod.shape_char_position(letter_char_idx=-1, token_len=5) == 0
+
 
 # =============================================================================
 # Layer 2 — JS bundle via bun

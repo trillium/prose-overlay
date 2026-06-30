@@ -185,6 +185,21 @@ def _draw_token_rows(
             # SVG renderer centers against its own viewBox.
             shape_name = shape_for_idx.get(idx) if shape_enabled else None
             if has_hat and shape_name is not None:
+                # Place the shape on a DIFFERENT character than the letter-hat
+                # dot so a single token can host BOTH hats without visual
+                # overlap. Per user requirement: t[h]{e}re — bracket is the
+                # default letter hat (gray-h on idx 1), curly is the shape hat
+                # (colored shape on idx 2). Two addressing namespaces, one
+                # token, no collision.
+                letter_char_idx = assignment[0] if assignment is not None else -1
+                shape_char_idx = _shapes.shape_char_position(letter_char_idx, len(token))
+                shape_prefix_w = 0.0
+                if shape_char_idx > 0:
+                    shape_prefix_w = c.paint.measure_text(token[:shape_char_idx])[1].width
+                shape_target_char = token[shape_char_idx] if shape_char_idx < len(token) else token[0]
+                shape_char_rect = c.paint.measure_text(shape_target_char)[1]
+                shape_cx = x + shape_prefix_w + shape_char_rect.width / 2
+                shape_cy = y_base + DOT_RADIUS
                 shape_color_hex = HAT_COLOR_HEX.get(
                     HOMOPHONE_SHAPE_DEFAULT_COLOR, HAT_COLOR,
                 )
@@ -192,8 +207,8 @@ def _draw_token_rows(
                     c,
                     shape_name=shape_name,
                     color=shape_color_hex,
-                    cx=dot_cx,
-                    cy=dot_cy,
+                    cx=shape_cx,
+                    cy=shape_cy,
                     scale=HOMOPHONE_SHAPE_SCALE,
                     alpha=255,
                 )

@@ -105,6 +105,16 @@ change <user.prose_hat_color> <user.letter>:
 # {user.symbol_key} includes all spoken forms — both command-and-dictation and command-only.
 {user.symbol_key}: user.prose_overlay_add_text(symbol_key)
 
+# Prose formatters inside the overlay — "snake the quick brown fox" produces
+# one buffer token "the_quick_brown_fox" instead of five raw words. Mirrors
+# trillium_talon/core/text/text.talon:8 but scoped to the overlay-active
+# context so it fires in dictation mode (the overlay enables dictation on
+# show). The insert_formatted call is caught by the _ctx_overlay_active shim
+# in prose_overlay.py which routes through formatted_text → add_text.
+{user.prose_formatter} <user.prose>$: user.insert_formatted(prose, prose_formatter)
+{user.prose_formatter} <user.prose> {user.phrase_ender}:
+    user.insert_formatted(prose, prose_formatter)
+
 # NATO letter forms: "trap trap trap" → "ttt", "air bat cap" → "abc".
 # Without this, single-letter NATO forms fire key(letter) in the background
 # window (per core/keys/keys.talon:1) or get eaten as the literal word "trap"

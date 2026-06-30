@@ -237,6 +237,31 @@ def run_layer_1() -> None:
         assert homophones.is_flagged("their"), "'their' should be flagged"
         assert homophones.is_flagged("there"), "'there' should be flagged"
 
+    with test("L1", "L1.17", "snake_case formatter output lands as ONE buffer token"):
+        # Mirrors the shim chain: insert_formatted ("the quick brown fox",
+        # "SNAKE_CASE") -> formatted_text -> "the_quick_brown_fox" ->
+        # add_text("the_quick_brown_fox") -> buffer splits on whitespace -> 1 token.
+        # We don't need the community formatter here — just verify the BUFFER
+        # contract: a snake_case string (no whitespace) becomes one token.
+        b = ProseBuffer()
+        b.add_text("the_quick_brown_fox")
+        assert b.get_tokens() == ["the_quick_brown_fox"], (
+            f"snake_case output should be ONE token; got {b.get_tokens()!r}"
+        )
+
+    with test("L1", "L1.18", "camelCase formatter output lands as ONE buffer token"):
+        b = ProseBuffer()
+        b.add_text("theQuickBrownFox")
+        assert b.get_tokens() == ["theQuickBrownFox"], b.get_tokens()
+
+    with test("L1", "L1.19", "title-case formatter output stays multi-token (has spaces)"):
+        # TITLE_CASE preserves spaces ("The Quick Brown Fox"), so add_text
+        # naturally splits — 4 tokens, each capitalized. Documenting the
+        # expected split behavior so future regressions are caught.
+        b = ProseBuffer()
+        b.add_text("The Quick Brown Fox")
+        assert b.get_tokens() == ["The", "Quick", "Brown", "Fox"], b.get_tokens()
+
 
 # =============================================================================
 # Layer 2 — JS bundle via bun

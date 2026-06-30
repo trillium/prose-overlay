@@ -56,6 +56,9 @@ to be.
 | L1.14 | `reset()` preserves object identity (buffer/canvas refs not reassigned) | safe re-init |
 | L1.15 | `hint_enabled()` returns True by default (keep-verdict regression) | slice A default-on |
 | L1.16 | `is_flagged("their")` and `is_flagged("there")` return True | CSV load smoke |
+| L1.17 | `add_text("the_quick_brown_fox")` → 1 token (snake formatter output) | buffer contract for formatters |
+| L1.18 | `add_text("theQuickBrownFox")` → 1 token (camel formatter output) | buffer contract for formatters |
+| L1.19 | `add_text("The Quick Brown Fox")` → 4 tokens (title-case has spaces) | documented split behavior |
 
 ### Layer 2 — JS bundle via `bun` (no Talon)
 

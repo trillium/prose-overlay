@@ -1,27 +1,53 @@
 """Expanded homophone panel renderer — Slice C of docs/PHONES_SPEC.md.
 
 For every shape-hatted token whose homophone group has > 1 member, paint
-a small panel BELOW the token with one chip per alt member. Each chip's
-background is the Cursorless palette color that addresses that alt; the
-chip's foreground text is the alt word itself. The user can then say
-`<color> <shape>` to swap directly to that alt (Scenario 4).
+a **bubble** BELOW the token containing:
 
-Layout (default per OQ5 — "below" the token):
+  [color-chip-1][homophone-shape-glyph][color-chip-2]
 
-    t[h]{e}re               <- the token, with letter hat + shape hat
-    [ their ] [ they're ]   <- the panel chips, below
-       gold      blue
+with the homophone shape glyph re-rendered INSIDE the bubble (at reduced
+scale) as a visual anchor — so the user can identify which token the
+bubble belongs to even when adjacent bubbles wrap to a second row.
 
-The panel reads from `instance.homophone_panel_alts` (populated by
-`shim.actions_core._recompute_hats` from `shim.shapes.compute_panel_alts`).
-When the dict is empty, this routine paints nothing — zero overhead when
-shapes are off or no flagged token has > 1 member.
+This replaces the original flat chip row that packed under each token.
+The original layout had two bugs the user reported in the first-paint
+verdict (PHONES_SPEC.md commit 566143c):
 
-Geometry strategy: walk the same `rows` list that `_draw_token_rows` used,
-reconstructing each token's x/y/tw. We don't share live state with the
-token renderer — the two paint passes share the layout INPUT (the rows
-list) and recompute identical x positions. This keeps the modules
-loosely coupled and headless-test friendly.
+  1. Truncation — chips were sized to fit under the token's width, not
+     the chip's text content, so "they're" rendered as "t".
+  2. No bubble boundary — adjacent tokens' chips visually ran together;
+     the user could not tell which alt belonged to which token.
+
+Layout (per token):
+
+    ·^                       ← letter-hat dot + homophone-shape hat (above)
+    there                    ← token text
+    ─────                    ← segmented amber underline (Slice A)
+    [their][shape][they're]  ← BUBBLE: chip + small shape glyph + chip
+
+For 2-member groups (e.g. `your,you're`): one chip only —
+`[chip][shape]`.
+
+For 4+ member groups: only the first two alts get chips inside the
+bubble. Extras are reachable via cycling (`phone <shape>`) per the spec
+Non-goal "first two alts; extras via cycling."
+
+Bubble x = `token_x + (token_w - bubble_w) / 2` — centered on the token.
+Bubble y = `underline_y + BUBBLE_TOP_GAP`.
+
+When two adjacent bubbles' ideal positions would overlap (closer than
+`BUBBLE_OUTER_GAP`), the right-hand bubble shifts DOWN one row instead
+of being squeezed horizontally — preserves chip sizing and stays
+visually identifiable.
+
+Reads from `instance.homophone_panel_alts` (already populated by
+`shim.actions_core._recompute_hats` via `shim.shapes.compute_panel_alts`)
+and `instance.shape_assignments` (the per-token shape name). When the
+former is empty, this routine returns without painting.
+
+Geometry strategy: walks the same `rows` list that `_draw_token_rows`
+consumed, reconstructing each token's x position. The two paint passes
+share the layout INPUT (the rows list) — no live state coupling.
 """
 
 from talon.skia.canvas import Canvas as SkiaCanvas
@@ -31,33 +57,44 @@ from ....utils.overlay_kit import draw_rounded_rect
 from ..internal.draw_constants import (
     DOT_RADIUS, DOT_GAP_Y, TOKEN_FONT_SIZE, TOKEN_GAP_X, LINE_HEIGHT,
     HAT_COLOR_HEX,
+    HOMOPHONE_SHAPE_COLOR_HEX,
+    BUBBLE_CHIP_FONT_SIZE, BUBBLE_CHIP_PAD_X, BUBBLE_CHIP_PAD_Y,
+    BUBBLE_CHIP_RADIUS, BUBBLE_INNER_GAP, BUBBLE_OUTER_GAP,
+    BUBBLE_TOP_GAP, BUBBLE_SHAPE_SCALE,
 )
 from ..internal.instance import instance as _instance
+from ..shim import shapes as _shapes
 
 
 # ---------------------------------------------------------------------------
-# Constants — geometry of the panel + chips
+# Geometry constants — derived
 # ---------------------------------------------------------------------------
 
-# Panel sits below the token's underline, with this much vertical gap.
-# Underline lives ~2 px below the token text bottom, so the chip top is
-# token_text_bottom + UNDERLINE_RESERVE + PANEL_GAP_Y.
-PANEL_GAP_Y = 4
-UNDERLINE_RESERVE = 4  # px reserved for the segmented underline
+# Reserve a few pixels for the segmented underline + active-segment height.
+# Mirrors the calculation in ui/draw_tokens.py where the underline lives at
+# `y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE + 2`. We add a
+# fixed UNDERLINE_RESERVE on top of that to clear the active segment's
+# extra height (HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT can extend down to ~3px).
+UNDERLINE_RESERVE = 4
 
-# Per-chip geometry. Chips are sized to fit their alt word plus padding.
-CHIP_PAD_X = 4         # px horizontal padding inside a chip
-CHIP_PAD_Y = 2         # px vertical padding inside a chip
-CHIP_RADIUS = 2        # px corner radius
-CHIP_GAP_X = 3         # px horizontal gap between adjacent chips on the same panel
-CHIP_FONT_SIZE = 10    # px — smaller than the token font so the panel is unmistakably
-                       # a secondary UI element, not another token row.
+# Native SVG viewBox is 12 wide × 9 tall (mouse-clock conventions, mirrored
+# in shim/shapes.py:_SVG_W / _SVG_H). When the painter draws a hat shape at
+# `scale`, the glyph occupies (12*scale) × (9*scale) px centered on (cx, cy).
+# We need the same numbers here to know the shape's footprint inside the
+# bubble layout math. Hard-coded rather than imported because the shapes
+# module guards Skia imports behind a try/except and we don't want to
+# entangle the panel renderer's import time with Skia availability.
+_SHAPE_NATIVE_W = 12.0
+_SHAPE_NATIVE_H = 9.0
 
-# Foreground text colors per background color. The chip background is a
+
+# ---------------------------------------------------------------------------
+# Color helpers
+# ---------------------------------------------------------------------------
+
+# Foreground text color picked per chip background. The chip background is a
 # saturated Cursorless palette color; the text needs to read against it.
-# We pick BLACK for light backgrounds (yellow, white) and WHITE for the
-# rest. Matches the existing HAT_COLOR_HEX black-circle-on-white-ring
-# treatment used by the letter hat dot.
+# Light backgrounds (yellow, white) take BLACK; the rest take WHITE.
 _LIGHT_BG_COLORS = {"yellow", "white"}
 
 
@@ -66,6 +103,54 @@ def _chip_fg_for(color_name: str) -> str:
     if color_name in _LIGHT_BG_COLORS:
         return "000000ff"
     return "ffffffff"
+
+
+# ---------------------------------------------------------------------------
+# Bubble spec — built once per token in a measurement pass before drawing
+# ---------------------------------------------------------------------------
+
+class _Bubble:
+    """One token's bubble layout spec.
+
+    Computed by `_measure_bubble` from the panel entry + the shape name.
+    Holds chip widths, shape footprint, total bubble width / height, and
+    the IDEAL x (centered on the token). The placement pass mutates `x`
+    and `band` to handle collisions with adjacent bubbles.
+    """
+
+    __slots__ = (
+        "token_idx", "token_x", "token_w", "shape_name",
+        "left_chip", "right_chip",
+        "left_chip_w", "right_chip_w",
+        "bubble_w", "bubble_h",
+        "ideal_x", "x", "band",
+    )
+
+    def __init__(
+        self,
+        token_idx: int,
+        token_x: float,
+        token_w: float,
+        shape_name: str,
+        left_chip: tuple[str, str, float],
+        right_chip: tuple[str, str, float] | None,
+        bubble_w: float,
+        bubble_h: float,
+        ideal_x: float,
+    ) -> None:
+        self.token_idx = token_idx
+        self.token_x = token_x
+        self.token_w = token_w
+        self.shape_name = shape_name
+        self.left_chip = left_chip
+        self.right_chip = right_chip
+        self.left_chip_w = left_chip[2]
+        self.right_chip_w = right_chip[2] if right_chip is not None else 0.0
+        self.bubble_w = bubble_w
+        self.bubble_h = bubble_h
+        self.ideal_x = ideal_x
+        self.x = ideal_x
+        self.band = 0  # row offset from the primary bubble row (0, 1, 2, …)
 
 
 # ---------------------------------------------------------------------------
@@ -78,80 +163,275 @@ def draw_homophone_panels(
     x_origin: float,
     y_start: float,
 ) -> None:
-    """Paint the expanded homophone panel beneath each shape-hatted token.
+    """Paint the bubble panel beneath each shape-hatted token.
 
-    Reads `_instance.homophone_panel_alts` (token_idx -> {color -> alt}).
-    When the dict is empty, the function returns without drawing anything.
+    Reads `_instance.homophone_panel_alts` (token_idx -> {color -> alt})
+    and `_instance.shape_assignments` (token_idx -> shape_name). When
+    `panel_alts` is empty the function returns without drawing.
 
     Walks the same `rows` structure that `_draw_token_rows` consumed so
-    the per-token x positions match exactly. The vertical offset to the
-    chip row matches the underline_y in draw_tokens plus a small gap.
+    the per-token x positions match exactly. For each row, runs a
+    measurement pass (build _Bubble specs) followed by a placement pass
+    (assign bands so collisions wrap downward) and a draw pass.
     """
     panel_alts = _instance.homophone_panel_alts
     if not panel_alts:
         return
+    shape_assignments = _instance.shape_assignments or {}
 
     y_base = y_start
     for row in rows:
-        x = x_origin
-        for idx, token, tw in row:
-            entry = panel_alts.get(idx)
-            if not entry:
-                x += tw + TOKEN_GAP_X
-                continue
-            _draw_one_panel(c, entry, x, y_base, tw)
-            x += tw + TOKEN_GAP_X
+        bubbles = _build_row_bubbles(
+            c, row, panel_alts, shape_assignments, y_base
+        )
+        _place_row_bubbles(bubbles, x_origin)
+        # Underline_y_base mirrors ui/draw_tokens.py's underline math: the
+        # underline sits at `y_base + (DOT_RADIUS * 2) + DOT_GAP_Y +
+        # TOKEN_FONT_SIZE + 2`. We then add UNDERLINE_RESERVE (to clear
+        # the active segment's extra height) and BUBBLE_TOP_GAP for the
+        # visual breathing room called for in the spec.
+        underline_y_base = (
+            y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE + 2
+        )
+        bubble_top_band_0 = (
+            underline_y_base + UNDERLINE_RESERVE + BUBBLE_TOP_GAP
+        )
+        for b in bubbles:
+            band_y = bubble_top_band_0 + b.band * (b.bubble_h + BUBBLE_TOP_GAP)
+            _draw_one_bubble(c, b, band_y)
         y_base += LINE_HEIGHT
 
 
-def _draw_one_panel(
+# ---------------------------------------------------------------------------
+# Measurement pass — build _Bubble specs for one row of tokens
+# ---------------------------------------------------------------------------
+
+def _build_row_bubbles(
     c: SkiaCanvas,
-    entry: dict[str, str],
-    token_x: float,
+    row: list[tuple[int, str, float]],
+    panel_alts: dict[int, dict[str, str]],
+    shape_assignments: dict[int, str],
     y_base: float,
-    tw: float,
-) -> None:
-    """Paint one token's panel as a row of color-coded chips.
+) -> list[_Bubble]:
+    """Walk a single row, measure each panel entry's bubble, return specs.
 
-    Chips are positioned left-aligned with the token. They flow
-    horizontally; if they overflow the token's width budget, they still
-    paint — the overflow is acceptable since panels are an addressing
-    affordance, not a strict layout obligation. The first viable shape
-    can iterate (OQ5).
+    Tokens without panel entries are skipped silently. Tokens whose entry
+    is in `panel_alts` but lack a shape assignment also skipped — the
+    bubble's central anchor is the shape glyph, and a missing shape would
+    leave a confusing chip-pair with no glyph between them.
     """
-    # Measure each chip's text to determine widths.
-    c.paint.textsize = CHIP_FONT_SIZE
-    chips: list[tuple[str, str, float]] = []  # (color, alt, text_w)
-    for color, alt in entry.items():
-        text_w = c.paint.measure_text(alt)[1].width
-        chips.append((color, alt, text_w))
+    bubbles: list[_Bubble] = []
+    x = 0.0  # x relative to row's x_origin; resolved to absolute by caller
+    for idx, _token, tw in row:
+        entry = panel_alts.get(idx)
+        shape_name = shape_assignments.get(idx)
+        if entry and shape_name is not None:
+            bubble = _measure_bubble(c, idx, x, tw, shape_name, entry)
+            if bubble is not None:
+                bubbles.append(bubble)
+        x += tw + TOKEN_GAP_X
+    return bubbles
 
-    # Anchor chip row top below the underline.
-    underline_bottom = y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE + UNDERLINE_RESERVE
-    chip_top = underline_bottom + PANEL_GAP_Y
-    chip_h = CHIP_FONT_SIZE + CHIP_PAD_Y * 2
 
-    chip_x = token_x
-    for color, alt, text_w in chips:
-        chip_w = text_w + CHIP_PAD_X * 2
-        bg_color = HAT_COLOR_HEX.get(color, "999999ff")
-        fg_color = _chip_fg_for(color)
+def _measure_bubble(
+    c: SkiaCanvas,
+    token_idx: int,
+    token_x_rel: float,
+    token_w: float,
+    shape_name: str,
+    entry: dict[str, str],
+) -> _Bubble | None:
+    """Measure one token's bubble dimensions; return a _Bubble or None.
 
-        # Chip background.
-        c.paint.style = c.paint.Style.FILL
-        c.paint.color = bg_color
-        draw_rounded_rect(
-            c,
-            Rect(chip_x, chip_top, chip_w, chip_h),
-            CHIP_RADIUS,
+    Picks the first two color-alt pairs from `entry` (the entry is keyed
+    in PANEL_COLOR_PALETTE order — yellow first, blue second — per the
+    OQ2 convention enforced by `shim/shapes.py:compute_panel_alts`).
+
+    For 2-member groups (only one alt available) renders [chip][shape]
+    with no right chip. For 4+ member groups, the extra alts beyond the
+    second slot are dropped — the spec routes them to cycling, not
+    additional chips.
+
+    Returns None when `entry` is empty (defensive — shouldn't happen
+    because `compute_panel_alts` only writes non-empty mappings, but the
+    nil-check keeps the caller simple).
+    """
+    if not entry:
+        return None
+
+    # Pull (color, alt) pairs in insertion order. The mapping was built by
+    # compute_panel_alts iterating PANEL_COLOR_PALETTE in CSV-row order,
+    # so the first two items are yellow + blue for the worked example.
+    pairs = list(entry.items())
+    if not pairs:
+        return None
+
+    # Measure each chip's text using the chip's font size (NOT the token
+    # font). Skia's measure_text returns (rect_w, glyph_bounds); the
+    # glyph_bounds.width is what we want for tight packing.
+    c.paint.textsize = BUBBLE_CHIP_FONT_SIZE
+    left_color, left_alt = pairs[0]
+    left_text_w = c.paint.measure_text(left_alt)[1].width
+    left_chip_w = left_text_w + BUBBLE_CHIP_PAD_X * 2
+    left_chip = (left_color, left_alt, left_chip_w)
+
+    right_chip: tuple[str, str, float] | None = None
+    right_chip_w = 0.0
+    if len(pairs) >= 2:
+        right_color, right_alt = pairs[1]
+        right_text_w = c.paint.measure_text(right_alt)[1].width
+        right_chip_w = right_text_w + BUBBLE_CHIP_PAD_X * 2
+        right_chip = (right_color, right_alt, right_chip_w)
+
+    # Shape footprint at BUBBLE_SHAPE_SCALE.
+    shape_w = _SHAPE_NATIVE_W * BUBBLE_SHAPE_SCALE
+    shape_h = _SHAPE_NATIVE_H * BUBBLE_SHAPE_SCALE
+
+    # Bubble width: [left_chip][gap][shape][gap][right_chip], or
+    # [left_chip][gap][shape] for the 2-member case.
+    if right_chip is not None:
+        bubble_w = (
+            left_chip_w + BUBBLE_INNER_GAP + shape_w
+            + BUBBLE_INNER_GAP + right_chip_w
         )
+    else:
+        bubble_w = left_chip_w + BUBBLE_INNER_GAP + shape_w
 
-        # Chip foreground (the alt word).
-        c.paint.textsize = CHIP_FONT_SIZE
-        c.paint.color = fg_color
-        # Baseline: chip_top + CHIP_PAD_Y + font_size (text draws above
-        # baseline; the +font_size shifts the baseline to the bottom of
-        # the text area).
-        c.draw_text(alt, chip_x + CHIP_PAD_X, chip_top + CHIP_PAD_Y + CHIP_FONT_SIZE)
+    # Bubble height: chip height (chips are the tallest element; the
+    # shape at scale 0.55 is ~5 px tall, smaller than a chip).
+    chip_h = BUBBLE_CHIP_FONT_SIZE + BUBBLE_CHIP_PAD_Y * 2
+    bubble_h = max(chip_h, shape_h)
 
-        chip_x += chip_w + CHIP_GAP_X
+    # Ideal x: bubble centered on the token. token_x_rel is row-relative;
+    # caller adds x_origin during the placement pass.
+    ideal_x_rel = token_x_rel + (token_w - bubble_w) / 2.0
+
+    return _Bubble(
+        token_idx=token_idx,
+        token_x=token_x_rel,
+        token_w=token_w,
+        shape_name=shape_name,
+        left_chip=left_chip,
+        right_chip=right_chip,
+        bubble_w=bubble_w,
+        bubble_h=bubble_h,
+        ideal_x=ideal_x_rel,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Placement pass — assign bands so adjacent bubbles don't collide
+# ---------------------------------------------------------------------------
+
+def _place_row_bubbles(bubbles: list[_Bubble], x_origin: float) -> None:
+    """Assign each bubble a band (0=primary, 1=below, 2=below-below, …).
+
+    The first bubble takes band 0. Each subsequent bubble checks against
+    the rightmost bubble already placed on band 0; if their x-ranges
+    would be closer than `BUBBLE_OUTER_GAP`, the new bubble drops to
+    band 1. The same check then runs against the rightmost bubble on
+    band 1, etc., until we find a band with enough gap.
+
+    Also resolves the absolute `x` (adds `x_origin`) and soft-clamps to
+    `x >= x_origin` so a bubble whose ideal_x would underflow the panel
+    margin sticks at the margin instead.
+    """
+    # rightmost_on[band] = absolute right edge of the last bubble we placed
+    # on that band; missing key = no bubble yet on that band.
+    rightmost_on: dict[int, float] = {}
+    for b in bubbles:
+        abs_x = x_origin + b.ideal_x
+        # Soft left-clamp: never start a bubble before the panel margin.
+        if abs_x < x_origin:
+            abs_x = x_origin
+        # Find the lowest band where this bubble fits.
+        band = 0
+        while True:
+            r = rightmost_on.get(band)
+            if r is None or abs_x >= r + BUBBLE_OUTER_GAP:
+                break
+            band += 1
+        b.band = band
+        b.x = abs_x
+        rightmost_on[band] = abs_x + b.bubble_w
+
+
+# ---------------------------------------------------------------------------
+# Draw pass — paint one bubble
+# ---------------------------------------------------------------------------
+
+def _draw_one_bubble(c: SkiaCanvas, b: _Bubble, y_top: float) -> None:
+    """Render one bubble at `(b.x, y_top)`.
+
+    Pieces, left to right:
+      1. Left chip (color background, alt text on top)
+      2. Homophone shape glyph (small, amber, centered between gaps)
+      3. Right chip (when present; 3-member or 4+ groups)
+    """
+    shape_w = _SHAPE_NATIVE_W * BUBBLE_SHAPE_SCALE
+    shape_h = _SHAPE_NATIVE_H * BUBBLE_SHAPE_SCALE
+    chip_h = BUBBLE_CHIP_FONT_SIZE + BUBBLE_CHIP_PAD_Y * 2
+
+    # Chip vertical center across the bubble. The shape paints centered on
+    # its own (cx, cy); the chips align top so their bounding box matches
+    # the chip_h footprint. We anchor chips at y_top and center the shape
+    # vertically on chip's mid-line so chips + shape read as one unit.
+    chip_y = y_top + (b.bubble_h - chip_h) / 2.0
+    chip_mid_y = chip_y + chip_h / 2.0
+    _ = shape_h  # shape_h not used directly — Skia centers via cx/cy
+
+    # ----- Left chip --------------------------------------------------------
+    left_color, left_alt, left_chip_w = b.left_chip
+    left_x = b.x
+    _draw_chip(c, left_color, left_alt, left_x, chip_y, left_chip_w, chip_h)
+
+    # ----- Shape glyph ------------------------------------------------------
+    shape_x_left = left_x + left_chip_w + BUBBLE_INNER_GAP
+    shape_cx = shape_x_left + shape_w / 2.0
+    shape_cy = chip_mid_y
+    _shapes.draw_hat_shape(
+        c,
+        shape_name=b.shape_name,
+        color=HOMOPHONE_SHAPE_COLOR_HEX,
+        cx=shape_cx,
+        cy=shape_cy,
+        scale=BUBBLE_SHAPE_SCALE,
+        alpha=255,
+    )
+
+    # ----- Right chip (when present) ---------------------------------------
+    if b.right_chip is not None:
+        right_color, right_alt, right_chip_w = b.right_chip
+        right_x = shape_x_left + shape_w + BUBBLE_INNER_GAP
+        _draw_chip(c, right_color, right_alt, right_x, chip_y, right_chip_w, chip_h)
+
+
+def _draw_chip(
+    c: SkiaCanvas,
+    color_name: str,
+    text: str,
+    x: float,
+    y: float,
+    chip_w: float,
+    chip_h: float,
+) -> None:
+    """Paint one chip: rounded-rect background + alt text on top.
+
+    Uses HAT_COLOR_HEX for the background lookup (same palette as the
+    letter-hat dot) so color-addressed swap reads consistently — the
+    user's `gold play` lands on the alt under the gold/yellow chip.
+    """
+    bg_color = HAT_COLOR_HEX.get(color_name, "999999ff")
+    fg_color = _chip_fg_for(color_name)
+
+    # Background fill.
+    c.paint.style = c.paint.Style.FILL
+    c.paint.color = bg_color
+    draw_rounded_rect(c, Rect(x, y, chip_w, chip_h), BUBBLE_CHIP_RADIUS)
+
+    # Text. Baseline = y + chip_pad_y + font_size (font_size approximates
+    # the cap height for small fonts; pad_y sits above and the baseline
+    # falls one font-size below the padded top edge).
+    c.paint.textsize = BUBBLE_CHIP_FONT_SIZE
+    c.paint.color = fg_color
+    c.draw_text(text, x + BUBBLE_CHIP_PAD_X, y + BUBBLE_CHIP_PAD_Y + BUBBLE_CHIP_FONT_SIZE)

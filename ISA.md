@@ -3,10 +3,10 @@ task: Voice-first prose editor for Talon — Cursorless verbs on a floating buff
 slug: prose-overlay-v2
 effort: E4
 phase: build
-progress: 18/24
+progress: 19/27
 mode: build
 started: 2026-05-21T00:00:00Z
-updated: 2026-06-30T10:00:00Z
+updated: 2026-06-30T14:00:00Z
 project: prose_overlay
 ---
 
@@ -73,8 +73,11 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - [x] ISC-10: Hat-allocator fallback paints orange chrome (BG_COLOR_FALLBACK + BORDER_COLOR_FALLBACK) — `prose_overlay_draw.py` + `prose_overlay_actions_core.py`
 - [x] ISC-11: Homophone slice A — dotted underline under any token whose lowercase appears in pimentel CSV, default ON since 2026-06-30 (user keep verdict), runtime toggle via `overlay hints homo off` — `prose_overlay_homophones.py`
 - [x] ISC-12: Voice toggle for homophone hint (`overlay hints homo on/off`) — `prose_overlay_actions_visibility.py:prose_overlay_set_homophone_hint`
-- [ ] ISC-13: Homophone slice B — `phone <hat>` cycles to next group member (per `docs/HOMOPHONE_UI_PLAN.md`)
-- [ ] ISC-14: Hat shape vocabulary integrated for shape-coded homophone swap (per `docs/HOMOPHONE_SHAPES_LOCATION.md`)
+- [ ] ISC-13: **SUPERSEDED by ISC-14a-d (`docs/HOMOPHONE_SHAPES_PLAN.md`):** Homophone slice B — `phone <hat>` cycles to next group member (per `docs/HOMOPHONE_UI_PLAN.md`)
+- [x] ISC-14a: Homophone shapes slice 1 — round-robin hat-shape paint above flagged tokens, default OFF, runtime toggle via `overlay shapes homo on/off` (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3)
+- [ ] ISC-14b: Homophone shapes slice 2 — `instance.shape_assignments` per-token stability across edits (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3 Slice 2)
+- [ ] ISC-14c: Homophone shapes slice 3 — same-group-same-shape allocation (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3 Slice 3)
+- [ ] ISC-14d: Homophone shapes slice 4 — `phone <shape>` swap grammar (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3 Slice 4)
 - [x] ISC-15: Scope-preview flash before execution — when user speaks a scope verb, the resolved range flashes before the destructive action (satisfied by inheritance — `_flash_tokens(indices, color, _execute)` schedules `_execute` after a 150ms `cron.after`, so every dispatcher that resolves a target through `_resolve_target_to_token_range` — including scope verbs via `_apply_containing_scope` / `_scope_word` / `_scope_regex` / `_scope_surrounding_pair` — flashes the resolved range before mutating; this turn added `flash` + `flash_color` to the debug snapshot so the Test-Strategy probe has greppable fields)
 
 ### Phase 4 — Observability + headless driving
@@ -101,7 +104,9 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 | 9 | code | grep for `prose_overlay_cursorless_resolve` imports returns 0 (after retirement) | Grep |
 | 10 | visual | force JS allocator failure, assert orange chrome appears | manual or screenshot diff |
 | 11–12 | logic | dictate flagged words with hint on, assert underline drawn (via debug log `flagged` field) | test-overlay.sh + grep flagged |
-| 13–14 | feature | per HOMOPHONE_UI_PLAN slice criteria | future slices |
+| 13 | feature | superseded by ISC-14a-d (homophone-shapes plan) | n/a |
+| 14a | headless+visual | L1.20-L1.23 cover module vocabulary/parse/assets; Skia paint verify-in-Talon via `overlay shapes homo on` + flagged word | scripts/headless-verify.py + live Talon |
+| 14b–d | feature | per HOMOPHONE_SHAPES_PLAN slice criteria | future slices |
 | 15 | visual | speak scope verb, assert `flash` field diff appears in debug.jsonl before the `tokens` field diff | `jq 'select(.diff.flash)' ~/.talon/prose_overlay_debug.jsonl` |
 | 16–17 | observability | mutate buffer 1000×, assert log grew + rotated at 5 MB | test-overlay.sh + wc/ls -la |
 | 18 | crash | reproduce HAT_ALLOC overflow under PROSE_OVERLAY_TRAIL=1, assert traceback in faulthandler.log | manual repro |
@@ -120,8 +125,11 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 | JSResolverBridge | QuickJS bridge to cursorless processTargets, gated by setting | ISC-8..9 | scaffolded |
 | HatJSFallbackChrome | Orange BG/BORDER when JS allocator fails | ISC-10 | shipped |
 | HomophoneSliceA | Static dotted underline behind opt-in flag | ISC-11..12 | shipped |
-| HomophoneSwap | `phone <hat>` cycle (slice B) | ISC-13 | planned |
-| HatShapeIntegration | Lift mouse-clock shape vocabulary for swap UI | ISC-14 | located |
+| HomophoneSwap | `phone <hat>` cycle (slice B) | ISC-13 (superseded) | superseded by HatShapeSlice1 |
+| HatShapeSlice1 | Round-robin hat-shape paint above flagged tokens, default OFF, runtime toggle | ISC-14a | shipped |
+| HatShapeSlice2 | Per-token shape stability via `instance.shape_assignments` | ISC-14b | planned |
+| HatShapeSlice3 | Same-group-same-shape allocation | ISC-14c | planned |
+| HatShapeSlice4 | `phone <shape>` swap grammar | ISC-14d | planned |
 | ScopePreviewFlash | Pre-execution flash of resolved scope | ISC-15 | shipped |
 | DebugStreamRich | Always-on JSONL with full snapshot + rotation | ISC-16..17 | shipped |
 | StackOverflowTrail | Paper-trail slice tree (A: faulthandler; B: preamble) | ISC-18, ISC-20 | A + B shipped (ISC-20 still unchecked — verification gap pending HAT_ALLOC repro) |
@@ -132,6 +140,8 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 | ParagraphCache | SkParagraph layout cache keyed by buffer_rev | ISC-24 | researched |
 
 ## Decisions
+
+- **2026-06-30 — HOMOPHONE_SHAPES_PLAN Slice 1 shipped.** Six commits via Forge in a worktree: (A) vendor 11 SVGs from sibling `trillium/mouse-clock` into `svg/` + plan doc, (B) new `prose_overlay_shapes.py` (~210 LOC: HAT_SHAPES + shape_pool + draw_hat_shape + lazy Skia cache + _parse_svg_entries lifted from `mouse-clock/src/rendering/svg_loader.py:20-40`), (C) draw wiring in `_draw_token_rows` (round-robin via `shape_pool()[sorted-rank % 10]`, anchored to existing dot's (cx,cy)) + two new constants, (D) `mod.setting("prose_overlay_homophone_shapes", default=False)` + runtime toggle action + `overlay shapes homo on/off` voice binding, (E) headless tests L1.20-L1.23 + plan-doc updates, (F) this ISA update. Shapes default OFF per plan §6.1 (Slice 1 invisible at the voice layer until the user opts in). SVGs vendored per plan §6.2 / §4.6 (self-contained, no install-order dependency on mouse-clock). Underline (Slice A) stays default-ON; coexistence per §4.8 with no change to the underline draw — Slice 5 will demote it to spillover-only IF Slice 1's keep verdict comes back positive. 43/43 headless tests pass; Skia paint is verify-in-Talon only (see HEADLESS_VERIFY_PLAN.md Layer 4 gap note). Per parent instruction, Slices 2-5 deferred; ISC-14b-d stay unchecked. ISC-13 marked SUPERSEDED for history (the old `phone <hat>` slice B is reframed as ISC-14d `phone <shape>` because shape addressing is the cleaner foundation than letter-hat addressing for the homophone-swap surface).
 
 - **2026-06-30 — Module-level `_hint_enabled` flag instead of `ctx.settings[...] =`** for the homophone voice toggle. The supported Talon API exists (item-assignment on a Context's settings dict — verified by ClaudeResearcher against talon.wiki), but it's context-scoped and would silently revert when the overlay dismisses, while the toggle wants process-global session semantics. Module flag is the right tool *for this toggle specifically*; use `ctx.settings[...]` when an override genuinely is context-scoped.
 - **2026-06-30 — Homophone slice A KEPT, default flipped ON.** User keep verdict: "given the buffer is active, when homophones are present, the UI shows those homophones (on by default)." Slice A (dotted underline) was shipped 2026-06-30 behind an opt-in flag pending this verdict. Flip: `_hint_enabled` default `False → True` in `prose_overlay_homophones.py`; `mod.setting('prose_overlay_homophone_hint', default=True)` in `prose_overlay.py`. Runtime toggle off via `overlay hints homo off`. This also UNBLOCKS ISC-13 (homophone slice B — `phone <hat>` cycles) and ISC-14 (hat-shape vocab for swap UI) which were gated on this verdict; future loop turns can pick them up.
@@ -151,6 +161,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 
 ## Changelog
 
+- **2026-06-30** — HOMOPHONE_SHAPES_PLAN Slice 1 shipped via Forge worktree (6 commits A-F). ISC-13 marked SUPERSEDED, ISC-14 expanded into ISC-14a-d, ISC-14a flipped green. Progress 18/24 → 19/27 (1 closed, 3 new criteria added from the expansion). 43/43 headless tests pass (39 prior + 4 new at L1.20-L1.23). Default OFF per plan §6.1; SVGs vendored per §6.2. Underline (Slice A) untouched per §4.8 coexistence.
 - **2026-06-30** — Frontmatter reconcile: `progress` was 11/24 after turn 2 but actual `^- [x]` checkbox count is 18/24. Pre-existing drift from the v2 rewrite (claimed 9/24 baseline but actual was 16/24). Counter is now ground-truth. Loop turn deltas were correct (turn 1: +1, turn 2: +1) — only the starting baseline was off.
 - **2026-06-30** — Loop turn 5 (autonomous): second consecutive no-work fire. State identical to turn 4. Autonomous utility exhausted — recommend `/loop stop` until a blocker clears. 18/24 unchanged.
 - **2026-06-30** — Loop turn 4 (autonomous): no-work fire. All 6 unchecked ISCs are user-blocked (see turn 3 report). Considered headless ISC-8 harness (would require porting cursorless grammar to Python — multi-turn project, out of slice scope). Considered ISC-24 tombstone (doesn't satisfy "all 24 ticked" stop condition). 18/24 unchanged.

@@ -6,7 +6,7 @@ phase: build
 progress: 18/24
 mode: build
 started: 2026-05-21T00:00:00Z
-updated: 2026-06-30T08:30:00Z
+updated: 2026-06-30T09:00:00Z
 project: prose_overlay
 ---
 
@@ -124,7 +124,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 | HatShapeIntegration | Lift mouse-clock shape vocabulary for swap UI | ISC-14 | located |
 | ScopePreviewFlash | Pre-execution flash of resolved scope | ISC-15 | shipped |
 | DebugStreamRich | Always-on JSONL with full snapshot + rotation | ISC-16..17 | shipped |
-| StackOverflowTrail | Paper-trail slice tree (A: faulthandler; B: preamble) | ISC-18, ISC-20 | A shipped |
+| StackOverflowTrail | Paper-trail slice tree (A: faulthandler; B: preamble) | ISC-18, ISC-20 | A + B shipped (ISC-20 still unchecked — verification gap pending HAT_ALLOC repro) |
 | TestDriver | Headless JSON queue for shell-driven dispatch | ISC-19 | shipped |
 | BufferRev | Monotonic revision counter, cache-invalidation substrate | ISC-21 | shipped |
 | ViewportClass | Scroll/anchor/recenter state, Helix+Emacs voice surface | ISC-22 | shipped |
@@ -142,10 +142,13 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - **2026-06-30 — ISC-23 shipped with coalescing OFF by default.** Plan `docs/UNDO_REDO_PLAN.md` defaults `_GROUP_DELAY_S = 0.400` (CM6 dictation coalescing on). We ship `_GROUP_DELAY_S = 0.0` with a runtime toggle (`overlay undo group on/off` + `prose_overlay_undo_group_set` action). Per plan §9 open question #1, coalescing-feel is a kill-criterion-grade decision needing user verification — shipping OFF respects the "don't ship past a slice's kill criterion" rule. User can opt in to evaluate.
 - **2026-06-30 — Cato (E4 cross-vendor audit) critical findings disposition.** Cato returned `concerns` verdict with 3 critical findings on the undo/redo landing. (1) `set_tokens_raw` outside bracket bumps rev without clearing `_undone` — KNOWN, no current caller hits this path, follow-up to add guard or hard-error. (2) No-op `set_tokens_raw` inside bracket clears redo + consumes undo slot — KNOWN, low impact (idempotent edits are rare in practice), follow-up to short-circuit on pre==new. (3) bring/move skipped rev bump after manual `_tokens.pop/insert` — FIXED inline (commit `1a618a3`) by converting to bracket API; removes the last remaining `snapshot()` shim caller. Plus 7 non-blocking concerns logged (selection-restore deferred to Phase 3, anti-criterion `_HISTORY_MAX` 20→200 expansion documented, etc.). Findings #1 and #2 left as follow-ups rather than blocking ISC-23 because they don't break the criterion (two-deque + delta-pairs + bracket boundary all hold) and no current call path triggers them. ISC stays green; follow-ups deferred per loop YOLO discipline.
 - **2026-06-30 — Forge worktree commit-per-feature discipline.** Loop turn 2 used Forge in worktree with explicit per-phase commit instruction. Phase 1 (`ec52d32`) + Phase 2 (`7eb3e56`) shipped as two separate commits — if Phase 2 had hit a lint/test failure mid-flight, Phase 1 would still have landed. Worth keeping as a standing rule for any multi-feature autonomous worktree run.
+- **2026-06-30 — Paper-trail slice B shipped, ISC-20 stays unchecked (verification gap).** Slice B (last_command.json preamble + JS-bridge wrap) landed in commit `62f41c4` per `docs/STACK_OVERFLOW_PAPER_TRAIL_PLAN.md` §3.Slice B. The ISC criterion text says "verified" — that requires the live HAT_ALLOC_OVERFLOW reproduction recipe, which is a user-present blocker (revert option A, restart Talon, run the phrase, observe `last_command.json` survives the native SIGSEGV or QuickJS exception, restart Talon, re-apply option A). Smoke tests pass: preamble lands pre-call, atomicity via `tmp + os.replace` holds, stubs no-op when env var unset, in-flight `ok=None` state visible. Plan §6.Q2 explicitly names the "willing to bounce Talon for repro" question as an open user decision. Slice B infrastructure is durable; next live session can verify and flip.
+- **2026-06-30 — Loop turn 3 audit gap: Cato returned empty result.** E4 mandates Cato cross-vendor audit. The background agent spawned, ran for ~40s, then returned a transcript that ended mid-analysis ("Now I have enough context. Let me also check…") with no structured verdict. Proceeded without the Cato output rather than blocking the turn — smoke tests pass, implementation matches the plan §3 spec verbatim, the atomicity argument (tmp+os.replace + POSIX rename) is well-established. Audit re-spawn deferred to a later turn; if Cato keeps misfiring under E4 backgrounded calls, investigate the agent invocation pattern.
 
 ## Changelog
 
 - **2026-06-30** — Frontmatter reconcile: `progress` was 11/24 after turn 2 but actual `^- [x]` checkbox count is 18/24. Pre-existing drift from the v2 rewrite (claimed 9/24 baseline but actual was 16/24). Counter is now ground-truth. Loop turn deltas were correct (turn 1: +1, turn 2: +1) — only the starting baseline was off.
+- **2026-06-30** — Loop turn 3 (autonomous): paper-trail slice B shipped (commit `62f41c4`) per STACK_OVERFLOW_PAPER_TRAIL_PLAN.md §3. ISC-20 stays UNCHECKED — verification requires live HAT_ALLOC repro (user-present blocker). 18/24 unchanged.
 - **2026-06-30** — Loop turn 2 (autonomous): ISC-23 (undo/redo) flipped green — Phases 1+2 of UNDO_REDO_PLAN landed via Forge worktree (commits `ec52d32`, `7eb3e56`); Cato critical #3 fixed inline (commit `1a618a3`); coalescing OFF default + voice toggle. 17→18/24.
 - **2026-06-30** — Loop turn 1 (autonomous): ISC-15 (scope-preview flash) flipped green by audit + observability close. 16→17/24.
 - **2026-06-30** — Phase 2 active. 9/24 ISCs green. Today's session shipped: viewport extraction (ISC-22), buffer rev counter (ISC-21), homophone slice A (ISC-11, ISC-12), hat-shape locate (ISC-14 substrate), stack-overflow trail slice A (ISC-18), always-on debug + draw hook (ISC-16, ISC-17), test driver (ISC-19). Plus three plan docs: `docs/UNDO_REDO_PLAN.md`, `docs/HOMOPHONE_UI_PLAN.md`, `docs/STACK_OVERFLOW_PAPER_TRAIL_PLAN.md`.

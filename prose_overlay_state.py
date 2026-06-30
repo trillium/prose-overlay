@@ -67,6 +67,13 @@ def compute_hat_assignments(
             for ci, ch in enumerate(token)
             if ch.lower().isalpha()
         ]
+        if not candidates and token:
+            # Non-letter token (digits like "123", pure punctuation like "!").
+            # Paint a hat anyway so the user can SEE the token. Addressability
+            # for digits/punct is a separate future slice — `<user.letter>`
+            # currently only binds a-z, so "take 1" won't bind today, but the
+            # visible hat is the load-bearing signal that the token exists.
+            candidates = [(0, token[0].lower())]
         if not candidates:
             continue
 

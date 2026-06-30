@@ -20,6 +20,7 @@ from .prose_overlay_cursorless_resolve import (
 from .prose_overlay_instance import instance
 from .prose_overlay_actions_core import _recompute_hats, _sync_tags, _hat_to_index
 from . import prose_overlay_trail  # noqa: F401
+from . import prose_overlay_test_driver  # noqa: F401
 
 mod = Module()
 

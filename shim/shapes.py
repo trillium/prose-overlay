@@ -335,17 +335,21 @@ def draw_hat_shape(
     cy: float,
     scale: float = 0.75,
     alpha: int = 255,
+    outline: str | None = None,
 ) -> None:
     """Paint one hat shape centered at (cx, cy) on Skia canvas c.
 
     Two-pass FILL+STROKE compositing per mouse-clock/src/features/clock_letters/
     shapes.py:114-126:
       1. FILL in `color`
-      2. STROKE in black at 0.5 px for readability on varied backgrounds
+      2. STROKE in `outline` at 0.5 px (defaults to `color` itself — same hue
+         as the fill, so the shape reads as a single-color glyph; pass an
+         explicit contrasting outline like "000000" if you want the classic
+         mouse-clock dark-outline look)
 
-    color must be a 6-char hex (no alpha) — alpha is composited from the
-    `alpha` argument (0-255). If `shape_name` is not in HAT_SHAPES or the
-    Skia cache is unavailable, this is a silent no-op.
+    color and outline must be 6-char hex (no alpha) — alpha is composited
+    from the `alpha` argument (0-255). If `shape_name` is not in HAT_SHAPES
+    or the Skia cache is unavailable, this is a silent no-op.
     """
     cache = _get_shape_path_cache()
     if cache.get("__skia_unavailable__"):
@@ -361,8 +365,10 @@ def draw_hat_shape(
     # Clamp alpha to 0..255 and format as 2-char hex.
     a = max(0, min(255, int(alpha)))
     alpha_hex = f"{a:02x}"
-    fill_color = (color[:6] if len(color) >= 6 else "999999") + alpha_hex
-    outline_color = "000000" + alpha_hex
+    fill_hex = color[:6] if len(color) >= 6 else "999999"
+    outline_hex = outline[:6] if (outline is not None and len(outline) >= 6) else fill_hex
+    fill_color = fill_hex + alpha_hex
+    outline_color = outline_hex + alpha_hex
 
     draw_x = cx - _SVG_W * scale / 2
     draw_y = cy - _SVG_H * scale / 2
@@ -379,5 +385,12 @@ def draw_hat_shape(
     c.paint.stroke_width = 0.5
     c.paint.color = outline_color
     c.draw_path(path)
+
+    # Reset paint.style to FILL before returning. c.save()/c.restore() saves
+    # matrix + clip but NOT the paint object's state — so the STROKE style
+    # we just set would leak into the next draw_text call, painting the
+    # token glyphs as thin outlined strokes instead of solid fills.
+    # Symptom: tokens look "black" / outlined after a shape paints above them.
+    c.paint.style = Paint.Style.FILL
 
     c.restore()

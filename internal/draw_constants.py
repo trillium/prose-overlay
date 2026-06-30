@@ -37,13 +37,15 @@ HELP_TITLE_COLOR = "66aaccee"
 HOMOPHONE_UNDERLINE_COLOR = "ffb74dee"      # amber, ~93% alpha
 HOMOPHONE_UNDERLINE_HEIGHT = 1.5             # px — visible at standard DPI
 
-# Homophone-shape paint — Slice 1 of docs/HOMOPHONE_SHAPES_PLAN.md. Hat-shape
-# (Cursorless vocab: bolt/frame/eye/…) painted above the existing letter-hat
-# dot on flagged tokens. 0.75 matches mouse-clock's default cursor-letter
-# scale; "gray" maps to HAT_COLOR_HEX["gray"] inside the draw call so we
-# don't carry a hex literal here.
+# Homophone-shape paint — Slice 1+2 of docs/HOMOPHONE_SHAPES_PLAN.md. Hat-shape
+# (Cursorless vocab: bolt/frame/eye/…) painted on flagged tokens, positioned
+# on a DIFFERENT character than the letter-hat dot so both can coexist.
+# 0.75 matches mouse-clock's default cursor-letter scale. Color matches the
+# homophone underline exactly so the two indicators read as a single visual
+# signal — same amber for both render layers.
 HOMOPHONE_SHAPE_SCALE = 0.75
-HOMOPHONE_SHAPE_DEFAULT_COLOR = "gray"
+HOMOPHONE_SHAPE_COLOR_HEX = "ffb74d"        # amber base (no alpha) — matches HOMOPHONE_UNDERLINE_COLOR
+HOMOPHONE_SHAPE_OUTLINE_HEX = "ffb74d"      # same amber for the stroke — no contrasting black outline
 
 # Hat dot colors — matches Cursorless palette
 HAT_COLOR_HEX: dict[str, str] = {

@@ -19,7 +19,7 @@ from ..internal.draw_constants import (
     CURSOR_COLOR_NAVIGATE, CURSOR_COLOR_CHANGE,
     CURSOR_WIDTH, CURSOR_CHANGE_ZONE_WIDTH, CURSOR_CHANGE_ZONE_ALPHA,
     HOMOPHONE_UNDERLINE_COLOR, HOMOPHONE_UNDERLINE_HEIGHT,
-    HOMOPHONE_SHAPE_SCALE, HOMOPHONE_SHAPE_DEFAULT_COLOR,
+    HOMOPHONE_SHAPE_SCALE, HOMOPHONE_SHAPE_COLOR_HEX,
 )
 from ..shim import shapes as _shapes
 from ..internal.instance import instance as _instance
@@ -200,13 +200,10 @@ def _draw_token_rows(
                 shape_char_rect = c.paint.measure_text(shape_target_char)[1]
                 shape_cx = x + shape_prefix_w + shape_char_rect.width / 2
                 shape_cy = y_base + DOT_RADIUS
-                shape_color_hex = HAT_COLOR_HEX.get(
-                    HOMOPHONE_SHAPE_DEFAULT_COLOR, HAT_COLOR,
-                )
                 _shapes.draw_hat_shape(
                     c,
                     shape_name=shape_name,
-                    color=shape_color_hex,
+                    color=HOMOPHONE_SHAPE_COLOR_HEX,
                     cx=shape_cx,
                     cy=shape_cy,
                     scale=HOMOPHONE_SHAPE_SCALE,

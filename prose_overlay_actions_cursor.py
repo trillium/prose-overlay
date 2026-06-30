@@ -64,11 +64,17 @@ def _viewport_cursor_row():
     return viewport, viewport._find_cursor_row(viewport._last_rows, instance.cursor)
 
 
-def _auto_scroll_to_cursor():
+_STRATEGY_TO_ALIGN = {"start": "top", "center": "center", "end": "bottom"}
+
+
+def _auto_scroll_to_cursor(strategy: str = "nearest") -> None:
     """Snap the scroll viewport to keep the cursor row visible.
 
-    Reads the cached row layout from the last draw and adjusts the viewport
-    scroll offset so the next frame shows the cursor.
+    Strategy in {'nearest', 'start', 'end', 'center'} (CodeMirror semantics):
+      - 'nearest': minimal scroll to make cursor row visible (default).
+      - 'start':   align cursor row to viewport top.
+      - 'end':     align cursor row to viewport bottom.
+      - 'center':  center cursor row in viewport.
     """
     viewport = instance.viewport
     if viewport is None:
@@ -76,11 +82,20 @@ def _auto_scroll_to_cursor():
     cached_rows = viewport._last_rows
     if not cached_rows:
         return
-    max_vis = viewport.get_max_visible_rows()
-    new_offset = viewport.compute_scroll_for_cursor(
-        cached_rows, instance.cursor, viewport.get_scroll_offset(), max_vis
-    )
-    viewport.set_scroll_offset(new_offset)
+    if strategy == "nearest":
+        max_vis = viewport.get_max_visible_rows()
+        new_offset = viewport.compute_scroll_for_cursor(
+            cached_rows, instance.cursor, viewport.get_scroll_offset(), max_vis
+        )
+        viewport.set_scroll_offset(new_offset)
+        return
+    align_where = _STRATEGY_TO_ALIGN.get(strategy)
+    if align_where is None:
+        return
+    row = viewport._find_cursor_row(cached_rows, instance.cursor)
+    if row is None:
+        return
+    viewport.align(row, align_where)
 
 
 # ---------------------------------------------------------------------------
@@ -122,13 +137,13 @@ class Actions:
     def prose_overlay_cursor_start():
         """Move cursor to before the first token (pre file)."""
         _prose_overlay_set_cursor(0)
-        _auto_scroll_to_cursor()
+        _auto_scroll_to_cursor(strategy="start")
         instance.canvas.refresh()
 
     def prose_overlay_cursor_end():
         """Move cursor to after the last token (post file)."""
         _prose_overlay_set_cursor(len(instance.buffer))
-        _auto_scroll_to_cursor()
+        _auto_scroll_to_cursor(strategy="end")
         instance.canvas.refresh()
 
     def prose_overlay_change_hat(letter: str, color: str = "gray"):

@@ -102,16 +102,20 @@ prose_overlay_actions_cursor.py
     M 114:4 Actions.prose_overlay_get_blink_on - A (1)
     M 118:4 Actions.prose_overlay_cursor_start - A (1)
     M 124:4 Actions.prose_overlay_cursor_end - A (1)
+prose_overlay_actions_cursorless_edit.py
+    F 112:0 _apply_edit_plan - B (6)
+    F 62:0 _cursor_to_char - A (4)
+    F 85:0 _apply_one_edit - A (4)
+    F 99:0 _selection_to_gap - A (4)
+    F 18:0 _po_matcher_misfire - A (3)
+    F 48:0 _token_char_range - A (3)
+    F 77:0 _edit_start - A (3)
 prose_overlay_actions_cursorless.py
-    F 108:0 _apply_edit_plan - C (12)
-    C 200:0 Actions - A (5)
-    M 201:4 Actions.prose_overlay_run_action - A (5)
-    M 384:4 Actions.prose_overlay_bring_move - A (5)
-    F 79:0 _cursor_to_char - A (4)
-    M 271:4 Actions.prose_overlay_run_action_range - A (4)
-    M 323:4 Actions.prose_overlay_apply_formatter - A (4)
-    F 45:0 _po_matcher_misfire - A (3)
-    F 94:0 _token_char_range - A (3)
+    C 33:0 Actions - A (5)
+    M 34:4 Actions.prose_overlay_run_action - A (5)
+    M 161:4 Actions.prose_overlay_bring_move - A (5)
+    M 85:4 Actions.prose_overlay_run_action_range - A (4)
+    M 119:4 Actions.prose_overlay_apply_formatter - A (4)
 prose_overlay_actions_delete.py
     C 23:0 Actions - A (3)
     M 24:4 Actions.prose_overlay_delete_hat - A (2)
@@ -193,15 +197,22 @@ prose_overlay_canvas.py
     M 57:4 OverlayCanvas.refresh - A (1)
     M 61:4 OverlayCanvas.hide - A (1)
 prose_overlay_cursorless_resolve.py
-    F 256:0 _resolve_primitive_to_token_range - E (31)
-    F 399:0 _resolve_target_to_token_range - C (19)
-    F 166:0 _resolve_surrounding_pair - C (17)
-    F 100:0 _char_range_to_token_range - B (7)
-    F 143:0 _cursor_gap_to_char_offset - A (3)
-    F 153:0 _token_idx_to_char_offset - A (2)
-    C 21:0 _ResolveState - A (2)
-    F 244:0 _cursorless_symbol_to_token_index - A (1)
-    M 33:4 _ResolveState.__init__ - A (1)
+    F 223:0 _resolve_target_to_token_range - C (11)
+    F 171:0 _resolve_primitive_to_token_range - B (7)
+    F 196:0 _resolve_range_target - B (7)
+    F 60:0 _resolve_mark_to_base_idx - B (6)
+    F 128:0 _scope_regex - B (6)
+    F 146:0 _apply_containing_scope - A (5)
+    F 87:0 _apply_extend_through_start_of - A (3)
+    F 96:0 _apply_extend_through_end_of - A (3)
+    F 109:0 _scope_word - A (3)
+    F 119:0 _scope_surrounding_pair - A (3)
+    F 81:0 _cursor_fallback_idx - A (2)
+    F 214:0 _resolve_implicit_target - A (2)
+    C 17:0 _ResolveState - A (2)
+    F 52:0 _cursorless_symbol_to_token_index - A (1)
+    F 105:0 _apply_every_scope - A (1)
+    M 23:4 _ResolveState.__init__ - A (1)
 prose_overlay_debug.py
     F 51:0 emit_if_changed - B (8)
     F 23:0 set_debug_mode - A (2)
@@ -253,6 +264,11 @@ prose_overlay_state.py
     M 234:4 ProseBuffer.clear - A (1)
     M 240:4 ProseBuffer.__len__ - A (1)
     M 243:4 ProseBuffer.__bool__ - A (1)
+prose_overlay_surrounding_pair.py
+    F 84:0 _resolve_surrounding_pair - C (17)
+    F 32:0 _char_range_to_token_range - B (7)
+    F 57:0 _cursor_gap_to_char_offset - A (3)
+    F 67:0 _token_idx_to_char_offset - A (2)
 prose_overlay_targets_js.py
     F 175:0 resolve_target - C (12)
     F 87:0 _target_to_json - B (9)
@@ -270,8 +286,8 @@ prose_overlay.py
     F 71:0 prose_hat_color - A (1)
     M 150:4 _OverlayActiveActions.insert_formatted - A (1)
 
-168 blocks (classes, functions, methods) analyzed.
-Average complexity: A (3.1785714285714284)
+182 blocks (classes, functions, methods) analyzed.
+Average complexity: A (3.010989010989011)
 ```
 
 ## radon — maintainability index (MI)
@@ -280,7 +296,8 @@ Average complexity: A (3.1785714285714284)
 prose_overlay_actions_bring_move.py - A (75.58)
 prose_overlay_actions_core.py - A (87.99)
 prose_overlay_actions_cursor.py - A (60.35)
-prose_overlay_actions_cursorless.py - A (52.83)
+prose_overlay_actions_cursorless_edit.py - A (64.23)
+prose_overlay_actions_cursorless.py - A (57.18)
 prose_overlay_actions_delete.py - A (78.29)
 prose_overlay_actions_flash.py - A (82.67)
 prose_overlay_actions_help.py - A (75.52)
@@ -290,7 +307,7 @@ prose_overlay_actions_layout.py - A (71.90)
 prose_overlay_actions_target.py - A (92.22)
 prose_overlay_actions_visibility.py - A (68.94)
 prose_overlay_canvas.py - A (74.42)
-prose_overlay_cursorless_resolve.py - A (43.48)
+prose_overlay_cursorless_resolve.py - A (34.98)
 prose_overlay_debug.py - A (75.69)
 prose_overlay_draw_constants.py - A (81.00)
 prose_overlay_draw_tokens.py - A (56.76)
@@ -300,25 +317,14 @@ prose_overlay_help.py - A (56.36)
 prose_overlay_history_panel.py - A (60.11)
 prose_overlay_instance.py - A (100.00)
 prose_overlay_state.py - A (56.82)
-prose_overlay_targets_js.py - A (61.99)
+prose_overlay_surrounding_pair.py - A (63.79)
+prose_overlay_targets_js.py - A (61.91)
 prose_overlay.py - A (100.00)
 ```
 
 ## radon — raw LOC stats
 
 ```
-    - Comment Stats
-        (C % L): 13%
-        (C % S): 21%
-        (C + M % L): 20%
-prose_overlay_hats_js.py
-    LOC: 105
-    LLOC: 46
-    SLOC: 56
-    Comments: 14
-    Single comments: 13
-    Multi: 19
-    Blank: 17
     - Comment Stats
         (C % L): 13%
         (C % S): 25%
@@ -371,9 +377,21 @@ prose_overlay_state.py
         (C % L): 8%
         (C % S): 16%
         (C + M % L): 26%
+prose_overlay_surrounding_pair.py
+    LOC: 159
+    LLOC: 84
+    SLOC: 86
+    Comments: 22
+    Single comments: 20
+    Multi: 25
+    Blank: 28
+    - Comment Stats
+        (C % L): 14%
+        (C % S): 26%
+        (C + M % L): 30%
 prose_overlay_targets_js.py
     LOC: 244
-    LLOC: 112
+    LLOC: 113
     SLOC: 139
     Comments: 26
     Single comments: 25
@@ -396,21 +414,20 @@ prose_overlay.py
         (C % S): 34%
         (C + M % L): 28%
 ** Total **
-    LOC: 3996
-    LLOC: 2110
-    SLOC: 2343
-    Comments: 435
-    Single comments: 435
-    Multi: 518
-    Blank: 700
+    LOC: 3829
+    LLOC: 2129
+    SLOC: 2331
+    Comments: 354
+    Single comments: 377
+    Multi: 448
+    Blank: 673
     - Comment Stats
-        (C % L): 11%
-        (C % S): 19%
-        (C + M % L): 24%
+        (C % L): 9%
+        (C % S): 15%
+        (C + M % L): 21%
 ```
 
 ## vulture — dead code (confidence ≥ 70%)
 
 ```
-prose_overlay.py:158: unused variable 'auto_cap' (100% confidence)
 ```

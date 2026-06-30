@@ -363,8 +363,16 @@ def compute_shape_assignments(
     flagged,
     rev: int,
     prior: "dict[int, str] | None" = None,
+    group_id_for_word_fn=None,
 ) -> dict[int, str]:
     """Return ``token_idx -> shape_name`` for the currently flagged tokens.
+
+    ISC-14c semantics (HOMOPHONE_SHAPES_PLAN §3 Slice 3): tokens that
+    share a homophone group wear the SAME shape. If `there`, `their`,
+    `they're` all appear in the buffer, they all get (e.g.) `bolt` —
+    the user learns the group by its glyph instead of having to track
+    a different shape per occurrence. The 10-shape pool now bounds the
+    number of distinct GROUPS visible, not the number of flagged tokens.
 
     Parameters:
         tokens: ordered sequence of buffer tokens (list[str] or tuple[str, ...])
@@ -372,14 +380,26 @@ def compute_shape_assignments(
         rev: buffer rev counter — included in the memoization key so the
              cache invalidates on every buffer mutation
         prior: previous assignment dict (typically ``instance.shape_assignments``
-               from the last allocator run); shapes for indices still in the
-               flagged set are preserved across calls
+               from the last allocator run); the prior shape for any token
+               in a group is preserved as that group's shape on the next
+               call, even if that specific token-idx was removed.
+        group_id_for_word_fn: pluggable lookup — given a token, returns a
+               stable group ID (int) or None. Lazy default: imports
+               ``internal.homophones.group_id_for_word``. Dependency-
+               injected so headless tests can pass a fake without
+               touching the real CSV.
 
-    Stability strategy (see module-level comment):
-      Pass 1 keeps prior assignments where the prior shape is still in
-      HAT_SHAPES and the index is still flagged. Pass 2 fills the remaining
-      flagged indices from the pool of unused shapes. If the pool exhausts,
-      the overflow indices are omitted — the caller falls back to underline.
+    Stability strategy:
+      Pass 1 walks `prior` and harvests one (group_id → shape) mapping
+        per still-flagged group, keeping the earliest-indexed prior token
+        that's still flagged as the carryover. Skips prior shapes already
+        claimed by another group (defensive — shouldn't happen).
+      Pass 2 walks currently-flagged groups in sorted-by-min-index order
+        and allocates from the unused-shape pool to any group still
+        without a shape. Pool exhaustion → the remaining groups (and
+        their tokens) are omitted; caller falls back to underline.
+      Pass 3 expands group→shape to token→shape — every flagged token
+        whose group got a shape receives that shape.
 
     Memoization: keyed on ``(rev, frozenset(flagged), tokens-at-flagged)``;
     repeated calls with identical inputs return the same dict reference.
@@ -401,35 +421,76 @@ def compute_shape_assignments(
     if cached is not None:
         return cached
 
-    prior_map: dict[int, str] = prior or {}
-    result: dict[int, str] = {}
-    used_shapes: set[str] = set()
+    # Resolve group_id_for_word lazily — internal.homophones loads the CSV
+    # at import time and isn't import-safe in headless tests that haven't
+    # set up the package path. The DI parameter lets tests pass a fake.
+    if group_id_for_word_fn is None:
+        try:
+            from ..internal.homophones import group_id_for_word as _gid
+        except ImportError:
+            # Relative import failed (headless harness loads this file via
+            # spec_from_file_location, bypassing the parent package). The
+            # test driver is responsible for injecting a real fn.
+            _gid = None  # type: ignore[assignment]
+        if _gid is None:
+            raise RuntimeError(
+                "compute_shape_assignments: pass group_id_for_word_fn "
+                "when invoked outside the prose-overlay package"
+            )
+        group_id_for_word_fn = _gid
 
-    # Pass 1 — keep prior assignments that are still valid.
+    prior_map: dict[int, str] = prior or {}
+
+    # Cluster flagged token indices by group id. Tokens whose group id is
+    # None (defensive — `flagged` should already be in sync with `is_flagged`)
+    # are dropped silently — the caller's underline path still paints them.
+    gid_to_indices: dict[int, list[int]] = {}
     for idx in sorted_flagged:
-        if idx in prior_map:
+        if not (0 <= idx < len(tokens)):
+            continue
+        gid = group_id_for_word_fn(tokens[idx])
+        if gid is None:
+            continue
+        gid_to_indices.setdefault(gid, []).append(idx)
+
+    # Pass 1 — harvest one prior (group → shape) mapping per group.
+    gid_to_shape: dict[int, str] = {}
+    used_shapes: set[str] = set()
+    for gid, indices in gid_to_indices.items():
+        for idx in indices:  # already sorted, earliest token wins
+            if idx not in prior_map:
+                continue
             prior_shape = prior_map[idx]
             if prior_shape in HAT_SHAPES and prior_shape not in used_shapes:
-                result[idx] = prior_shape
+                gid_to_shape[gid] = prior_shape
                 used_shapes.add(prior_shape)
+                break
 
-    # Pass 2 — assign shapes to newly-flagged indices from the unused pool.
-    # Iteration over HAT_SHAPES preserves the canonical pool order; the
-    # first not-yet-used shape goes to the lowest unassigned flagged index.
+    # Pass 2 — assign shapes to groups without a prior, walking by the
+    # group's earliest-flagged token index so that allocation is stable
+    # across edits that don't change the relative order of groups.
+    gids_by_first_idx = sorted(
+        gid_to_indices.keys(), key=lambda g: gid_to_indices[g][0]
+    )
     unused_iter = iter(s for s in HAT_SHAPES if s not in used_shapes)
-    for idx in sorted_flagged:
-        if idx in result:
+    for gid in gids_by_first_idx:
+        if gid in gid_to_shape:
             continue
         try:
-            result[idx] = next(unused_iter)
+            gid_to_shape[gid] = next(unused_iter)
         except StopIteration:
-            # Pool exhausted — overflow. Omit this and remaining indices
-            # per HOMOPHONE_SHAPES_PLAN.md §4.8 (caller falls back to
-            # underline, which already paints unconditionally on flagged
-            # tokens). Break (rather than continue) so the omitted set is
-            # the contiguous tail of the sorted flagged list, which is
-            # documented and testable behavior.
+            # Pool exhausted — the remaining groups (and all their tokens)
+            # get no shape. Caller's underline path still paints them per
+            # HOMOPHONE_SHAPES_PLAN §4.8. Break so the omitted set is the
+            # contiguous tail of `gids_by_first_idx`, mirroring the
+            # documented per-token overflow tail from Slice 2.
             break
+
+    # Pass 3 — expand group → shape to token → shape.
+    result: dict[int, str] = {}
+    for gid, shape in gid_to_shape.items():
+        for idx in gid_to_indices[gid]:
+            result[idx] = shape
 
     # Bounded cache — drop oldest entry if at limit. Insertion order is
     # preserved by Python's dict so the FIRST key is the oldest.

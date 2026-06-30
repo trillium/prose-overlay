@@ -409,7 +409,10 @@ def run_layer_1() -> None:
 
     with test("L1", "L1.24", "compute_shape_assignments: single flagged token gets one shape from HAT_SHAPES"):
         shapes_mod._clear_shape_cache()
-        r = shapes_mod.compute_shape_assignments(["there"], frozenset({0}), rev=1)
+        r = shapes_mod.compute_shape_assignments(
+            ["there"], frozenset({0}), rev=1,
+            group_id_for_word_fn=lambda t: 0,
+        )
         assert 0 in r, f"expected idx 0 in result; got {r}"
         assert r[0] in shapes_mod.HAT_SHAPES, (
             f"shape {r[0]!r} not in HAT_SHAPES {shapes_mod.HAT_SHAPES}"
@@ -417,11 +420,16 @@ def run_layer_1() -> None:
 
     with test("L1", "L1.25", "compute_shape_assignments: memoization returns same dict reference"):
         shapes_mod._clear_shape_cache()
+        # Different groups so each gets its own shape (memoization is keyed
+        # on inputs, not on group structure).
+        gid = lambda t: 0 if t == "there" else 1
         r1 = shapes_mod.compute_shape_assignments(
             ["there", "their"], frozenset({0, 1}), rev=1,
+            group_id_for_word_fn=gid,
         )
         r2 = shapes_mod.compute_shape_assignments(
             ["there", "their"], frozenset({0, 1}), rev=1,
+            group_id_for_word_fn=gid,
         )
         assert r1 == r2, f"identical inputs should equal: {r1} vs {r2}"
         # Memoization: identical inputs must return the SAME dict reference
@@ -431,42 +439,81 @@ def run_layer_1() -> None:
             f"got two different dicts: id={id(r1)} vs id={id(r2)}"
         )
 
-    with test("L1", "L1.26", "compute_shape_assignments: prior assignment survives a new flag"):
+    with test("L1", "L1.26", "compute_shape_assignments (ISC-14c): same-group tokens share their group's prior shape"):
         shapes_mod._clear_shape_cache()
-        # idx 0 was assigned 'wing' on the previous allocator run. When idx
-        # 1 joins the flagged set, idx 0 should KEEP 'wing' and idx 1 should
-        # be allocated from the pool of unused shapes (i.e. not 'wing').
+        # idx 0 ("there", group 0) was assigned 'wing' on the previous run.
+        # On the next run idx 1 ("their", same group 0) joins the flagged
+        # set — under ISC-14c, both tokens belong to the SAME group, so
+        # idx 1 ALSO gets 'wing'. (Pre-ISC-14c semantics had idx 1 get a
+        # DIFFERENT shape; that's wrong now — group identity drives shape.)
         prior = {0: "wing"}
         r = shapes_mod.compute_shape_assignments(
             ["there", "their"], frozenset({0, 1}), rev=2, prior=prior,
+            group_id_for_word_fn=lambda t: 0,  # both tokens in group 0
         )
         assert r[0] == "wing", (
             f"prior shape 'wing' should survive on idx 0; got {r!r}"
         )
-        assert r[1] != "wing", (
-            f"new flagged idx should not duplicate a used shape; got {r!r}"
-        )
-        assert r[1] in shapes_mod.HAT_SHAPES, (
-            f"new shape {r[1]!r} not in HAT_SHAPES"
+        assert r[1] == "wing", (
+            f"ISC-14c: same-group token idx 1 must share group's shape 'wing'; "
+            f"got {r!r}"
         )
 
-    with test("L1", "L1.27", "compute_shape_assignments: 11 flagged tokens overflows — 11th omitted"):
+    with test("L1", "L1.27", "compute_shape_assignments (ISC-14c): 11 distinct groups overflows — 11th group omitted"):
         shapes_mod._clear_shape_cache()
-        tokens = ["there"] * 11
+        # 11 tokens, each in a UNIQUE group. The 10-shape pool now caps the
+        # number of distinct GROUPS visible — the 11th group's tokens go
+        # without a shape and fall back to the always-on underline.
+        tokens = [f"w{i}" for i in range(11)]
         flagged = frozenset(range(11))
-        r = shapes_mod.compute_shape_assignments(tokens, flagged, rev=1)
-        # Pool has exactly 10 shapes; 11 flagged tokens → exactly 10 entries.
-        assert len(r) == 10, (
-            f"expected 10 shape assignments (pool exhausted at 10); got "
-            f"{len(r)}: {r}"
+        r = shapes_mod.compute_shape_assignments(
+            tokens, flagged, rev=1,
+            group_id_for_word_fn=lambda t: int(t[1:]),  # group_id == idx
         )
-        # The first 10 sorted indices get the shapes; idx 10 (the 11th)
-        # falls into the overflow tail and is omitted per §4.8.
+        assert len(r) == 10, (
+            f"expected 10 shape assignments (pool exhausted at 10 groups); "
+            f"got {len(r)}: {r}"
+        )
         for idx in range(10):
             assert idx in r, f"idx {idx} should be in result; got {sorted(r)}"
         assert 10 not in r, (
-            f"11th idx (10) should be omitted on pool exhaustion; got {r}"
+            f"11th group's token (idx 10) should be omitted on pool exhaustion; "
+            f"got {r}"
         )
+
+    with test("L1", "L1.27a", "compute_shape_assignments (ISC-14c): 11 tokens in ONE group all share one shape — no overflow"):
+        shapes_mod._clear_shape_cache()
+        # Inverse of L1.27 — 11 tokens but ALL in the same group. Under
+        # ISC-14c the pool only sees 1 GROUP, so all 11 tokens get the
+        # same single shape and there's no overflow.
+        tokens = ["there"] * 11
+        flagged = frozenset(range(11))
+        r = shapes_mod.compute_shape_assignments(
+            tokens, flagged, rev=1,
+            group_id_for_word_fn=lambda t: 0,
+        )
+        assert len(r) == 11, (
+            f"ISC-14c: 11 tokens in one group should all be assigned; got {len(r)}: {r}"
+        )
+        shapes_used = set(r.values())
+        assert len(shapes_used) == 1, (
+            f"ISC-14c: all same-group tokens must share ONE shape; got {shapes_used} from {r}"
+        )
+
+    with test("L1", "L1.27b", "compute_shape_assignments (ISC-14c): two groups get two distinct shapes; intra-group sharing"):
+        shapes_mod._clear_shape_cache()
+        # 4 tokens: 2 in group 0 (there/their), 2 in group 1 (your/you're).
+        # Group 0 → one shape, group 1 → a different shape, intra-group
+        # shares.
+        tokens = ["there", "your", "their", "you're"]
+        flagged = frozenset({0, 1, 2, 3})
+        r = shapes_mod.compute_shape_assignments(
+            tokens, flagged, rev=1,
+            group_id_for_word_fn=lambda t: 0 if t in ("there", "their") else 1,
+        )
+        assert r[0] == r[2], f"group-0 tokens (idx 0,2) must share: got {r}"
+        assert r[1] == r[3], f"group-1 tokens (idx 1,3) must share: got {r}"
+        assert r[0] != r[1], f"different groups must have different shapes: got {r}"
 
     with test("L1", "L1.28", "shape_char_position: 'there' letter on idx 1 → shape on idx 2"):
         # Per user requirement: t[h]{e}re — letter-hat on 'h' (idx 1),

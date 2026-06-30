@@ -119,6 +119,19 @@ def _group_index(token: str) -> int | None:
     return _WORD_TO_GROUP.get(_normalize(token))
 
 
+def group_id_for_word(token: str) -> int | None:
+    """Return a stable canonical group ID for `token`, or None if unflagged.
+
+    The ID is the CSV-row index — stable across calls in a single process
+    AND across processes for the same CSV (since the CSV is the source of
+    truth). Used by the shape allocator to cluster tokens-in-the-same-group
+    so they all wear the same glyph (HOMOPHONE_SHAPES_PLAN §3 Slice 3 /
+    ISC-14c) — the user learns the group by its shape, not by per-token
+    randomness.
+    """
+    return _group_index(token)
+
+
 def group_for_word(token: str) -> tuple[str, ...] | None:
     """Return the tuple of group members for a flagged token (CSV row order)
     or None if the token is not a flagged homophone."""

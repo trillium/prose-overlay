@@ -37,6 +37,28 @@ HELP_TITLE_COLOR = "66aaccee"
 HOMOPHONE_UNDERLINE_COLOR = "ffb74dee"      # amber, ~93% alpha
 HOMOPHONE_UNDERLINE_HEIGHT = 1.5             # px — visible at standard DPI
 
+# Slice A of docs/PHONES_SPEC.md — segmented amber underline shows cycle
+# position (Scenario 3). When the flagged token belongs to a multi-member
+# CSV row, the underline splits into N segments (one per row member, in
+# CSV row order). The segment whose position matches the current word's
+# active_idx is rendered taller AND fully opaque; the others stay at the
+# base height with a slightly dimmer alpha so the active position pops.
+#
+# Constants:
+#   GAP_W                — px gap between segments (visual separator).
+#   ACTIVE_HEIGHT        — px height of the highlighted (current) segment.
+#   ACTIVE_ALPHA         — alpha hex for the highlighted segment (full).
+#   INACTIVE_ALPHA       — alpha hex for non-active segments (dimmer).
+#   MIN_SEGMENT_W        — px floor; below this, fall back to solid
+#                          (OQ11 default — solid amber + log hint).
+HOMOPHONE_UNDERLINE_GAP_W = 2
+HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT = 2.5
+HOMOPHONE_UNDERLINE_MIN_SEGMENT_W = 1.5
+# Per OQ12 default: active segment gets BOTH taller height AND full alpha,
+# non-active segments stay at HOMOPHONE_UNDERLINE_HEIGHT with reduced alpha.
+HOMOPHONE_UNDERLINE_ACTIVE_ALPHA = "ff"
+HOMOPHONE_UNDERLINE_INACTIVE_ALPHA = "cc"
+
 # Homophone-shape paint — Slice 1+2 of docs/HOMOPHONE_SHAPES_PLAN.md. Hat-shape
 # (Cursorless vocab: bolt/frame/eye/…) painted on flagged tokens, positioned
 # on a DIFFERENT character than the letter-hat dot so both can coexist.

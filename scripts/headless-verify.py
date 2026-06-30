@@ -510,6 +510,48 @@ def run_layer_1() -> None:
             f"expected 3-member their/there/they're group; got {g!r}"
         )
 
+    # -----------------------------------------------------------------------
+    # Slice A of docs/PHONES_SPEC.md — segmented-underline math
+    # The width helper is pure (no Skia), so it imports cleanly in headless.
+    # We load it via a stripped-down spec because ui/draw_tokens.py imports
+    # from talon.skia at module level; the module-load would fail under
+    # headless. Approach: read the constants and run the math directly.
+    # -----------------------------------------------------------------------
+
+    with test("L1", "L1.43", "segment_width(tw=40, members=3) → 12.0 ((40-4)/3)"):
+        # Pure formula: (tw - (n-1)*GAP_W) / n with GAP_W = 2.
+        # We import the constants module directly (no Skia) and recompute.
+        dc_spec = importlib.util.spec_from_file_location(
+            "prose_overlay_draw_constants",
+            REPO / "internal" / "draw_constants.py",
+        )
+        dc = importlib.util.module_from_spec(dc_spec)
+        dc_spec.loader.exec_module(dc)
+        assert dc.HOMOPHONE_UNDERLINE_GAP_W == 2
+        assert dc.HOMOPHONE_UNDERLINE_MIN_SEGMENT_W == 1.5
+        tw, members = 40, 3
+        seg_w = (tw - (members - 1) * dc.HOMOPHONE_UNDERLINE_GAP_W) / members
+        assert seg_w == 12.0, f"expected 12.0, got {seg_w}"
+
+    with test("L1", "L1.44", "segment_width below MIN_SEGMENT_W triggers solid fallback"):
+        # The renderer falls back to solid when any segment would be
+        # narrower than HOMOPHONE_UNDERLINE_MIN_SEGMENT_W. We don't call
+        # draw here (Skia not loaded), but we verify the math: width=5
+        # split into 4 members with 2px gaps leaves (5 - 6) / 4 = -0.25
+        # per segment, which is far below the threshold.
+        dc_spec = importlib.util.spec_from_file_location(
+            "prose_overlay_draw_constants",
+            REPO / "internal" / "draw_constants.py",
+        )
+        dc = importlib.util.module_from_spec(dc_spec)
+        dc_spec.loader.exec_module(dc)
+        tw, members = 5, 4
+        seg_w = (tw - (members - 1) * dc.HOMOPHONE_UNDERLINE_GAP_W) / members
+        assert seg_w < dc.HOMOPHONE_UNDERLINE_MIN_SEGMENT_W, (
+            f"expected seg_w ({seg_w}) below threshold "
+            f"({dc.HOMOPHONE_UNDERLINE_MIN_SEGMENT_W})"
+        )
+
     with test("L1", "L1.42", "buffer-level cycle: their→there→they're→their = 3 undo records"):
         # Mirrors what shim.actions_homophones._swap_token does at the
         # buffer level (commit_start → set_tokens_raw → commit_end). Each

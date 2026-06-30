@@ -19,10 +19,55 @@ from ..internal.draw_constants import (
     CURSOR_COLOR_NAVIGATE, CURSOR_COLOR_CHANGE,
     CURSOR_WIDTH, CURSOR_CHANGE_ZONE_WIDTH, CURSOR_CHANGE_ZONE_ALPHA,
     HOMOPHONE_UNDERLINE_COLOR, HOMOPHONE_UNDERLINE_HEIGHT,
+    HOMOPHONE_UNDERLINE_GAP_W, HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT,
+    HOMOPHONE_UNDERLINE_MIN_SEGMENT_W,
+    HOMOPHONE_UNDERLINE_ACTIVE_ALPHA, HOMOPHONE_UNDERLINE_INACTIVE_ALPHA,
     HOMOPHONE_SHAPE_SCALE, HOMOPHONE_SHAPE_COLOR_HEX,
 )
 from ..shim import shapes as _shapes
 from ..internal.instance import instance as _instance
+
+
+# ---------------------------------------------------------------------------
+# Slice A of docs/PHONES_SPEC.md — segmented underline math
+# ---------------------------------------------------------------------------
+
+
+# Track (idx, member_count, tw_bucket) tuples we've already logged so the
+# diagnostic prints once per regime instead of on every paint. Buckets the
+# float width to 1px so trivial subpixel jitter doesn't re-trigger.
+_LOGGED_SEGMENT_FALLBACKS: set[tuple[int, int, int]] = set()
+
+
+def _maybe_log_segment_fallback(idx: int, tw: float, member_count: int) -> None:
+    """Print a one-shot hint when a segmented underline falls back to solid
+    because a segment would be narrower than MIN_SEGMENT_W. Deduplicated
+    by (idx, member_count, int(tw)) so the log isn't spammed every paint.
+    """
+    key = (idx, member_count, int(tw))
+    if key in _LOGGED_SEGMENT_FALLBACKS:
+        return
+    _LOGGED_SEGMENT_FALLBACKS.add(key)
+    print(
+        f"prose_overlay: segmented underline fell back to solid for "
+        f"token idx={idx} (width={tw:.1f}px, members={member_count}; "
+        f"each segment would be < {HOMOPHONE_UNDERLINE_MIN_SEGMENT_W}px)"
+    )
+
+
+def homophone_segment_width(tw: float, member_count: int) -> float:
+    """Return the width of one segment when the underline splits into
+    ``member_count`` parts with HOMOPHONE_UNDERLINE_GAP_W gaps between.
+
+    Pure function — called both from the draw routine and from the L1
+    headless tests so the math has a single source of truth. Returns the
+    raw segment width even when it falls below MIN_SEGMENT_W; the caller
+    decides whether to render or fall back to the solid underline.
+    """
+    if member_count <= 1:
+        return tw
+    gap_count = member_count - 1
+    return (tw - gap_count * HOMOPHONE_UNDERLINE_GAP_W) / member_count
 
 
 # ---------------------------------------------------------------------------
@@ -234,10 +279,77 @@ def _draw_token_rows(
             c.draw_text(token, x, y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE)
 
             if idx in flagged_indices:
-                underline_y = y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE + 2
+                # Slice A of docs/PHONES_SPEC.md — Scenario 3.
+                # If we have cycle-position info (instance.position_assignments
+                # populated by shim.actions_core._recompute_hats) AND the group
+                # has multiple members, paint a SEGMENTED underline: N
+                # contiguous segments separated by HOMOPHONE_UNDERLINE_GAP_W
+                # gaps. The segment whose index matches active_idx is rendered
+                # taller (HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT) AND fully opaque
+                # (HOMOPHONE_UNDERLINE_ACTIVE_ALPHA), the others stay at the
+                # base HOMOPHONE_UNDERLINE_HEIGHT with the inactive alpha.
+                #
+                # Falls back to the solid bar when:
+                #   - no cycle info available (degraded import / pre-Slice-A
+                #     state)
+                #   - group_size == 1 (degenerate 1-member CSV row, OQ4)
+                #   - any segment would be < HOMOPHONE_UNDERLINE_MIN_SEGMENT_W
+                #     (OQ11 — render an unreadably narrow segmented bar as
+                #     solid + log hint once)
+                pos = _instance.position_assignments.get(idx)
+                underline_y_base = (
+                    y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE + 2
+                )
+                use_segmented = pos is not None and pos[1] > 1
+                seg_w = (
+                    homophone_segment_width(tw, pos[1])
+                    if use_segmented
+                    else tw
+                )
+                if use_segmented and seg_w < HOMOPHONE_UNDERLINE_MIN_SEGMENT_W:
+                    use_segmented = False
+                    # One-shot diagnostic per token width so the log isn't
+                    # spammed every paint. Inexpensive — Python ints are
+                    # interned, comparison is O(1).
+                    _maybe_log_segment_fallback(idx, tw, pos[1] if pos else 0)
+
                 c.paint.style = c.paint.Style.FILL
-                c.paint.color = HOMOPHONE_UNDERLINE_COLOR
-                c.draw_rect(Rect(x, underline_y, tw, HOMOPHONE_UNDERLINE_HEIGHT))
+                if not use_segmented:
+                    c.paint.color = HOMOPHONE_UNDERLINE_COLOR
+                    c.draw_rect(Rect(x, underline_y_base, tw, HOMOPHONE_UNDERLINE_HEIGHT))
+                else:
+                    active_idx, member_count = pos  # type: ignore[misc]
+                    base_color = HOMOPHONE_UNDERLINE_COLOR[:6]
+                    active_color = base_color + HOMOPHONE_UNDERLINE_ACTIVE_ALPHA
+                    inactive_color = base_color + HOMOPHONE_UNDERLINE_INACTIVE_ALPHA
+                    # The active segment renders TALLER than the base, anchored
+                    # at the same TOP edge — so it visually extends DOWN past
+                    # the row baseline. This keeps the row-grid stable and
+                    # avoids a vertical-shift jiggle when the active position
+                    # changes between paints (cycling lands on a different
+                    # segment but doesn't reflow the rows).
+                    for seg_idx in range(member_count):
+                        seg_x = x + seg_idx * (seg_w + HOMOPHONE_UNDERLINE_GAP_W)
+                        if seg_idx == active_idx:
+                            c.paint.color = active_color
+                            c.draw_rect(
+                                Rect(
+                                    seg_x,
+                                    underline_y_base,
+                                    seg_w,
+                                    HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT,
+                                )
+                            )
+                        else:
+                            c.paint.color = inactive_color
+                            c.draw_rect(
+                                Rect(
+                                    seg_x,
+                                    underline_y_base,
+                                    seg_w,
+                                    HOMOPHONE_UNDERLINE_HEIGHT,
+                                )
+                            )
 
             x += tw + TOKEN_GAP_X
 

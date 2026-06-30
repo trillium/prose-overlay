@@ -11,7 +11,7 @@ _hat_to_token, _buffer, or _cursor change.
 
 import re
 
-from talon import actions  # noqa: F401  (available for future use; kept for symmetry)
+from talon import actions, settings  # noqa: F401  (actions kept for symmetry)
 
 
 # ---------------------------------------------------------------------------
@@ -405,8 +405,24 @@ def _resolve_target_to_token_range(target) -> "list[tuple[int, int]] | None":
     - ListTarget      → list of ranges, one per element
     - ImplicitTarget  → single-element list at cursor position
 
+    When `user.prose_overlay_use_js_resolver` is True, dispatch routes through
+    the JS bundle (cursorless's actual processTargets pipeline) instead of
+    the Python implementation below. On JS error the bridge raises
+    RuntimeError; we log full context and return None — no silent fallback
+    to the Python path (constraint 6 / Anti-3).
+
     Returns None if the target cannot be resolved.
     """
+    if settings.get("user.prose_overlay_use_js_resolver", False):
+        # Lazy import to avoid circular dependency: prose_overlay_targets_js
+        # imports helpers from this module.
+        from . import prose_overlay_targets_js
+        try:
+            return prose_overlay_targets_js.resolve_target(target)
+        except RuntimeError as e:
+            print(f"prose_overlay: JS resolver failed (no fallback): {e}")
+            return None
+
     target_type = target.type  # class attribute, not instance dict
 
     if target_type == "primitive":

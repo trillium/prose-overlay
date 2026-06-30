@@ -53,6 +53,19 @@ mod.setting(
     desc="When true, the overlay panel is sized and positioned to match the target window",
 )
 
+mod.setting(
+    "prose_overlay_use_js_resolver",
+    type=bool,
+    default=False,
+    desc=(
+        "When true, target/scope resolution flows through cursorless's "
+        "processTargets pipeline bundled at js/prose_resolve_targets.js. "
+        "When false (default), the legacy Python resolver in "
+        "prose_overlay_cursorless_resolve.py is used. Toggle for the F5 "
+        "JS-resolver migration; remove the Python path once parity verified."
+    ),
+)
+
 
 @mod.capture(rule="red | blue | green | pink | yellow | purple | plum | gold | black | white")
 def prose_hat_color(m) -> str:

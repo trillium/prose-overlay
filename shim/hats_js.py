@@ -69,7 +69,11 @@ def compute_hat_assignments(
     except Exception as e:
         print(f"prose_overlay: hat JS load failed ({e}), using Python fallback")
         _using_fallback = True
-        return _py_compute_hat_assignments(tokens, cursor_pos=len(tokens) if cursor_pos is None else cursor_pos)
+        return _py_compute_hat_assignments(
+            tokens,
+            cursor_pos=len(tokens) if cursor_pos is None else cursor_pos,
+            old_assignments=old_assignments,
+        )
 
     # Convert old_assignments to the JSON shape the JS function expects
     old_list = []
@@ -97,10 +101,41 @@ def compute_hat_assignments(
         ))
         raw: dict[str, dict] = json.loads(result_json)
         # Convert {"0": {charIdx, letter, color}, ...} -> {0: (charIdx, letter, color), ...}
-        result = {
-            int(k): (v["charIdx"], v["letter"], v["color"])
-            for k, v in raw.items()
-        }
+        # POST-VALIDATE char_idx against the live token text. Cursorless's JS
+        # allocator preserves prior hats by `tokenIdx` and can return a
+        # `charIdx` that referred to the OLD token's letter position — e.g.
+        # "they're" had 'r' at idx 5; after "phones risk" swaps it to
+        # "their", JS may still report charIdx=5 even though 'r' is now at
+        # idx 4. Without this fix the renderer paints the letter dot past
+        # the end of the new word ("hat over nothing"). We search for the
+        # claimed letter in the current token and rewrite charIdx; if the
+        # letter has vanished entirely we drop the assignment so the
+        # downstream collision passes can reassign.
+        result: dict[int, tuple[int, str, str]] = {}
+        for k, v in raw.items():
+            tok_idx = int(k)
+            char_idx = int(v["charIdx"])
+            letter = str(v["letter"]).lower()
+            color = str(v["color"])
+            if tok_idx >= len(tokens):
+                continue
+            token = tokens[tok_idx]
+            in_range = 0 <= char_idx < len(token)
+            matches = in_range and token[char_idx].lower() == letter
+            if matches:
+                result[tok_idx] = (char_idx, letter, color)
+                continue
+            # Hunt for the letter in the new token.
+            fixed_ci = None
+            for ci, ch in enumerate(token):
+                if ch.lower() == letter:
+                    fixed_ci = ci
+                    break
+            if fixed_ci is None:
+                # Letter vanished from this token entirely — drop, let the
+                # next allocator run pick something new for this slot.
+                continue
+            result[tok_idx] = (fixed_ci, letter, color)
         _using_fallback = False
         _trail.end_command(corr_id, ok=True)
         return result
@@ -108,4 +143,8 @@ def compute_hat_assignments(
         _trail.end_command(corr_id, ok=False, err=repr(e))
         print(f"prose_overlay: hat JS call failed ({e}), using Python fallback")
         _using_fallback = True
-        return _py_compute_hat_assignments(tokens, cursor_pos=len(tokens) if cursor_pos is None else cursor_pos)
+        return _py_compute_hat_assignments(
+            tokens,
+            cursor_pos=len(tokens) if cursor_pos is None else cursor_pos,
+            old_assignments=old_assignments,
+        )

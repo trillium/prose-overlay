@@ -141,6 +141,28 @@ def run_layer_1() -> None:
         # After fix: 123 should have a hat.
         assert r[2][1] in {"1"}, f"expected '1' hat letter for '123', got {r[2]!r}"
 
+    with test("L1", "L1.10b", "hat stability: prior letter survives token edit at the SAME letter's new index (phones-swap regression)"):
+        # User repro: token 0 = "they're" with prior hat (5, 'r', 'gray').
+        # `phones risk` swaps it to "their". 'r' is now at idx 4, not 5.
+        # The allocator must keep ('r', 'gray') and rewrite char_idx to 4.
+        # Without this fix the renderer paints the letter dot past the end
+        # of "their" ("hat over nothing").
+        prior = {0: (5, "r", "gray")}
+        r = compute(["their"], old_assignments=prior)
+        assert 0 in r, f"prior 'r' should still hold a slot in 'their'; got {r}"
+        ci, letter, color = r[0]
+        assert letter == "r" and color == "gray", f"prior (letter, color) lost across edit: {r[0]!r}"
+        assert ci == 4, f"char_idx must be repositioned to 'r' in 'their' (idx 4), got {ci}"
+
+    with test("L1", "L1.10c", "hat stability: prior letter VANISHES from new token → allocator picks fresh letter"):
+        # If the swapped word has no 'r' at all, drop the prior cleanly
+        # and let the normal allocator pass pick a different letter.
+        prior = {0: (5, "r", "gray")}
+        r = compute(["foo"], old_assignments=prior)
+        assert 0 in r, f"token should still get SOME hat: {r}"
+        _ci, letter, _color = r[0]
+        assert letter != "r", f"'foo' has no 'r' — prior must be dropped, got {r[0]!r}"
+
     with test("L1", "L1.11", "letter-extend pattern: 'air' then 'bat cap' → one token 'abc'"):
         # Mirrors what prose_overlay_add_letters does at the buffer level:
         # first utterance appends "a"; second utterance (with prior also

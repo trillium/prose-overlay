@@ -29,6 +29,7 @@ _GROUP_DELAY_S: float = 0.0
 def compute_hat_assignments(
     tokens: list[str],
     cursor_pos: int | None = None,
+    old_assignments: dict[int, tuple[int, str, str]] | None = None,
 ) -> dict[int, tuple[int, str, str]]:
     """Assign a unique (letter, color) pair to each token for hat identification.
 
@@ -39,15 +40,25 @@ def compute_hat_assignments(
     Tokens closest to the cursor get first pick of the best hats. Defaults to
     len(tokens) (end of buffer) when None, matching the writing position.
 
+    old_assignments: prior result for stability across edits. When provided,
+    each token's prior (letter, color) is preferred IF the letter is still
+    alpha-present in the new token at SOME char_idx. The char_idx is always
+    recomputed from the new token's text — the prior (5, 'r', 'gray') for
+    "they're" becomes (4, 'r', 'gray') for "their" because 'r' is now at
+    idx 4. This stops the user-visible "phones <shape>" bug where a swap
+    leaves the letter hat painting past the end of the new word.
+
     Algorithm (Cursorless-style color collision resolution):
     1. Process tokens in proximity order from cursor (closest first).
-    2. For each token, iterate its letters left to right.
-    3. For each letter, try colors in HAT_COLOR_PRIORITY order.
-    4. Assign the first (letter, color) combo not already claimed.
-    5. If all combos for all letters are exhausted, the token gets no hat.
+    2. PRE-PASS: if old_assignments present, try to honor prior (letter, color)
+       for the same token_idx — repositioning char_idx in the new token.
+    3. For tokens without an honored prior, iterate letters left to right.
+    4. For each letter, try colors in HAT_COLOR_PRIORITY order.
+    5. Assign the first (letter, color) combo not already claimed.
+    6. If all combos for all letters are exhausted, the token gets no hat.
 
-    This means two tokens can share the same letter but get different colors,
-    matching how Cursorless resolves collisions. "air" = gray-a, "blue air" = blue-a.
+    Two tokens can share the same letter but get different colors, matching
+    how Cursorless resolves collisions. "air" = gray-a, "blue air" = blue-a.
     """
     effective_cursor = cursor_pos if cursor_pos is not None else len(tokens)
 
@@ -59,7 +70,40 @@ def compute_hat_assignments(
     claimed: set[tuple[str, str]] = set()
     assignments: dict[int, tuple[int, str, str]] = {}
 
+    def _find_letter_idx(token: str, letter: str) -> int | None:
+        """Return the first char_idx of `letter` in `token`, or None."""
+        for ci, ch in enumerate(token):
+            if ch.lower() == letter:
+                return ci
+        return None
+
+    # PRE-PASS: honor prior assignments where possible.
+    # Walks priority_order (cursor-closest first) so prior conflicts resolve
+    # in proximity preference rather than first-token-wins.
+    honored: set[int] = set()
+    if old_assignments:
+        for token_idx in priority_order:
+            if token_idx >= len(tokens):
+                continue
+            prior = old_assignments.get(token_idx)
+            if not prior:
+                continue
+            _old_ci, letter, color = prior
+            token = tokens[token_idx]
+            new_ci = _find_letter_idx(token, letter)
+            if new_ci is None:
+                # Prior letter not in new token — drop it, let normal pass handle.
+                continue
+            if (letter, color) in claimed:
+                # Prior (letter, color) taken by a closer token — drop it.
+                continue
+            claimed.add((letter, color))
+            assignments[token_idx] = (new_ci, letter, color)
+            honored.add(token_idx)
+
     for token_idx in priority_order:
+        if token_idx in honored:
+            continue
         token = tokens[token_idx]
         # Build the ordered list of (char_idx, letter) for this token
         candidates = [

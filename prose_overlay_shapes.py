@@ -37,10 +37,14 @@ import xml.etree.ElementTree as ET
 # ---------------------------------------------------------------------------
 # Runtime toggle — mirrors the prose_overlay_homophones._hint_enabled pattern
 # ---------------------------------------------------------------------------
-# Talon doesn't have a public live-setter for module settings, so the voice
-# command `overlay shapes homo on` mutates this flag instead of the static
-# user.prose_overlay_homophone_shapes setting. The draw module ORs both
-# (static setting OR runtime flag) so either path turns shapes on.
+# Talon DOES have a public live-setter (`ctx.settings["user.foo"] = value`
+# on a Context object), but that path is CONTEXT-scoped — the value reverts
+# when the owning context deactivates. These toggles want process-global
+# session semantics (one toggle persists across overlay show/hide cycles),
+# so a module-level flag is the right tool for THIS toggle specifically.
+# The voice command `overlay shapes homo on/off` mutates this flag. The draw
+# module ORs both (static `user.prose_overlay_homophone_shapes` setting OR
+# this runtime flag) so either path turns shapes on.
 # Default ON since 2026-06-30 (user keep verdict — mirrors the slice-A
 # homophone-hint default flip; rationale per memory
 # feedback_overlay_subtle_hints_wrong: must-perceive signals should default

@@ -38,8 +38,11 @@ _FLAGGED: frozenset[str] = _load()
 
 # Live override toggleable by voice via prose_overlay_set_homophone_hint.
 # Read by the draw module instead of (or in addition to) the static
-# user.prose_overlay_homophone_hint setting — Talon doesn't have a public
-# live-setter for module settings, so we keep the toggle here.
+# user.prose_overlay_homophone_hint setting. Talon DOES have a public
+# live-setter (`ctx.settings["user.foo"] = value`), but it's context-scoped
+# and the value reverts when the owning Context deactivates. This toggle
+# wants process-global session semantics (persists across show/hide), so
+# a module-level flag is the right tool for THIS toggle specifically.
 # Default ON per user keep verdict 2026-06-30 (slice A KEEP). Toggle off
 # at runtime via `overlay hints homo off`.
 _hint_enabled: bool = True

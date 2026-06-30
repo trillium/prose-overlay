@@ -278,6 +278,62 @@ def run_layer_1() -> None:
         b.add_text("The Quick Brown Fox")
         assert b.get_tokens() == ["The", "Quick", "Brown", "Fox"], b.get_tokens()
 
+    # -----------------------------------------------------------------------
+    # Homophone shapes (Slice 1 — docs/HOMOPHONE_SHAPES_PLAN.md)
+    # The module imports cleanly without Talon (Skia is lazy-loaded inside
+    # _get_shape_path_cache), so the static vocabulary + asset existence
+    # checks are headless-friendly. The actual paint (draw_hat_shape) is
+    # verify-in-Talon only because Skia rendering needs the live process.
+    # -----------------------------------------------------------------------
+    shapes_spec = importlib.util.spec_from_file_location(
+        "prose_overlay_shapes",
+        REPO / "prose_overlay_shapes.py",
+    )
+    shapes_mod = importlib.util.module_from_spec(shapes_spec)
+    shapes_spec.loader.exec_module(shapes_mod)
+
+    with test("L1", "L1.20", "HAT_SHAPES is a tuple of exactly 10 strings"):
+        assert isinstance(shapes_mod.HAT_SHAPES, tuple), type(shapes_mod.HAT_SHAPES)
+        assert len(shapes_mod.HAT_SHAPES) == 10, len(shapes_mod.HAT_SHAPES)
+        assert all(isinstance(s, str) for s in shapes_mod.HAT_SHAPES), shapes_mod.HAT_SHAPES
+        # 'dot' must NOT be in the pool — the existing letter-hat dot owns
+        # that slot, per plan §3 ("dot is excluded — that's the default
+        # letter-hat shape, not a homophone shape").
+        assert "dot" not in shapes_mod.HAT_SHAPES, "'dot' should NOT be in HAT_SHAPES"
+
+    with test("L1", "L1.21", "shape_pool() returns the same tuple as HAT_SHAPES"):
+        assert shapes_mod.shape_pool() == shapes_mod.HAT_SHAPES, (
+            f"shape_pool diverged from HAT_SHAPES: {shapes_mod.shape_pool()!r} vs "
+            f"{shapes_mod.HAT_SHAPES!r}"
+        )
+
+    with test("L1", "L1.22", "All 10 SVG files for HAT_SHAPES exist in svg/"):
+        # The 'cross' spoken form maps to filename 'crosshairs.svg' per upstream
+        # HAT_NAMES; the loader's _HAT_NAMES dict carries that mapping. We check
+        # by inverting _HAT_NAMES (spoken → stem) and confirming each stem has
+        # a corresponding .svg file on disk.
+        spoken_to_stem = {v: k for k, v in shapes_mod._HAT_NAMES.items()}
+        svg_dir = REPO / "svg"
+        assert svg_dir.is_dir(), f"svg/ dir missing at {svg_dir}"
+        for spoken in shapes_mod.HAT_SHAPES:
+            stem = spoken_to_stem.get(spoken, spoken)
+            f = svg_dir / f"{stem}.svg"
+            assert f.is_file(), f"missing SVG for shape {spoken!r}: expected {f}"
+
+    with test("L1", "L1.23", "_parse_svg_entries returns 10 homophone-shape entries (+ 1 default)"):
+        # Each entry is (stem, spoken_name, d, fill_rule). The parse picks up
+        # all 11 SVGs including 'default'; the homophone subset is the 10
+        # spoken names in HAT_SHAPES.
+        entries = shapes_mod._svg_entries  # populated at import
+        assert len(entries) >= 10, f"expected ≥10 SVG entries, got {len(entries)}"
+        spokens = {e[1] for e in entries}
+        for spoken in shapes_mod.HAT_SHAPES:
+            assert spoken in spokens, f"shape {spoken!r} not in parsed entries {sorted(spokens)}"
+        # And every entry must have non-empty path data — bad SVG would be
+        # an import-time silent skip (logged) but still pass length check.
+        for stem, spoken, d, fill_rule in entries:
+            assert d, f"empty path data for {spoken} ({stem}.svg)"
+
 
 # =============================================================================
 # Layer 2 — JS bundle via bun

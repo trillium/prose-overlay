@@ -114,6 +114,7 @@ class ProseBuffer:
         self._tokens: list[str] = []
         self._history: list[list[str]] = []
         self._selection: tuple[int, int] | None = None  # (start_idx, end_idx) inclusive
+        self.rev: int = 0
 
     # ---------------------------------------------------------------------------
     # Undo stack
@@ -131,6 +132,7 @@ class ProseBuffer:
             return False
         self._tokens = self._history.pop()
         self._selection = None
+        self.rev += 1
         return True
 
     # ---------------------------------------------------------------------------
@@ -159,6 +161,7 @@ class ProseBuffer:
         Trailing punctuation is split off each word into its own token,
         e.g. "hello world." -> ["hello", "world", "."].
         """
+        self.rev += 1
         self.snapshot()
         self._selection = None
         words = text.strip().split()
@@ -171,6 +174,7 @@ class ProseBuffer:
     def delete_token(self, index: int):
         """Delete the token at the given index. No-op if out of range."""
         if 0 <= index < len(self._tokens):
+            self.rev += 1
             self.snapshot()
             self._selection = None
             self._tokens.pop(index)
@@ -183,6 +187,7 @@ class ProseBuffer:
         hat's word and everything after it.
         """
         if 0 <= index < len(self._tokens):
+            self.rev += 1
             self.snapshot()
             self._selection = None
             self._tokens = self._tokens[:index]
@@ -195,6 +200,7 @@ class ProseBuffer:
         the hat's word.
         """
         if 0 <= index < len(self._tokens):
+            self.rev += 1
             self.snapshot()
             self._selection = None
             self._tokens = self._tokens[index + 1:]
@@ -202,6 +208,7 @@ class ProseBuffer:
     def replace_token(self, index: int, text: str):
         """Replace the token at index with the first word of text."""
         if 0 <= index < len(self._tokens):
+            self.rev += 1
             self.snapshot()
             self._selection = None
             words = text.strip().split()
@@ -210,6 +217,7 @@ class ProseBuffer:
 
     def insert_at(self, index: int, text: str):
         """Insert words from text at gap index (0 = before all, N = after all)."""
+        self.rev += 1
         self.snapshot()
         self._selection = None
         words = text.strip().split()
@@ -228,11 +236,13 @@ class ProseBuffer:
 
         Used by _apply_edit_plan, which takes a manual snapshot before calling this.
         """
+        self.rev += 1
         self._tokens = list(tokens)
         self._selection = None
 
     def clear(self):
         """Remove all tokens."""
+        self.rev += 1
         self._tokens.clear()
         self._history.clear()
         self._selection = None

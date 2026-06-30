@@ -157,7 +157,7 @@ class _OverlayActiveActions:
 
 @_ctx_shim.action_class("user")
 class _ShimActions:
-    def dictation_insert(text: str, auto_cap: bool = True):
+    def dictation_insert(text: str):
         """Shim: route dictated text to the prose overlay instead of inserting directly.
 
         Intercepts every path that ends in dictation_insert — community enders,

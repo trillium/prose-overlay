@@ -207,4 +207,10 @@ def draw_overlay(
             c.paint.color = HINT_COLOR
             c.draw_text(_fit_text(c, desc, desc_col_w), hint_pad_x + cmd_col_w, hint_y)
 
+    # Continuous capture — emit on every draw. emit_if_changed dedupes by
+    # snapshot equality so this is a no-op when nothing changed since the
+    # last earlier-stage hook fired (set_cursor, recompute_hats, show, hide).
+    from . import prose_overlay_debug
+    prose_overlay_debug.emit_if_changed("draw")
+
     return panel_rect

@@ -77,6 +77,8 @@ def _snapshot() -> dict:
         "scroll_offset":  instance.viewport.get_scroll_offset(),
         "hints_hidden":   dm._hints_hidden_by_overflow,
         "target_window":  instance.target_window_title,
+        "flash":          list(instance.flash_state.get("indices", [])),
+        "flash_color":    instance.flash_state.get("color", ""),
     }
 
 

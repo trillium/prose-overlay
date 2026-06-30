@@ -439,6 +439,64 @@ def run_layer_1() -> None:
     with test("L1", "L1.31", "shape_char_position: no letter hat (-1) → 0"):
         assert shapes_mod.shape_char_position(letter_char_idx=-1, token_len=5) == 0
 
+    # -----------------------------------------------------------------------
+    # Slice A of docs/PHONES_SPEC.md — group-aware homophone helpers
+    # next_in_group / current_position_in_group drive the cycling swap
+    # and the segmented underline. Both are pure functions over the CSV
+    # so they are fully headless-friendly. We use the canonical
+    # "their,there,they're" and "your,you're" rows; tests assume the live
+    # trillium_talon CSV contains both (verified by L1.16).
+    # -----------------------------------------------------------------------
+
+    with test("L1", "L1.32", "next_in_group('there') → 'they're' (mid-row)"):
+        assert homophones.next_in_group("there") == "they're", (
+            f"expected they're; got {homophones.next_in_group('there')!r}"
+        )
+
+    with test("L1", "L1.33", "next_in_group('they\\'re') → 'their' (wraps)"):
+        assert homophones.next_in_group("they're") == "their", (
+            f"expected their (wrap); got {homophones.next_in_group(chr(0x27).join(['they', 're']))!r}"
+        )
+
+    with test("L1", "L1.34", "next_in_group('your') → 'you\\'re' (3-member, mid-row)"):
+        # CSV row: your,you're,yore — cycling your → you're → yore → your.
+        assert homophones.next_in_group("your") == "you're", (
+            f"expected you're; got {homophones.next_in_group('your')!r}"
+        )
+
+    with test("L1", "L1.35", "next_in_group('not-a-homophone') → None"):
+        assert homophones.next_in_group("not-a-homophone") is None
+
+    with test("L1", "L1.36", "next_in_group ignores trailing punct ('There,' → 'they're')"):
+        # _normalize strips trailing comma + quote, so capitalisation and
+        # surrounding punct don't break the lookup. Matches is_flagged.
+        assert homophones.next_in_group("There,") == "they're", (
+            f"normalisation broke; got {homophones.next_in_group('There,')!r}"
+        )
+
+    with test("L1", "L1.37", "current_position_in_group('there') → (1, 3)"):
+        # "their,there,they're" — 0-indexed: their=0, there=1, they're=2
+        assert homophones.current_position_in_group("there") == (1, 3), (
+            f"expected (1, 3); got "
+            f"{homophones.current_position_in_group('there')!r}"
+        )
+
+    with test("L1", "L1.38", "current_position_in_group('they\\'re') → (2, 3)"):
+        assert homophones.current_position_in_group("they're") == (2, 3)
+
+    with test("L1", "L1.39", "current_position_in_group('your') → (0, 3) (first slot)"):
+        # CSV row: your,you're,yore. Position 0 of 3.
+        assert homophones.current_position_in_group("your") == (0, 3)
+
+    with test("L1", "L1.40", "current_position_in_group('not-a-homophone') → None"):
+        assert homophones.current_position_in_group("not-a-homophone") is None
+
+    with test("L1", "L1.41", "group_for_word('there') → contains all 3 members"):
+        g = homophones.group_for_word("there")
+        assert g is not None and set(g) == {"their", "there", "they're"}, (
+            f"expected 3-member their/there/they're group; got {g!r}"
+        )
+
 
 # =============================================================================
 # Layer 2 — JS bundle via bun

@@ -27,6 +27,7 @@ from .prose_overlay_surrounding_pair import (
     _char_range_to_token_range,
     _cursor_gap_to_char_offset,
 )
+from . import prose_overlay_trail as _trail
 
 
 # ---------------------------------------------------------------------------
@@ -195,12 +196,17 @@ def resolve_target(target) -> "list[tuple[int, int]]":
         "gap": _state.cursor if _state.cursor is not None else -1,
     })
 
+    # Wrapped in begin_command/end_command (paper-trail slice B) so the
+    # preamble is on disk before the risky JS call fires.
+    corr_id = _trail.begin_command("", "resolve_target", {"n_tokens": len(tokens)})
     try:
         # Bundle returns the result JSON string directly. Crossing JS->Python
         # via NewProxy blows QuickJS's call stack (see prose_overlay_hats_js
         # 2026-05-21), so the bundle uses the return-string pattern.
         result_json: str = str(_fn(target_json, doc_json, hat_map_json, cursor_json))
+        _trail.end_command(corr_id, ok=True)
     except Exception as e:
+        _trail.end_command(corr_id, ok=False, err=repr(e))
         raise RuntimeError(
             f"prose JS resolver call raised: target={target_json} "
             f"buffer={tokens!r} error={e!r}"

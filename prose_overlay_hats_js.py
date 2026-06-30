@@ -15,6 +15,7 @@ import os
 import talon.lib.js as js
 
 from .prose_overlay_state import compute_hat_assignments as _py_compute_hat_assignments
+from . import prose_overlay_trail as _trail
 
 # ---------------------------------------------------------------------------
 # Module-level JS context — created once, reused across calls
@@ -84,6 +85,9 @@ def compute_hat_assignments(
     # Call JS — pass everything as JSON strings to avoid Python→JS coercion issues.
     # proseAllocateHats returns the result JSON string directly (no callback / NewProxy):
     # crossing JS→Python via NewProxy blows QuickJS's call stack (confirmed 2026-05-21).
+    # Wrapped in begin_command/end_command (paper-trail slice B) so the
+    # preamble is on disk before the risky JS call fires.
+    corr_id = _trail.begin_command("", "allocate_hats", {"n_tokens": len(tokens)})
     try:
         result_json: str = str(_fn(
             json.dumps(tokens),
@@ -98,8 +102,10 @@ def compute_hat_assignments(
             for k, v in raw.items()
         }
         _using_fallback = False
+        _trail.end_command(corr_id, ok=True)
         return result
     except Exception as e:
+        _trail.end_command(corr_id, ok=False, err=repr(e))
         print(f"prose_overlay: hat JS call failed ({e}), using Python fallback")
         _using_fallback = True
         return _py_compute_hat_assignments(tokens, cursor_pos=len(tokens) if cursor_pos is None else cursor_pos)

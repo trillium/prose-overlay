@@ -1208,12 +1208,764 @@ def run_layer_4() -> None:
         )
 
 
+# =============================================================================
+# Layer 5 — Resolver parity (Python ↔ JS, F9 migration)
+# =============================================================================
+#
+# This layer is the headless contract for ISC-8 / F9 migration. For each row
+# in MANUAL_VERIFICATION.md whose target dict + buffer + expected token range
+# can be expressed without Talon's grammar engine, we construct a fixture,
+# run BOTH resolvers against it, and assert:
+#
+#   python_output == js_output == expected
+#
+# A row failing here means the JS resolver and the Python re-impl diverge,
+# OR one of them diverges from the documented expected behavior — the whole
+# point of the harness is to catch these before live verification. The Python
+# resolver is treated as the parity yardstick (it has shipped in production
+# for weeks) and any disagreement gets surfaced as a test failure, not a
+# silent mask.
+#
+# Rows that require Talon's voice grammar to construct the target dict
+# (e.g. surrounding-pair where the bundle expects cursorless's internal
+# delimiter names rather than the prose-side names, cursor-positioning where
+# the parity is action-level not resolver-level) are NOT included here —
+# those stay live-only, documented in MANUAL_VERIFICATION.md and the FEATURE
+# PARITY doc.
+
+# The standard buffer + hat-letter assignments for all "std" rows in
+# MANUAL_VERIFICATION.md.
+_STD_TOKENS: "list[str]" = ["the", "air", "ball", "drum", "echo"]
+_STD_LETTERS: "list[str]" = ["t", "a", "b", "d", "e"]
+
+
+def _build_hat_map_for_js(
+    tokens: "list[str]", letters: "list[str]", color: str = "default"
+) -> "list[dict]":
+    """Build the JS-bundle hat-map entries — startCol/endCol over ' '.join(tokens)."""
+    entries: "list[dict]" = []
+    pos = 0
+    for i, tok in enumerate(tokens):
+        if i < len(letters) and letters[i]:
+            entries.append({
+                "color": color,
+                "grapheme": letters[i],
+                "startCol": pos,
+                "endCol": pos + len(tok),
+                "text": tok,
+            })
+        pos += len(tok) + 1
+    return entries
+
+
+def _run_js_resolver(
+    target: dict,
+    tokens: "list[str]",
+    hat_entries: "list[dict]",
+    cursor_char: int = 0,
+) -> "list[tuple[int, int]] | None":
+    """Spawn bun, eval the resolver bundle, return list[(first_tok, last_tok)] or None.
+
+    Raises AssertionError if the bundle errors or returns no ranges — the
+    parity harness treats those as failures so the row's [P/F] flips red.
+    """
+    text = " ".join(tokens)
+    payload = {
+        "targetJson": json.dumps(target),
+        "documentJson": json.dumps({
+            "text": text,
+            "cursorAnchorChar": cursor_char,
+            "cursorActiveChar": cursor_char,
+        }),
+        "hatMapJson": json.dumps({"entries": hat_entries}),
+        "cursorJson": json.dumps({"gap": -1}),
+    }
+    bundle = REPO / "js" / "prose_resolve_targets.js"
+    script = f"""
+const code = require('fs').readFileSync('{bundle}', 'utf8');
+eval(code);
+const p = {json.dumps(payload)};
+const out = globalThis.proseResolveTarget(
+  p.targetJson, p.documentJson, p.hatMapJson, p.cursorJson,
+);
+process.stdout.write(out);
+"""
+    tmp = pathlib.Path("/tmp/headless-verify-resolver-probe.js")
+    tmp.write_text(script)
+    proc = subprocess.run(
+        ["bun", str(tmp)], capture_output=True, text=True, timeout=15,
+    )
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"bun exited {proc.returncode}: {proc.stderr.strip()[:300]}"
+        )
+    result = json.loads(proc.stdout)
+    if "error" in result:
+        raise AssertionError(f"JS bundle error: {result['error']!r}")
+    content_ranges = result.get("contentRanges") or []
+    if not content_ranges:
+        raise AssertionError("JS bundle returned no contentRanges")
+    out: "list[tuple[int, int]]" = []
+    for r in content_ranges:
+        char_start = r["start"]["character"]
+        char_end = r["end"]["character"]
+        tr = _char_range_to_token_range(char_start, char_end, tokens)
+        if tr is None:
+            raise AssertionError(
+                f"JS range [{char_start},{char_end}) does not overlap any token "
+                f"in {tokens!r}"
+            )
+        out.append(tr)
+    return out
+
+
+def _char_range_to_token_range(
+    char_start: int, char_end: int, tokens: "list[str]",
+) -> "tuple[int, int] | None":
+    """Local copy of the helper in prose_overlay_surrounding_pair, kept here
+    so Layer 5 can convert JS char ranges to token ranges without importing
+    the package (the SHIM/CURSORLESS modules carry talon-state coupling)."""
+    pos = 0
+    first_tok: "int | None" = None
+    last_tok: "int | None" = None
+    for i, tok in enumerate(tokens):
+        tok_end = pos + len(tok)
+        if tok_end > char_start and pos < char_end:
+            if first_tok is None:
+                first_tok = i
+            last_tok = i
+        pos = tok_end + 1
+    if first_tok is not None and last_tok is not None:
+        return (first_tok, last_tok)
+    return None
+
+
+class _MockBuffer:
+    """Minimal ProseBuffer stand-in — Layer 5 doesn't need the real undo/redo
+    machinery, just a get_tokens() that returns a fixed list."""
+
+    def __init__(self, tokens: "list[str]"):
+        self._tokens = list(tokens)
+
+    def get_tokens(self) -> "list[str]":
+        return list(self._tokens)
+
+
+class _MockTarget:
+    """Duck-typed CursorlessTarget — matches the attribute surface the Python
+    resolver reads (type / mark / modifiers / anchor / active / elements).
+    Lets us feed JSON-shaped fixtures into _resolve_target_to_token_range
+    without invoking Talon's grammar matcher."""
+
+    def __init__(self, **kw):
+        self.type: str = kw["type"]
+        self.mark = kw.get("mark")
+        self.modifiers: "list[dict]" = kw.get("modifiers") or []
+        self.anchor = kw.get("anchor")
+        self.active = kw.get("active")
+        self.elements: "list[_MockTarget]" = kw.get("elements") or []
+
+
+def _load_python_resolver():
+    """Import prose_overlay_cursorless_resolve with a stubbed talon.
+
+    The module does `from .prose_overlay_surrounding_pair import …` (relative)
+    and `from talon import settings` (lazy, inside _resolve_target_to_token_range
+    where it checks the JS-resolver flag). For the parity harness we want the
+    Python path forced ON, so we stub settings.get to return False.
+    """
+    # Stub talon — the resolver does a lazy `from talon import settings` and
+    # checks settings.get("user.prose_overlay_use_js_resolver", False). We
+    # need that to return False so the Python branch runs.
+    #
+    # Layer 3 may have already installed a talon stub for the test-driver,
+    # but without `settings`. Always (re)attach a settings stub so the
+    # lazy import inside _resolve_target_to_token_range succeeds.
+    if "talon" not in sys.modules:
+        sys.modules["talon"] = types.ModuleType("talon")
+
+    class _StubSettings:
+        def get(self, _key, default=False):
+            return default
+
+    # Force the attribute regardless of whether Layer 3 already populated
+    # the talon module — Layer 3's stub doesn't carry .settings.
+    sys.modules["talon"].settings = _StubSettings()
+
+    # The resolver does `from .prose_overlay_surrounding_pair import …` — we
+    # stand up a synthetic package, register the surrounding-pair module
+    # inside it, then load the resolver with the package-qualified name so
+    # the relative import resolves.
+    pkg_name = "_parity_harness_pkg"
+    if pkg_name not in sys.modules:
+        pkg = types.ModuleType(pkg_name)
+        pkg.__path__ = [str(REPO)]
+        sys.modules[pkg_name] = pkg
+
+        sp_spec = importlib.util.spec_from_file_location(
+            f"{pkg_name}.prose_overlay_surrounding_pair",
+            REPO / "prose_overlay_surrounding_pair.py",
+        )
+        sp_mod = importlib.util.module_from_spec(sp_spec)
+        sp_spec.loader.exec_module(sp_mod)
+        sys.modules[f"{pkg_name}.prose_overlay_surrounding_pair"] = sp_mod
+
+    resolver_name = f"{pkg_name}.prose_overlay_cursorless_resolve"
+    if resolver_name in sys.modules:
+        return sys.modules[resolver_name]
+    r_spec = importlib.util.spec_from_file_location(
+        resolver_name,
+        REPO / "prose_overlay_cursorless_resolve.py",
+    )
+    r_mod = importlib.util.module_from_spec(r_spec)
+    r_spec.loader.exec_module(r_mod)
+    sys.modules[resolver_name] = r_mod
+    return r_mod
+
+
+def _run_python_resolver(
+    target: "_MockTarget",
+    tokens: "list[str]",
+    hat_to_token: "dict[tuple[str, str], int]",
+    cursor: "int | None" = None,
+) -> "list[tuple[int, int]] | None":
+    resolver = _load_python_resolver()
+    resolver._state.buffer = _MockBuffer(tokens)
+    resolver._state.hat_to_token = dict(hat_to_token)
+    resolver._state.cursor = cursor
+    return resolver._resolve_target_to_token_range(target)
+
+
+def _decorated(letter: str, color: str = "default") -> dict:
+    """Cursorless-side decoratedSymbol mark (the JS bundle expects 'default'
+    for the no-color hat; the Python resolver expects 'gray' on its side.
+    Each fixture builds two views — one per resolver — sharing the letter."""
+    return {"type": "decoratedSymbol", "symbolColor": color, "character": letter}
+
+
+def _build_std_hat_to_token(color: str = "gray") -> "dict[tuple[str, str], int]":
+    """Standard hat-to-token map for the 'std' MANUAL_VERIFICATION buffer.
+
+    Keys are (letter, prose_color) — matches what the Python resolver's
+    _cursorless_symbol_to_token_index looks up after color normalization.
+    """
+    return {(_STD_LETTERS[i], color): i for i in range(len(_STD_TOKENS))}
+
+
+def _parity_row(
+    row_id: str,
+    description: str,
+    tokens: "list[str]",
+    hat_letters: "list[str]",
+    python_target: "_MockTarget",
+    js_target: dict,
+    expected: "list[tuple[int, int]]",
+    *,
+    cursor: "int | None" = None,
+    hat_color_prose: str = "gray",
+    hat_color_js: str = "default",
+) -> None:
+    """Run BOTH resolvers, assert they agree with each other AND `expected`.
+
+    Each row's docstring (in the registry below) names the
+    MANUAL_VERIFICATION.md row it parity-tests + which cursorless shape
+    drives it. A failure here is one of three things:
+      (a) Python resolver disagrees with JS — the F9 migration is unsafe;
+      (b) Both resolvers disagree with `expected` — MANUAL_VERIFICATION.md
+          has a documentation bug we need to fix;
+      (c) The JS bundle threw on a target shape the prose-side grammar
+          would construct — bundle gap to file as a follow-up.
+    """
+    hat_to_token_prose = {
+        (hat_letters[i], hat_color_prose): i
+        for i in range(len(tokens)) if i < len(hat_letters) and hat_letters[i]
+    }
+    cursor_char = 0
+    if cursor is not None:
+        pos = 0
+        for i in range(min(cursor, len(tokens))):
+            pos += len(tokens[i])
+            if i < len(tokens) - 1:
+                pos += 1
+        cursor_char = pos
+
+    py_result = _run_python_resolver(python_target, tokens, hat_to_token_prose, cursor)
+    hat_entries = _build_hat_map_for_js(tokens, hat_letters, color=hat_color_js)
+    js_result = _run_js_resolver(js_target, tokens, hat_entries, cursor_char=cursor_char)
+
+    assert py_result == expected, (
+        f"{row_id}: Python resolver disagrees with expected — "
+        f"got {py_result!r}, expected {expected!r}"
+    )
+    assert js_result == expected, (
+        f"{row_id}: JS resolver disagrees with expected — "
+        f"got {js_result!r}, expected {expected!r}. "
+        f"Python returned {py_result!r}. "
+        f"If Python is right and JS is wrong, the bundle has a bug; if "
+        f"both disagree with expected, MANUAL_VERIFICATION.md is wrong."
+    )
+    assert py_result == js_result, (
+        f"{row_id}: Python and JS resolvers disagree — "
+        f"Python={py_result!r} JS={js_result!r}. "
+        f"This is the failure mode the F9 migration must not produce."
+    )
+
+
+def run_layer_5() -> None:
+    print(f"\n=== Layer 5 — Resolver parity ({DIM}Python ↔ JS, F9 migration{RESET}) ===")
+
+    # MANUAL_VERIFICATION.md row 1 — `take air` (primitive decoratedSymbol).
+    # The action-name differs across rows 1/2/15 but the resolver output is
+    # identical for the same target shape, so this row also parity-covers
+    # the resolver halves of rows 2 (chuck ball) and the primitive part of
+    # rows 8/9/10 (bring/move whose source target is identical to row 1).
+    with test("L5", "L5.1", "MANUAL_VERIFICATION row 1 — `take air` (primitive)"):
+        _parity_row(
+            "L5.1",
+            "primitive decoratedSymbol 'a' → token 1",
+            _STD_TOKENS, _STD_LETTERS,
+            python_target=_MockTarget(
+                type="primitive",
+                mark=_decorated("a", "gray"),
+            ),
+            js_target={
+                "type": "primitive",
+                "mark": _decorated("a", "default"),
+                "modifiers": [],
+            },
+            expected=[(1, 1)],
+        )
+
+    # Row 2 — `chuck ball` — same target shape, different hat letter.
+    with test("L5", "L5.2", "MANUAL_VERIFICATION row 2 — `chuck ball` (primitive)"):
+        _parity_row(
+            "L5.2",
+            "primitive decoratedSymbol 'b' → token 2",
+            _STD_TOKENS, _STD_LETTERS,
+            python_target=_MockTarget(
+                type="primitive",
+                mark=_decorated("b", "gray"),
+            ),
+            js_target={
+                "type": "primitive",
+                "mark": _decorated("b", "default"),
+                "modifiers": [],
+            },
+            expected=[(2, 2)],
+        )
+
+    # Row 3 — `chuck blue air` — primitive with COLORED decoratedSymbol.
+    # Buffer has BOTH a gray 'a' on "air" (token 1) AND a blue 'a' on
+    # "apple" (token 5). The blue-coded mark must resolve to the blue 'a',
+    # not the gray 'a' — that's the parity contract.
+    with test("L5", "L5.3", "MANUAL_VERIFICATION row 3 — `chuck blue air` (colored mark)"):
+        tokens_3 = ["the", "air", "ball", "drum", "echo", "apple"]
+        letters_3 = ["t", "a", "b", "d", "e", "a"]
+        hat_to_token = {
+            ("t", "gray"): 0,
+            ("a", "gray"): 1,
+            ("b", "gray"): 2,
+            ("d", "gray"): 3,
+            ("e", "gray"): 4,
+            ("a", "blue"): 5,
+        }
+        # Build JS hat entries — gray=default, blue=blue, both 'a' graphemes.
+        js_entries: "list[dict]" = []
+        pos = 0
+        for i, tok in enumerate(tokens_3):
+            color_js = "default" if i < 5 else "blue"
+            js_entries.append({
+                "color": color_js,
+                "grapheme": letters_3[i],
+                "startCol": pos,
+                "endCol": pos + len(tok),
+                "text": tok,
+            })
+            pos += len(tok) + 1
+
+        py_target = _MockTarget(
+            type="primitive",
+            mark={"type": "decoratedSymbol", "symbolColor": "blue", "character": "a"},
+        )
+        js_target = {
+            "type": "primitive",
+            "mark": {"type": "decoratedSymbol", "symbolColor": "blue", "character": "a"},
+            "modifiers": [],
+        }
+        py_result = _run_python_resolver(py_target, tokens_3, hat_to_token)
+        js_result = _run_js_resolver(js_target, tokens_3, js_entries)
+        expected = [(5, 5)]
+        assert py_result == expected, f"Python: {py_result!r} != expected {expected!r}"
+        assert js_result == expected, f"JS: {js_result!r} != expected {expected!r}"
+        assert py_result == js_result, f"Python {py_result!r} != JS {js_result!r}"
+
+    # Row 4 — `chuck head ball` — extendThroughStartOf with mark 'b'.
+    # Expected: tokens 0..2 (everything from start of buffer through ball).
+    # Also covers the resolver half of row 6 (`change head ball`, same target).
+    with test("L5", "L5.4", "MANUAL_VERIFICATION row 4 — `chuck head ball` (extendThroughStartOf)"):
+        _parity_row(
+            "L5.4",
+            "extendThroughStartOf with mark 'b' → tokens 0..2",
+            _STD_TOKENS, _STD_LETTERS,
+            python_target=_MockTarget(
+                type="primitive",
+                mark=_decorated("b", "gray"),
+                modifiers=[{"type": "extendThroughStartOf"}],
+            ),
+            js_target={
+                "type": "primitive",
+                "mark": _decorated("b", "default"),
+                "modifiers": [{"type": "extendThroughStartOf"}],
+            },
+            expected=[(0, 2)],
+        )
+
+    # Row 5 — `chuck tail drum` — extendThroughEndOf with mark 'd'.
+    # Expected: tokens 3..4. Also covers row 7 (`change tail drum`).
+    with test("L5", "L5.5", "MANUAL_VERIFICATION row 5 — `chuck tail drum` (extendThroughEndOf)"):
+        _parity_row(
+            "L5.5",
+            "extendThroughEndOf with mark 'd' → tokens 3..4",
+            _STD_TOKENS, _STD_LETTERS,
+            python_target=_MockTarget(
+                type="primitive",
+                mark=_decorated("d", "gray"),
+                modifiers=[{"type": "extendThroughEndOf"}],
+            ),
+            js_target={
+                "type": "primitive",
+                "mark": _decorated("d", "default"),
+                "modifiers": [{"type": "extendThroughEndOf"}],
+            },
+            expected=[(3, 4)],
+        )
+
+    # Row 6 — `change head ball` — resolver-level identical to row 4.
+    # The `change` action's distinctive effect (cursor parked at start) is
+    # an action-layer behavior, not a resolver-layer behavior — the target
+    # resolution is the same shape. We test the resolver here; the cursor-
+    # parking is verified live.
+    with test("L5", "L5.6", "MANUAL_VERIFICATION row 6 — `change head ball` (resolver shape)"):
+        _parity_row(
+            "L5.6",
+            "row 6 shares row 4's target resolution; cursor-parking is action-level",
+            _STD_TOKENS, _STD_LETTERS,
+            python_target=_MockTarget(
+                type="primitive",
+                mark=_decorated("b", "gray"),
+                modifiers=[{"type": "extendThroughStartOf"}],
+            ),
+            js_target={
+                "type": "primitive",
+                "mark": _decorated("b", "default"),
+                "modifiers": [{"type": "extendThroughStartOf"}],
+            },
+            expected=[(0, 2)],
+        )
+
+    # Row 7 — `change tail drum` — resolver identical to row 5.
+    with test("L5", "L5.7", "MANUAL_VERIFICATION row 7 — `change tail drum` (resolver shape)"):
+        _parity_row(
+            "L5.7",
+            "row 7 shares row 5's target resolution; cursor-parking is action-level",
+            _STD_TOKENS, _STD_LETTERS,
+            python_target=_MockTarget(
+                type="primitive",
+                mark=_decorated("d", "gray"),
+                modifiers=[{"type": "extendThroughEndOf"}],
+            ),
+            js_target={
+                "type": "primitive",
+                "mark": _decorated("d", "default"),
+                "modifiers": [{"type": "extendThroughEndOf"}],
+            },
+            expected=[(3, 4)],
+        )
+
+    # Row 8 — `bring air to drum` — source target is `air` (primitive),
+    # destination is `drum` (primitive). The resolver only resolves the
+    # source target; the destination is handled by bring/move action logic
+    # (it reads `instance.cursor` which is set by a separate `pre drum`
+    # flow OR the action chains its own resolver call for destination).
+    # We test that the SOURCE target resolves the same on both paths.
+    with test("L5", "L5.8", "MANUAL_VERIFICATION row 8 — `bring air to drum` (source resolves)"):
+        _parity_row(
+            "L5.8",
+            "row 8 source target = primitive 'a' → token 1; destination is action-level",
+            _STD_TOKENS, _STD_LETTERS,
+            python_target=_MockTarget(
+                type="primitive",
+                mark=_decorated("a", "gray"),
+            ),
+            js_target={
+                "type": "primitive",
+                "mark": _decorated("a", "default"),
+                "modifiers": [],
+            },
+            expected=[(1, 1)],
+        )
+
+    # Row 9 — `move air to drum` — same source-target as row 8.
+    with test("L5", "L5.9", "MANUAL_VERIFICATION row 9 — `move air to drum` (source resolves)"):
+        _parity_row(
+            "L5.9",
+            "row 9 source target same as row 8",
+            _STD_TOKENS, _STD_LETTERS,
+            python_target=_MockTarget(
+                type="primitive",
+                mark=_decorated("a", "gray"),
+            ),
+            js_target={
+                "type": "primitive",
+                "mark": _decorated("a", "default"),
+                "modifiers": [],
+            },
+            expected=[(1, 1)],
+        )
+
+    # Row 10 — `bring blue air to drum` — colored source mark.
+    with test("L5", "L5.10", "MANUAL_VERIFICATION row 10 — `bring blue air to drum`"):
+        tokens_10 = ["the", "air", "ball", "drum", "echo", "apple"]
+        letters_10 = ["t", "a", "b", "d", "e", "a"]
+        hat_to_token = {
+            ("t", "gray"): 0,
+            ("a", "gray"): 1,
+            ("b", "gray"): 2,
+            ("d", "gray"): 3,
+            ("e", "gray"): 4,
+            ("a", "blue"): 5,
+        }
+        js_entries: "list[dict]" = []
+        pos = 0
+        for i, tok in enumerate(tokens_10):
+            color_js = "default" if i < 5 else "blue"
+            js_entries.append({
+                "color": color_js, "grapheme": letters_10[i],
+                "startCol": pos, "endCol": pos + len(tok), "text": tok,
+            })
+            pos += len(tok) + 1
+
+        py_target = _MockTarget(
+            type="primitive",
+            mark={"type": "decoratedSymbol", "symbolColor": "blue", "character": "a"},
+        )
+        js_target = {
+            "type": "primitive",
+            "mark": {"type": "decoratedSymbol", "symbolColor": "blue", "character": "a"},
+            "modifiers": [],
+        }
+        py_result = _run_python_resolver(py_target, tokens_10, hat_to_token)
+        js_result = _run_js_resolver(js_target, tokens_10, js_entries)
+        expected = [(5, 5)]
+        assert py_result == expected, f"Python: {py_result!r} != expected"
+        assert js_result == expected, f"JS: {js_result!r} != expected"
+        assert py_result == js_result, "Python/JS disagree"
+
+    # Row 13 — `chuck file` — containingScope document. mark=cursor;
+    # everyScope/containingScope on a whole-buffer scope returns 0..len-1.
+    # The Python side accepts mark=None (its everyScope handler ignores
+    # base_idx and returns whole range); for parity we use mark={"type":
+    # "cursor"} on the JS side because the bundle's TargetPipelineRunner
+    # requires mark.type to be defined.
+    with test("L5", "L5.11", "MANUAL_VERIFICATION row 13 — `chuck file` (containingScope document)"):
+        py_target = _MockTarget(
+            type="primitive",
+            mark=None,
+            modifiers=[{"type": "containingScope", "scopeType": {"type": "document"}}],
+        )
+        js_target = {
+            "type": "primitive",
+            "mark": {"type": "cursor"},
+            "modifiers": [{"type": "containingScope", "scopeType": {"type": "document"}}],
+        }
+        tokens = _STD_TOKENS
+        letters = _STD_LETTERS
+        hat_to_token = _build_std_hat_to_token("gray")
+        hat_entries = _build_hat_map_for_js(tokens, letters, color="default")
+        py_result = _run_python_resolver(py_target, tokens, hat_to_token, cursor=None)
+        js_result = _run_js_resolver(js_target, tokens, hat_entries, cursor_char=0)
+        expected = [(0, 4)]
+        assert py_result == expected, f"Python: {py_result!r} != {expected!r}"
+        assert js_result == expected, f"JS: {js_result!r} != {expected!r}"
+        assert py_result == js_result, "Python/JS disagree on whole-buffer scope"
+
+    # Row 14 — `chuck line` — single-line buffer ⇒ whole buffer (same as 13).
+    with test("L5", "L5.12", "MANUAL_VERIFICATION row 14 — `chuck line` (single-line ⇒ whole buffer)"):
+        # The Python resolver treats "line" the same as "document" (it's in
+        # _WHOLE_BUFFER_SCOPE_TYPES). The JS bundle resolves "line" via its
+        # line-scope handler which on a single-line text returns 0..len.
+        py_target = _MockTarget(
+            type="primitive",
+            mark=None,
+            modifiers=[{"type": "containingScope", "scopeType": {"type": "line"}}],
+        )
+        js_target = {
+            "type": "primitive",
+            "mark": {"type": "cursor"},
+            "modifiers": [{"type": "containingScope", "scopeType": {"type": "line"}}],
+        }
+        tokens = _STD_TOKENS
+        letters = _STD_LETTERS
+        hat_to_token = _build_std_hat_to_token("gray")
+        hat_entries = _build_hat_map_for_js(tokens, letters, color="default")
+        py_result = _run_python_resolver(py_target, tokens, hat_to_token, cursor=None)
+        js_result = _run_js_resolver(js_target, tokens, hat_entries, cursor_char=0)
+        expected = [(0, 4)]
+        assert py_result == expected, f"Python: {py_result!r} != {expected!r}"
+        assert js_result == expected, f"JS: {js_result!r} != {expected!r}"
+        assert py_result == js_result, "Python/JS disagree on line scope"
+
+    # Row 15 — `take file` — same resolver shape as 13 (document scope).
+    with test("L5", "L5.13", "MANUAL_VERIFICATION row 15 — `take file` (resolver shape == row 13)"):
+        py_target = _MockTarget(
+            type="primitive",
+            mark=None,
+            modifiers=[{"type": "containingScope", "scopeType": {"type": "document"}}],
+        )
+        js_target = {
+            "type": "primitive",
+            "mark": {"type": "cursor"},
+            "modifiers": [{"type": "containingScope", "scopeType": {"type": "document"}}],
+        }
+        tokens = _STD_TOKENS
+        letters = _STD_LETTERS
+        hat_to_token = _build_std_hat_to_token("gray")
+        hat_entries = _build_hat_map_for_js(tokens, letters, color="default")
+        py_result = _run_python_resolver(py_target, tokens, hat_to_token, cursor=None)
+        js_result = _run_js_resolver(js_target, tokens, hat_entries, cursor_char=0)
+        expected = [(0, 4)]
+        assert py_result == expected, f"Python: {py_result!r} != {expected!r}"
+        assert js_result == expected, f"JS: {js_result!r} != {expected!r}"
+        assert py_result == js_result, "Python/JS disagree"
+
+    # Row 18 — `chuck air past drum` — range target.
+    with test("L5", "L5.14", "MANUAL_VERIFICATION row 18 — `chuck air past drum` (range)"):
+        anchor_py = _MockTarget(type="primitive", mark=_decorated("a", "gray"))
+        active_py = _MockTarget(type="primitive", mark=_decorated("d", "gray"))
+        py_target = _MockTarget(type="range", anchor=anchor_py, active=active_py)
+        js_target = {
+            "type": "range",
+            "anchor": {
+                "type": "primitive",
+                "mark": _decorated("a", "default"),
+                "modifiers": [],
+            },
+            "active": {
+                "type": "primitive",
+                "mark": _decorated("d", "default"),
+                "modifiers": [],
+            },
+            "excludeAnchor": False,
+            "excludeActive": False,
+            "rangeType": "continuous",
+        }
+        tokens = _STD_TOKENS
+        letters = _STD_LETTERS
+        hat_to_token = _build_std_hat_to_token("gray")
+        hat_entries = _build_hat_map_for_js(tokens, letters, color="default")
+        py_result = _run_python_resolver(py_target, tokens, hat_to_token)
+        js_result = _run_js_resolver(js_target, tokens, hat_entries)
+        expected = [(1, 3)]
+        assert py_result == expected, f"Python: {py_result!r} != {expected!r}"
+        assert js_result == expected, f"JS: {js_result!r} != {expected!r}"
+        assert py_result == js_result, "Python/JS disagree on range target"
+
+    # Row 19 — `take air and drum` — list target.
+    with test("L5", "L5.15", "MANUAL_VERIFICATION row 19 — `take air and drum` (list)"):
+        el1_py = _MockTarget(type="primitive", mark=_decorated("a", "gray"))
+        el2_py = _MockTarget(type="primitive", mark=_decorated("d", "gray"))
+        py_target = _MockTarget(type="list", elements=[el1_py, el2_py])
+        js_target = {
+            "type": "list",
+            "elements": [
+                {
+                    "type": "primitive",
+                    "mark": _decorated("a", "default"),
+                    "modifiers": [],
+                },
+                {
+                    "type": "primitive",
+                    "mark": _decorated("d", "default"),
+                    "modifiers": [],
+                },
+            ],
+        }
+        tokens = _STD_TOKENS
+        letters = _STD_LETTERS
+        hat_to_token = _build_std_hat_to_token("gray")
+        hat_entries = _build_hat_map_for_js(tokens, letters, color="default")
+        py_result = _run_python_resolver(py_target, tokens, hat_to_token)
+        js_result = _run_js_resolver(js_target, tokens, hat_entries)
+        expected = [(1, 1), (3, 3)]
+        assert py_result == expected, f"Python: {py_result!r} != {expected!r}"
+        assert js_result == expected, f"JS: {js_result!r} != {expected!r}"
+        assert py_result == js_result, "Python/JS disagree on list target"
+
+    # Row 20 — `format snake air past drum` — target is a range from 'a' to
+    # 'd' (same as row 18); the snake-case formatting happens at the
+    # action layer (`reformat_text` after the resolver returns tokens). We
+    # parity-test the resolver, not the formatter — the formatter side is
+    # covered by L1.17/L1.18.
+    with test("L5", "L5.16", "MANUAL_VERIFICATION row 20 — `format snake air past drum` (resolver = range)"):
+        anchor_py = _MockTarget(type="primitive", mark=_decorated("a", "gray"))
+        active_py = _MockTarget(type="primitive", mark=_decorated("d", "gray"))
+        py_target = _MockTarget(type="range", anchor=anchor_py, active=active_py)
+        js_target = {
+            "type": "range",
+            "anchor": {
+                "type": "primitive",
+                "mark": _decorated("a", "default"),
+                "modifiers": [],
+            },
+            "active": {
+                "type": "primitive",
+                "mark": _decorated("d", "default"),
+                "modifiers": [],
+            },
+            "excludeAnchor": False,
+            "excludeActive": False,
+            "rangeType": "continuous",
+        }
+        tokens = _STD_TOKENS
+        letters = _STD_LETTERS
+        hat_to_token = _build_std_hat_to_token("gray")
+        hat_entries = _build_hat_map_for_js(tokens, letters, color="default")
+        py_result = _run_python_resolver(py_target, tokens, hat_to_token)
+        js_result = _run_js_resolver(js_target, tokens, hat_entries)
+        expected = [(1, 3)]
+        assert py_result == expected, f"Python: {py_result!r} != {expected!r}"
+        assert js_result == expected, f"JS: {js_result!r} != {expected!r}"
+        assert py_result == js_result, "Python/JS disagree on range target (formatter source)"
+
+    # ----- Live-only rows — documented here, NOT executed -----
+    #
+    # The following MANUAL_VERIFICATION.md rows are NOT in Layer 5 because
+    # their parity cannot be expressed without driving Talon's grammar
+    # matcher OR the JS bundle ships a different surface than the prose-
+    # side Python re-impl:
+    #
+    #   - Rows 11, 12 — `pre start` / `post end` cursor-positioning. The
+    #     parity here is the action-layer cursor placement after the
+    #     resolver runs, not the resolver itself. Verify live.
+    #   - Rows 16, 17 — `take quotes air` / `chuck round air` surrounding-
+    #     pair. The cursorless JS bundle expects its own delimiter names
+    #     ("quotationMark", "parentheses", …) where the prose grammar
+    #     emits prose-side names ("quad", "round"). Bundle errors out on
+    #     the prose names today; bridging that is a separate slice (see
+    #     prose_overlay_targets_js gap note). The Python re-impl in
+    #     prose_overlay_surrounding_pair handles these locally. Verify
+    #     live with the JS resolver default ON, observe expected fallback
+    #     behavior, file a follow-up if the gap blocks UX.
+    print(f"  {DIM}(rows 11, 12, 16, 17 are live-only — see docstring above){RESET}")
+
+
 def main() -> int:
     print("Headless verify — see docs/HEADLESS_VERIFY_PLAN.md\n")
     run_layer_1()
     run_layer_2()
     run_layer_3()
     run_layer_4()
+    run_layer_5()
 
     passed = sum(1 for *_, ok, _ in results if ok)
     total = len(results)

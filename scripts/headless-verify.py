@@ -205,6 +205,10 @@ def run_layer_1() -> None:
         # reset" and the next swap acts on the previous buffer's words.
         inst.next_alt_assignments = {0: "they're"}
         inst.position_assignments = {0: (1, 3)}
+        # Slice C of docs/PHONES_SPEC.md adds homophone_panel_alts; reset()
+        # must clear it too so a stale panel from the prior session can't
+        # leak into the next.
+        inst.homophone_panel_alts = {0: {"yellow": "their", "blue": "they're"}}
         inst.flash_state = {"indices": [1], "color": "ff0000"}
         inst.history = ["old", "stuff"]
         inst.history_page = 3
@@ -231,6 +235,10 @@ def run_layer_1() -> None:
         assert inst.position_assignments == {}, (
             f"position_assignments not cleared by reset(): "
             f"{inst.position_assignments!r}"
+        )
+        assert inst.homophone_panel_alts == {}, (
+            f"homophone_panel_alts not cleared by reset(): "
+            f"{inst.homophone_panel_alts!r}"
         )
         assert inst.flash_state == {}
         assert inst.history == []
@@ -551,6 +559,86 @@ def run_layer_1() -> None:
             f"expected seg_w ({seg_w}) below threshold "
             f"({dc.HOMOPHONE_UNDERLINE_MIN_SEGMENT_W})"
         )
+
+    # -----------------------------------------------------------------------
+    # Slice C of docs/PHONES_SPEC.md — expanded panel mapping
+    # compute_panel_alts is a pure function (no Talon, no Skia); only the
+    # group_for_word fn it calls touches the CSV. We use the real CSV via
+    # the live module, since the spec covers concrete row content.
+    # -----------------------------------------------------------------------
+
+    with test("L1", "L1.47", "compute_panel_alts: 3-member 'their,there,they\\'re' → 2 colored alts"):
+        # When current word is 'there', the panel shows the OTHER members
+        # in CSV row order (their, they're) mapped to PANEL_COLOR_PALETTE
+        # [yellow, blue, …]. The worked example in PHONES_SPEC §Scenario 4
+        # says "gold play: their" — spoken `gold` normalises to `yellow`,
+        # so the yellow slot must point at 'their'.
+        tokens = ["there"]
+        flagged = frozenset({0})
+        shape_assignments = {0: "play"}
+        # Inject the helpers — headless test loads shapes_mod via
+        # spec_from_file_location which has no parent package, so the
+        # lazy relative import inside compute_panel_alts fails. The
+        # production path (live Talon) goes through the normal import
+        # chain and resolves the helpers transparently.
+        result = shapes_mod.compute_panel_alts(
+            tokens, flagged, shape_assignments,
+            group_for_word_fn=homophones.group_for_word,
+            normalize_token_fn=homophones.normalize_token,
+        )
+        assert 0 in result, f"expected mapping for idx 0; got {result}"
+        cmap = result[0]
+        # CSV row order: their, there, they're; current 'there' excluded
+        # → alts = [their, they're]; first slot = yellow → their.
+        assert cmap.get("yellow") == "their", (
+            f"expected yellow → their (gold play); got {cmap}"
+        )
+        assert cmap.get("blue") == "they're", (
+            f"expected blue → they're; got {cmap}"
+        )
+        # No third alt — only the two colors should appear.
+        assert set(cmap.keys()) == {"yellow", "blue"}, (
+            f"unexpected extra colors in panel: {sorted(cmap)}"
+        )
+
+    with test("L1", "L1.48", "compute_panel_alts: 2-member 'aid,aide' → 1 colored alt"):
+        # Two-member group ("aid,aide" is row 17 in the CSV); current 'aid'
+        # → alts = [aide] → 1 slot, yellow.
+        tokens = ["aid"]
+        flagged = frozenset({0})
+        shape_assignments = {0: "wing"}
+        # Sanity — 'aid,aide' must be in the CSV; if not, this test
+        # depends on a specific row we don't control.
+        if not homophones.is_flagged("aid"):
+            raise AssertionError(
+                "test fixture: 'aid' must be in the homophone CSV"
+            )
+        result = shapes_mod.compute_panel_alts(
+            tokens, flagged, shape_assignments,
+            group_for_word_fn=homophones.group_for_word,
+            normalize_token_fn=homophones.normalize_token,
+        )
+        cmap = result[0]
+        # Only one alt, on the yellow slot.
+        assert len(cmap) == 1, f"expected 1 alt; got {cmap}"
+        assert "yellow" in cmap, f"expected yellow slot; got {cmap}"
+
+    with test("L1", "L1.49", "compute_panel_alts: unflagged or no-shape tokens are skipped"):
+        # An unflagged token (not in `flagged`) MUST NOT appear in the
+        # output even if shape_assignments has an entry for it.
+        # Similarly, a flagged token WITHOUT a shape entry MUST NOT
+        # appear — the panel is per shape-hatted token.
+        tokens = ["foo", "there"]
+        flagged = frozenset({1})  # only idx 1 flagged
+        shape_assignments = {0: "play"}  # only idx 0 has a shape
+        result = shapes_mod.compute_panel_alts(
+            tokens, flagged, shape_assignments,
+            group_for_word_fn=homophones.group_for_word,
+            normalize_token_fn=homophones.normalize_token,
+        )
+        # idx 0 is in shape_assignments but NOT flagged → skip.
+        # idx 1 is flagged but NOT in shape_assignments → skip.
+        assert result == {}, f"expected empty result; got {result}"
 
     with test("L1", "L1.46", "letter-hat swap is no-op on non-flagged tokens (OQ10 default)"):
         # Mirror the action's gate: look up the token by (letter, color)

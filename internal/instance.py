@@ -32,6 +32,15 @@ class ProseOverlayState:
         # Tokens not flagged as homophones never appear in either dict.
         self.next_alt_assignments: dict[int, str] = {}
         self.position_assignments: dict[int, tuple[int, int]] = {}
+        # Slice C of docs/PHONES_SPEC.md — per-shape-hatted-token color
+        # mapping for the expanded panel (Scenario 4). Computed by
+        # shim.actions_core._recompute_hats via shim.shapes.compute_panel_alts.
+        # Structure: token_idx -> {color_name -> alt_word}. The action
+        # prose_overlay_phone_color_shape looks up by (shape, color);
+        # the draw routine (ui.draw_panels) renders one chip per entry.
+        # Color names match what prose_hat_color returns (normalised:
+        # gold→yellow, plum→purple).
+        self.homophone_panel_alts: dict[int, dict[str, str]] = {}
         self.canvas = None                  # OverlayCanvas
         self.ctx = None                     # Context (overlay showing)
         self.ctx_auto = None                # Context (auto-dictation)
@@ -78,6 +87,7 @@ class ProseOverlayState:
         self.shape_assignments = {}
         self.next_alt_assignments = {}
         self.position_assignments = {}
+        self.homophone_panel_alts = {}
         self.target_window_title = ""
         self.target_recall_name = None
         self.help_visible = False

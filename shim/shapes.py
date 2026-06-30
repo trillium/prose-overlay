@@ -204,6 +204,124 @@ def shape_char_position(letter_char_idx: int, token_len: int) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Slice C of docs/PHONES_SPEC.md — expanded panel mapping
+# ---------------------------------------------------------------------------
+# compute_panel_alts(tokens, flagged, shape_assignments) returns
+#   token_idx -> {color_name -> alt_word}
+# for every shape-hatted token whose group has > 1 member. The user says
+# `<color> <shape>` and the action looks up the panel mapping by the
+# normalised color name (gold→yellow, plum→purple via prose_hat_color).
+#
+# Color palette per OQ2 default: alts ordered by CSV-row index excluding
+# the current word, mapped in order to PANEL_COLOR_PALETTE. The leading
+# slot is `yellow` so the spoken form `gold <shape>` lands on the first
+# alt — matches the spec's worked example "gold play: their". `gray` is
+# omitted because the prose_hat_color capture in prose_overlay.py does
+# not include it (the user can't speak `gray play`); a 9th alt would be
+# unreachable, so we cap at 8 slots and any beyond fall off (a 9-member
+# row would lose one alt; verify with the L1 test).
+
+# Normalised forms — match what prose_hat_color returns. The voice
+# vocabulary is in prose_overlay.py:prose_hat_color (red, blue, green,
+# pink, yellow, purple, plum, gold, black, white) with gold→yellow and
+# plum→purple aliased to the normalised form.
+PANEL_COLOR_PALETTE: tuple[str, ...] = (
+    "yellow",  # spoken `gold` — first slot per OQ2 worked example
+    "blue",
+    "green",
+    "pink",
+    "red",
+    "purple",  # spoken `plum` or `purple`
+    "black",
+    "white",
+)
+
+
+def compute_panel_alts(
+    tokens,
+    flagged,
+    shape_assignments: dict[int, str],
+    group_for_word_fn=None,
+    normalize_token_fn=None,
+) -> dict[int, dict[str, str]]:
+    """Return ``token_idx -> {color_name -> alt_word}`` for shape-hatted tokens.
+
+    Only tokens that are flagged AND have a shape assignment AND whose
+    group has > 1 member produce an entry. The current word is excluded
+    from the alts; the remaining members are assigned colors from
+    PANEL_COLOR_PALETTE in CSV-row order.
+
+    Parameters:
+        tokens                — list[str] / tuple[str, ...] buffer tokens
+        flagged               — set/frozenset of flagged token indices
+        shape_assignments     — dict[int, str] from
+                                compute_shape_assignments / instance state
+        group_for_word_fn     — pluggable lookup (defaults to
+                                internal.homophones.group_for_word). Lazy
+                                injection lets the L1 test stub the lookup
+                                or pass a stub fixture independent of the
+                                live CSV.
+        normalize_token_fn    — pluggable token normaliser (defaults to
+                                internal.homophones.normalize_token). Same
+                                injection rationale as above.
+
+    Both helper fns are injected (not imported at top level) because
+    when this module is loaded by spec_from_file_location in the headless
+    test runner, relative-import resolution fails — the module has no
+    parent package context. Passing the helpers in keeps the function
+    pure-callable from any import style.
+    """
+    if group_for_word_fn is None or normalize_token_fn is None:
+        # Lazy import — works when shim/shapes is loaded as a package
+        # submodule (live Talon process). Falls through if the import
+        # itself raises, which is the case for headless tests loading
+        # this file via spec_from_file_location.
+        try:
+            from ..internal.homophones import (
+                group_for_word as _gfw,
+                normalize_token as _nt,
+            )
+        except (ImportError, ValueError):
+            # Test-friendly fallback: caller MUST inject both helpers.
+            if group_for_word_fn is None or normalize_token_fn is None:
+                raise RuntimeError(
+                    "compute_panel_alts: pass group_for_word_fn + "
+                    "normalize_token_fn explicitly when loaded outside "
+                    "the package"
+                )
+            _gfw = group_for_word_fn  # type: ignore[assignment]
+            _nt = normalize_token_fn  # type: ignore[assignment]
+        if group_for_word_fn is None:
+            group_for_word_fn = _gfw
+        if normalize_token_fn is None:
+            normalize_token_fn = _nt
+
+    flagged_fz = flagged if isinstance(flagged, frozenset) else frozenset(flagged)
+    out: dict[int, dict[str, str]] = {}
+    for idx, shape_name in shape_assignments.items():
+        if idx not in flagged_fz:
+            continue
+        if idx < 0 or idx >= len(tokens):
+            continue
+        current = tokens[idx]
+        group = group_for_word_fn(current)
+        if group is None or len(group) <= 1:
+            continue
+        # Normalise the current word once for the exclusion compare. The
+        # group tuple is already lowercased + punct-free per the loader.
+        cur_key = normalize_token_fn(current)
+        alts = [w for w in group if w != cur_key]
+        # Cap at PANEL_COLOR_PALETTE length — any alts beyond that fall off.
+        # In practice the largest real CSV row is ~5 members; cap is 8.
+        color_map: dict[str, str] = {}
+        for slot, alt in enumerate(alts[: len(PANEL_COLOR_PALETTE)]):
+            color_map[PANEL_COLOR_PALETTE[slot]] = alt
+        if color_map:
+            out[idx] = color_map
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Slice 2 — deterministic per-flag shape allocator
 # ---------------------------------------------------------------------------
 # Replaces Slice 1's `flagged_rank % 10` round-robin in ui/draw_tokens.py with

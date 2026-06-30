@@ -31,6 +31,7 @@ from talon import Module
 from ..internal.instance import instance
 from ..internal.state import EditKind
 from ..internal.homophones import is_flagged, next_in_group, normalize_token
+from .actions_core import _hat_to_index
 
 
 mod = Module()
@@ -164,5 +165,61 @@ class Actions:
             )
             return
         if not _swap_token(target_idx, new_word, f"phone {word}"):
+            return
+        _refresh_after_swap()
+
+    def prose_overlay_phone_letter(letter: str, color: str = "gray"):
+        """Cycle the token at letter hat `(color, letter)` to its next
+        CSV-row member, but ONLY if the token is currently flagged.
+
+        Slice B of docs/PHONES_SPEC.md — Scenario 6. The letter hat is
+        the existing Cursorless-style gray-letter dot painted on EVERY
+        visible token (flagged or not); this action is the
+        homophone-aware verb on that same hat. Falls through as a no-op
+        with log hint when:
+          - the (letter, color) pair isn't currently assigned (no hat),
+          - the addressed token is unflagged (per OQ10 default — no-op
+            instead of falling through to the modal HUD; iterate later
+            if real usage shows surprise),
+          - the matching token's group is degenerate (1-member row, OQ4).
+
+        Caveat per Scenario 6: after the swap, the letter-hat allocator
+        may reassign the (color, letter) slot to a DIFFERENT token (the
+        new word may not have a `letter` character). Repeated
+        `phones <letter>` calls may target different tokens session over
+        session — `phone <shape>` is the muscle-memory path. The action
+        body intentionally does not paper over this — it would require a
+        snapshot of the pre-swap hat assignment, which contradicts the
+        whole point of the letter-hat allocator being character-derived.
+        """
+        idx = _hat_to_index(letter, color)
+        if idx < 0:
+            print(
+                f"prose_overlay: phone letter {color}-{letter} — no hat assigned"
+            )
+            return
+        buf = instance.buffer
+        if buf is None:
+            return
+        tokens = buf.get_tokens()
+        if idx >= len(tokens):
+            return
+        tok = tokens[idx]
+        if not is_flagged(tok):
+            print(
+                f"prose_overlay: phone letter {color}-{letter} (token "
+                f"{tok!r}, idx {idx}) — token is not a flagged homophone"
+            )
+            return
+        new_word = next_in_group(tok)
+        if new_word is None or new_word == tok:
+            # Defensive — is_flagged is True so the group exists, but
+            # a 1-member row would still return the same word (OQ4).
+            print(
+                f"prose_overlay: phone letter {color}-{letter} — degenerate "
+                "1-member group; no swap"
+            )
+            return
+        if not _swap_token(idx, new_word, f"phone {color}-{letter}"):
             return
         _refresh_after_swap()

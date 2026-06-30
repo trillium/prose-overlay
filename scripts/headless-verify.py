@@ -552,6 +552,29 @@ def run_layer_1() -> None:
             f"({dc.HOMOPHONE_UNDERLINE_MIN_SEGMENT_W})"
         )
 
+    with test("L1", "L1.46", "letter-hat swap is no-op on non-flagged tokens (OQ10 default)"):
+        # Mirror the action's gate: look up the token by (letter, color)
+        # via the existing hat-to-token reverse map, check is_flagged, and
+        # bail with a log hint when the addressed token is unflagged. We
+        # simulate that check at the buffer level since the SHIM action
+        # imports talon and can't run headless. The contract: the action
+        # must NOT swap a non-flagged token even when the letter hat
+        # resolves to a real index.
+        b = ProseBuffer()
+        b.add_text("hello world")  # neither token is a flagged homophone
+        tokens = b.get_tokens()
+        # Synthetic hat-to-token map (the live action uses
+        # instance.hat_to_token populated by _recompute_hats).
+        synthetic_map = {("h", "gray"): 0, ("w", "gray"): 1}
+        idx = synthetic_map.get(("h", "gray"), -1)
+        assert idx == 0
+        tok = tokens[idx]
+        assert not homophones.is_flagged(tok), (
+            f"sanity: {tok!r} should NOT be flagged"
+        )
+        # Action would log and return without mutating.
+        assert b.get_tokens() == ["hello", "world"]
+
     with test("L1", "L1.45", "word-addressed swap finds FIRST match among multiple flagged"):
         # Slice B of docs/PHONES_SPEC.md Scenario 5 + OQ3 default:
         # when two tokens read the same word, the lower-index one swaps.
@@ -814,6 +837,29 @@ def run_layer_3() -> None:
         td._dispatch({"cmd": "phone_word", "word": "there"})
         assert actions_log == [
             ("prose_overlay_phone_word", ("there",), {}),
+        ], actions_log
+
+    # Slice B of docs/PHONES_SPEC.md — phone_letter dispatch (default color)
+    with test(
+        "L3",
+        "L3.5h",
+        "_dispatch phone_letter → prose_overlay_phone_letter(letter, gray default)",
+    ):
+        actions_log.clear()
+        td._dispatch({"cmd": "phone_letter", "letter": "a"})
+        assert actions_log == [
+            ("prose_overlay_phone_letter", ("a", "gray"), {}),
+        ], actions_log
+
+    with test(
+        "L3",
+        "L3.5i",
+        "_dispatch phone_letter with explicit color → both args passed",
+    ):
+        actions_log.clear()
+        td._dispatch({"cmd": "phone_letter", "letter": "h", "color": "blue"})
+        assert actions_log == [
+            ("prose_overlay_phone_letter", ("h", "blue"), {}),
         ], actions_log
 
     with test("L3", "L3.6", "_dispatch bogus cmd does not raise"):

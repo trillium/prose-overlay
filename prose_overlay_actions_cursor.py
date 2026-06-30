@@ -56,6 +56,14 @@ def _blink_tick():
     instance.canvas.refresh()
 
 
+def _viewport_cursor_row():
+    """Return (viewport, cursor_row) or (viewport, None) if not resolvable."""
+    viewport = instance.viewport
+    if viewport is None or not viewport._last_rows or instance.cursor is None:
+        return viewport, None
+    return viewport, viewport._find_cursor_row(viewport._last_rows, instance.cursor)
+
+
 def _auto_scroll_to_cursor():
     """Snap the scroll viewport to keep the cursor row visible.
 
@@ -161,3 +169,35 @@ class Actions:
             _prose_overlay_set_cursor(index, change_mode=True)
             instance.canvas.refresh()
         _flash_tokens(flash_indices, _action_color("clearAndSetSelection"), _do)
+
+    def prose_overlay_align_top():
+        """Align the cursor row to the top of the viewport (Helix-style)."""
+        viewport, row = _viewport_cursor_row()
+        if row is None:
+            return
+        viewport.align(row, "top")
+        instance.canvas.refresh()
+
+    def prose_overlay_align_center():
+        """Align the cursor row to the center of the viewport (Helix-style)."""
+        viewport, row = _viewport_cursor_row()
+        if row is None:
+            return
+        viewport.align(row, "center")
+        instance.canvas.refresh()
+
+    def prose_overlay_align_bottom():
+        """Align the cursor row to the bottom of the viewport (Helix-style)."""
+        viewport, row = _viewport_cursor_row()
+        if row is None:
+            return
+        viewport.align(row, "bottom")
+        instance.canvas.refresh()
+
+    def prose_overlay_recenter():
+        """Cycle viewport anchor center -> top -> bottom on repeats (Emacs-style)."""
+        viewport, row = _viewport_cursor_row()
+        if row is None:
+            return
+        viewport.recenter(row)
+        instance.canvas.refresh()

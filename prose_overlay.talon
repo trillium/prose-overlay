@@ -79,6 +79,12 @@ change <user.prose_hat_color> <user.letter>:
 # {user.symbol_key} includes all spoken forms — both command-and-dictation and command-only.
 {user.symbol_key}: user.prose_overlay_add_text(symbol_key)
 
+# Viewport alignment — Helix/Emacs-style
+overlay show top: user.prose_overlay_align_top()
+overlay show bottom: user.prose_overlay_align_bottom()
+overlay show center: user.prose_overlay_align_center()
+overlay center: user.prose_overlay_recenter()
+
 # Manual show (for re-opening after dismiss) -- in prose_overlay_start.talon
 # Cursorless-grammar actions live in prose_overlay_cursorless.talon (separate file,
 # separate context header with higher specificity than cursorless.talon).

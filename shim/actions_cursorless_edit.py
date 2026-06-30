@@ -7,9 +7,9 @@ from typing import Any
 
 from talon import actions
 
-from .prose_overlay_instance import instance
-from .prose_overlay_state import EditKind
-from .prose_overlay_actions_cursor import (
+from ..internal.instance import instance
+from ..internal.state import EditKind
+from ..ui.actions_cursor import (
     _prose_overlay_set_cursor,
     _prose_overlay_clear_cursor,
     _auto_scroll_to_cursor,

@@ -12,9 +12,9 @@ Contains:
 
 from talon import Module, actions
 
-from .prose_overlay_instance import instance
-from .prose_overlay_actions_core import _hat_to_index, _recompute_hats
-from .prose_overlay_actions_flash import _flash_tokens, _action_color
+from ..internal.instance import instance
+from ..shim.actions_core import _hat_to_index, _recompute_hats
+from .actions_flash import _flash_tokens, _action_color
 
 mod = Module()
 

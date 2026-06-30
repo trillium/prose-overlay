@@ -15,11 +15,11 @@ The live Talon process is one verification path. It is not the only one.
 Three things matter:
 
 1. **Most code that handles buffer state, undo, and hat allocation is pure
-   Python** — `prose_overlay_state.py` imports nothing from `talon`. It can
+   Python** — `internal/state.py` imports nothing from `talon`. It can
    be imported and exercised in any Python REPL.
 2. **The JS hat allocator is a self-contained bundle.** `js/prose_allocate_hats.js`
    runs in any JS runtime — `bun`, `node`, `deno`. No Talon-specific globals.
-3. **Talon-importing modules can be exercised with stubs.** `prose_overlay_test_driver.py`
+3. **Talon-importing modules can be exercised with stubs.** `ui/test_driver.py`
    imports `talon.Module`, `talon.actions`, `talon.cron` — stub them in
    `sys.modules` before import and the module loads + functions are callable.
 
@@ -36,7 +36,7 @@ to be.
 
 ### Layer 1 — Pure Python (no Talon, no JS)
 
-`prose_overlay_state.py` is the substrate. Direct import works.
+`internal/state.py` is the substrate. Direct import works.
 
 | ID | Test | Notes |
 |---|---|---|
@@ -76,7 +76,7 @@ to be.
 | L2.4 | `proseAllocateHats(["!"])` returns a hat | punct-hat — JS layer |
 | L2.5 | `proseAllocateHats(["testing", "testing", "123"])` returns hats for ALL three | end-to-end user repro — JS layer |
 
-### Layer 3 — Talon-stubbed (`prose_overlay_test_driver.py`)
+### Layer 3 — Talon-stubbed (`ui/test_driver.py`)
 
 Stub `talon.Module`, `talon.actions`, `talon.cron` before import. The module's
 `@mod.action_class` decorator must not throw under stubs. Test the
@@ -106,7 +106,7 @@ These require the live Talon process. Document the gap; do not run.
 - `prose_overlay_targets_js.py` end-to-end (same)
 - Canvas refresh + draw cycle
 - `prose_overlay_trail.py` slice B against a real crash (HAT_ALLOC repro)
-- `prose_overlay_shapes.draw_hat_shape()` actual Skia paint (Slice 1) — the
+- `shim/shapes.py` `draw_hat_shape()` actual Skia paint (Slice 1) — the
   module's vocabulary, parse, and asset-existence checks are L1.20-L1.23;
   the `Path.from_svg` + FILL+STROKE compositing path is verify-in-Talon only.
   Live check: `overlay shapes homo on` while a flagged word is in the
@@ -116,9 +116,9 @@ These require the live Talon process. Document the gap; do not run.
 ## 3. How the runner works
 
 `scripts/headless-verify.py` is one Python file with three sections:
-- **Layer 1**: imports `prose_overlay_state` via `importlib.util.spec_from_file_location` and exercises ProseBuffer + compute_hat_assignments.
+- **Layer 1**: imports `internal/state.py` via `importlib.util.spec_from_file_location` and exercises ProseBuffer + compute_hat_assignments.
 - **Layer 2**: spawns `bun` with an inline JS that loads the bundle and calls `proseAllocateHats`. Compares JSON output to expected shape.
-- **Layer 3**: installs stub modules into `sys.modules` for `talon`, `talon.lib.js`, then imports `prose_overlay_test_driver`. Captures stub `actions.user.*` calls to verify routing.
+- **Layer 3**: installs stub modules into `sys.modules` for `talon`, `talon.lib.js`, then imports `ui/test_driver.py`. Captures stub `actions.user.*` calls to verify routing.
 
 Each layer's tests are functions that raise `AssertionError` on failure. The
 runner catches per-test, marks `[x]` on success and `[ ] FAIL: <reason>` on

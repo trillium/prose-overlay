@@ -109,7 +109,7 @@ If we want to push the ratio up cheaply:
 
 1. **Buffer-side trailing punct test** — `ProseBuffer().add_text("hello.") → ["hello", "."]`. Easy add to L1.
 2. **Resolver-side scope tests** — feed synthetic target dicts into `_resolve_target_to_token_range` and assert token ranges. Cursorless's actual targets are JSON shapes; we can construct fixtures without Talon. Big lift in §3 coverage.
-3. **Action chain stubbed** — Layer 4. Stub Talon enough to import `prose_overlay_actions_*` and exercise the action methods. Catches integration bugs the dispatch-routing tests miss.
+3. **Action chain stubbed** — Layer 4. Stub Talon enough to import `ui/actions_*.py` and `shim/actions_*.py` and exercise the action methods. Catches integration bugs the dispatch-routing tests miss.
 4. **Underline-default-on assertion at the SETTING level** — currently L1.15 tests the runtime flag; we don't test the `mod.setting(default=True)`. Mostly a doc-vs-code consistency guard.
 5. **Coalescing threshold logic** — `_GROUP_DELAY_S` boundary test without actual timing (inject timestamps).
 
@@ -129,7 +129,7 @@ Items 2 + 3 are the meaningful coverage leaps. The other three are quick wins.
 | `[x]` | Phrase enders insert correctly at end of utterance | "test period" → "test." | community grammar |
 | `[x]` | Auto-show overlay on any dictation phrase | tag-gated | `prose_overlay_toggle_auto_dictation` |
 | `[x]` | Window-name prefix retargets focus then dictates | "edgar hello world" | `prose_overlay_dictation.talon:23` |
-| `[x]` | History recall — last N confirmed prose entries | `overlay history` | `prose_overlay_actions_history.py` |
+| `[x]` | History recall — last N confirmed prose entries | `overlay history` | `ui/actions_history.py` |
 | `[~]` | Insertion at cursor preserves split boundary | dictating mid-buffer w/ cursor active inserts at gap, but doesn't split a token if cursor is mid-token | gap-based; mid-token cursor doesn't exist yet (see §2) |
 
 ## 2. Key-based insertion
@@ -218,7 +218,7 @@ Items 2 + 3 are the meaningful coverage leaps. The other three are quick wins.
 |---|---|---|---|
 | `[x]` | Token selection via cursorless `setSelection` | "take air" → selection on token | shipped |
 | `[x]` | Range selection | "take air past drum" | shipped |
-| `[x]` | Selection highlight render | blue 25% alpha | `prose_overlay_draw_tokens.py:158` |
+| `[x]` | Selection highlight render | blue 25% alpha | `ui/draw_tokens.py:158` |
 | `[~]` | Selection survives surrounding edits | preserved on undo/redo via UndoRecord fields, but currently cleared (Phase 3 work) | UNDO_REDO_PLAN §5 |
 | `[ ]` | Replace selection by dictation | with selection {air}, dictating "trap odd pit" → replaces with "top" | not wired |
 | `[ ]` | Sub-word selection | "take second word this" inside a snake_case token | depends on §3c sub-word resolver |

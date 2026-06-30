@@ -10,8 +10,8 @@ import subprocess
 
 from talon import Module, actions
 
-from .prose_overlay_instance import instance
-from .prose_overlay_actions_core import _recompute_hats
+from ..internal.instance import instance
+from ..shim.actions_core import _recompute_hats
 
 mod = Module()
 
@@ -46,7 +46,7 @@ class Actions:
         If the cursor is active, inserts at the cursor gap position and
         advances the cursor past the inserted tokens. Otherwise appends.
         """
-        from .prose_overlay_actions_cursor import _set_cursor, _auto_scroll_to_cursor
+        from .actions_cursor import _set_cursor, _auto_scroll_to_cursor
         instance._last_input_source = "text"
         if instance.cursor is not None:
             words = text.strip().split()
@@ -93,8 +93,8 @@ class Actions:
         """
         if not chars:
             return
-        from .prose_overlay_actions_cursor import _auto_scroll_to_cursor
-        from .prose_overlay_state import EditKind
+        from .actions_cursor import _auto_scroll_to_cursor
+        from ..internal.state import EditKind
         extending = (
             instance.cursor is None
             and bool(instance.buffer.get_tokens())
@@ -176,8 +176,8 @@ class Actions:
 
     def prose_overlay_confirm():
         """Insert buffer text into the target window (or active window), then hide."""
-        from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
-        from .prose_overlay_actions_flash import _clear_flash
+        from .actions_cursor import _prose_overlay_clear_cursor
+        from .actions_flash import _clear_flash
         if not instance.canvas.is_showing:
             return  # overlay not open — ignore stale ender
         _prose_overlay_clear_cursor()
@@ -216,6 +216,6 @@ class Actions:
 
     def prose_overlay_undo_group_set(enabled: int):
         """Toggle CM6-style dictation coalescing. 1 = group within 400ms, 0 = off."""
-        from . import prose_overlay_state as _state
+        from ..internal import state as _state
         _state._GROUP_DELAY_S = 0.400 if enabled else 0.0
         print(f"prose_overlay: undo grouping {'ON (400ms)' if enabled else 'OFF'}")

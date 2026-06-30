@@ -12,8 +12,8 @@ import os
 
 from talon import Module, actions, settings
 
-from .prose_overlay_instance import instance
-from .prose_overlay_actions_core import _recompute_hats, _sync_tags
+from ..internal.instance import instance
+from ..shim.actions_core import _recompute_hats, _sync_tags
 
 mod = Module()
 
@@ -80,12 +80,12 @@ class Actions:
         instance.buffer.clear()
         instance.target_recall_name = None
         viewport.set_scroll_offset(0)
-        from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
+        from .actions_cursor import _prose_overlay_clear_cursor
         _prose_overlay_clear_cursor()
         _recompute_hats()
         instance.canvas.show()
         _sync_tags()  # canvas.is_showing is now True
-        from .prose_overlay_debug import emit_if_changed
+        from ..internal.debug import emit_if_changed
         emit_if_changed("show")
         # Auto-enable dictation so <user.raw_prose> routes to the buffer.
         # prose_overlay_dictation.talon requires mode: dictation to fire.
@@ -93,15 +93,15 @@ class Actions:
 
     def prose_overlay_hide():
         """Hide the prose overlay and clear the buffer."""
-        from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
-        from .prose_overlay_actions_flash import _clear_flash
+        from .actions_cursor import _prose_overlay_clear_cursor
+        from .actions_flash import _clear_flash
         _prose_overlay_clear_cursor()
         _clear_flash()
         instance.viewport.set_scroll_offset(0)
         instance.canvas.hide()
         instance.buffer.clear()
         _sync_tags()  # canvas.is_showing is now False
-        from .prose_overlay_debug import emit_if_changed
+        from ..internal.debug import emit_if_changed
         emit_if_changed("hide")
         instance.target_window_title = ""
         instance.target_recall_name = None
@@ -136,7 +136,7 @@ class Actions:
 
     def prose_overlay_debug(enabled: int):
         """Enable (1) or disable (0) JSONL state-change debug logging."""
-        from .prose_overlay_debug import set_debug_mode
+        from ..internal.debug import set_debug_mode
         set_debug_mode(bool(enabled))
 
     def prose_overlay_dump_state():
@@ -160,7 +160,7 @@ class Actions:
 
     def prose_overlay_set_homophone_hint(enabled: int):
         """Enable (1) or disable (0) the homophone-underline indicator (slice A)."""
-        from . import prose_overlay_homophones as _h
+        from ..internal import homophones as _h
         _h.set_hint_enabled(bool(enabled))
         if instance.canvas.is_showing:
             instance.canvas.refresh()
@@ -175,7 +175,7 @@ class Actions:
         user.prose_overlay_homophone_shapes setting so either path turns
         shapes on.
         """
-        from . import prose_overlay_shapes as _s
+        from ..shim import shapes as _s
         _s.set_shapes_enabled(bool(enabled))
         if instance.canvas.is_showing:
             instance.canvas.refresh()
@@ -194,19 +194,19 @@ class Actions:
         clears the buffer). This keeps the panel visible and returns the
         buffer to its post-show empty state.
         """
-        from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
-        from .prose_overlay_actions_flash import _clear_flash
+        from .actions_cursor import _prose_overlay_clear_cursor
+        from .actions_flash import _clear_flash
         _prose_overlay_clear_cursor()
         _clear_flash()
         instance.buffer.clear()
         instance.viewport.set_scroll_offset(0)
         instance.change_mode = False
         instance._last_input_source = "init"
-        from .prose_overlay_actions_core import _recompute_hats
+        from ..shim.actions_core import _recompute_hats
         _recompute_hats()
         if instance.canvas is not None:
             instance.canvas.refresh()
-        from .prose_overlay_debug import emit_if_changed
+        from ..internal.debug import emit_if_changed
         emit_if_changed("clear_buffer")
         print("prose_overlay: buffer cleared (canvas still showing)")
 
@@ -235,8 +235,8 @@ class Actions:
           - Doesn't clear saved preferences (~/.talon/prose_overlay_prefs.json).
           - Doesn't re-load any imported modules.
         """
-        from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
-        from .prose_overlay_actions_flash import _clear_flash
+        from .actions_cursor import _prose_overlay_clear_cursor
+        from .actions_flash import _clear_flash
         _prose_overlay_clear_cursor()
         _clear_flash()
         if instance.canvas is not None and instance.canvas.is_showing:
@@ -245,7 +245,7 @@ class Actions:
             instance.history_overlay.hide()
         instance.reset()
         _sync_tags()
-        from .prose_overlay_debug import emit_if_changed
+        from ..internal.debug import emit_if_changed
         emit_if_changed("reset")
         actions.mode.enable("command")
         actions.mode.disable("dictation")

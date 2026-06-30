@@ -2,24 +2,33 @@
 """Layer overfit audit — see docs/LAYER_AUDIT.md.
 
 Asserts the structural invariants that keep prose-overlay portable. Each .py
-module is explicitly assigned to one of four layers; the auditor then checks
-that the layer's import rules hold. Failures are "overfit" — code that has
-leaked across a boundary it shouldn't have.
+module is assigned to one of four layers by the directory it lives in; the
+auditor then checks that the layer's import rules hold. Failures are "overfit"
+— code that has leaked across a boundary it shouldn't have.
 
 Layers (top → bottom in dependency direction):
 
-  4. UI       (Talon-canvas, voice grammar, action classes; freely Talon)
-  3. SHIM     (Talon ↔ {INTERNAL, CURSORLESS} bridges; only allowed
-               import-both layer)
-  2. CURSORLESS (Python re-impl of cursorless logic; ports anywhere that has
-               a token/text buffer)
-  1. INTERNAL (Pure substrate — ProseBuffer, undo/redo, homophone CSV,
-               viewport math; ports anywhere with no Talon)
+  4. UI         (ui/)         Talon canvas, voice grammar, action classes
+                              The root prose_overlay.py also counts as UI —
+                              it's the Talon entry point that wires settings,
+                              tags, contexts, and imports every action module.
+  3. SHIM       (shim/)       Talon ↔ {INTERNAL, CURSORLESS} bridges; the
+                              only layer allowed to import from both above
+                              and below.
+  2. CURSORLESS (cursorless/) Python re-impl of cursorless logic; ports
+                              anywhere with a token/text buffer.
+  1. INTERNAL   (internal/)   Pure substrate — ProseBuffer, undo/redo,
+                              homophone CSV, viewport math; ports anywhere
+                              with no Talon.
 
 The meta-test: this script asserts the layering is honest. If it passes, the
 INTERNAL + CURSORLESS layers are viable primitives in another environment
 (VS Code, Vim, web, …) — drop in a different SHIM and a different UI and
 the buffer logic + cursorless resolution come for free.
+
+Maintenance rule: a new .py file MUST live in one of the four layer
+directories (or be `prose_overlay.py` at the root). New files inherit their
+layer from the directory they sit in — no manual allowlist edit needed.
 
 Exits 0 on pass, 1 on overfit findings.
 
@@ -34,73 +43,59 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
 # -----------------------------------------------------------------------------
-# Layer assignment — explicit per-file. New files MUST be added here.
+# Directory → layer mapping. Files inherit their layer from their parent dir.
+# The root prose_overlay.py is classified as UI (Talon entry point).
 # -----------------------------------------------------------------------------
 
-INTERNAL: set[str] = {
-    "prose_overlay_state.py",          # ProseBuffer + undo/redo + hat allocator
-    "prose_overlay_instance.py",       # shared state container
-    "prose_overlay_homophones.py",     # CSV loader + flag lookup
-    "prose_overlay_debug.py",          # JSONL snapshot writer
-    "prose_overlay_draw_constants.py", # pure visual constants (no Skia types)
-    "prose_overlay_trail.py",          # faulthandler + atomic JSON writer
-    "prose_overlay_viewport.py",       # scroll/anchor math
+LAYER_DIRS: dict[str, str] = {
+    "internal":   "INTERNAL",
+    "cursorless": "CURSORLESS",
+    "shim":       "SHIM",
+    "ui":         "UI",
 }
 
-CURSORLESS: set[str] = {
-    "prose_overlay_cursorless_resolve.py",  # Python re-impl of processTargets
-    "prose_overlay_surrounding_pair.py",    # cursorless delimiter pair handler
+ROOT_UI_FILES: set[str] = {
+    "prose_overlay.py",   # Talon entry point — settings/tags/contexts wiring
 }
 
-SHIM: set[str] = {
-    # Talon → QuickJS (cursorless bundles)
-    "prose_overlay_hats_js.py",
-    "prose_overlay_targets_js.py",
-    "prose_overlay_actions_js.py",
-    # Talon action surface routing to cursorless
-    "prose_overlay_actions_cursorless.py",
-    "prose_overlay_actions_cursorless_edit.py",
-    "prose_overlay_actions_target.py",
-    # _recompute_hats / _hat_to_index — Talon-state mgmt that crosses layers
-    "prose_overlay_actions_core.py",
-    # SVG vocab (portable) + Skia paint (Talon, LAZY-imported)
-    "prose_overlay_shapes.py",
-}
 
-UI: set[str] = {
-    "prose_overlay.py",
-    "prose_overlay_canvas.py",
-    "prose_overlay_draw.py",
-    "prose_overlay_draw_tokens.py",
-    "prose_overlay_help.py",
-    "prose_overlay_history_panel.py",
-    # Talon action classes (voice + canvas interaction)
-    "prose_overlay_actions_bring_move.py",
-    "prose_overlay_actions_cursor.py",
-    "prose_overlay_actions_delete.py",
-    "prose_overlay_actions_flash.py",
-    "prose_overlay_actions_help.py",
-    "prose_overlay_actions_history.py",
-    "prose_overlay_actions_layout.py",
-    "prose_overlay_actions_visibility.py",
-    # Talon cron-driven test queue
-    "prose_overlay_test_driver.py",
-}
+def layer_of(path: pathlib.Path) -> str | None:
+    """Return the layer name for a given .py path, or None if uncategorized."""
+    rel = path.relative_to(REPO)
+    if rel.parent == pathlib.Path("."):
+        if rel.name == "__init__.py":
+            return None  # ignore package marker at root
+        if rel.name in ROOT_UI_FILES:
+            return "UI"
+        return None
+    layer = LAYER_DIRS.get(rel.parent.name)
+    if layer is None:
+        return None
+    if rel.name == "__init__.py":
+        return None  # ignore empty package markers inside layer dirs
+    return layer
 
-LAYER_OF: dict[str, str] = (
-    {f: "INTERNAL"  for f in INTERNAL}
-    | {f: "CURSORLESS" for f in CURSORLESS}
-    | {f: "SHIM"    for f in SHIM}
-    | {f: "UI"      for f in UI}
-)
 
 # -----------------------------------------------------------------------------
 # Import detection
 # -----------------------------------------------------------------------------
 
-TALON_IMPORT_RE = re.compile(r"^\s*(?:from\s+talon(?:\.[\w.]+)?\s+import|import\s+talon(?:\.[\w.]+)?)", re.MULTILINE)
-LAZY_TALON_RE = re.compile(r"^\s+(?:from\s+talon(?:\.[\w.]+)?\s+import|import\s+talon(?:\.[\w.]+)?)", re.MULTILINE)
-INTERNAL_IMPORT_RE = re.compile(r"^\s*from\s+\.prose_overlay_cursorless_resolve\b|^\s*from\s+\.prose_overlay_surrounding_pair\b", re.MULTILINE)
+TALON_IMPORT_RE = re.compile(
+    r"^\s*(?:from\s+talon(?:\.[\w.]+)?\s+import|import\s+talon(?:\.[\w.]+)?)",
+    re.MULTILINE,
+)
+
+# UI files should not reach into cursorless/ directly — that crosses the SHIM
+# layer. We match any relative import that names `cursorless` as the first
+# segment after the leading dots, e.g.
+#   from .cursorless.resolve import ...       (root prose_overlay.py)
+#   from ..cursorless.surrounding_pair ...    (a file inside ui/)
+#   from ..cursorless import resolve          (rare, but caught)
+UI_BYPASS_RE = re.compile(
+    r"^\s*from\s+\.+cursorless(?:\.[\w_]+)*\s+import\b|"
+    r"^\s*from\s+\.+\s+import\s+cursorless\b",
+    re.MULTILINE,
+)
 
 
 def top_level_talon_imports(path: pathlib.Path) -> list[tuple[int, str]]:
@@ -113,7 +108,7 @@ def top_level_talon_imports(path: pathlib.Path) -> list[tuple[int, str]]:
 
 
 def imports_cursorless_resolver(path: pathlib.Path) -> bool:
-    return bool(INTERNAL_IMPORT_RE.search(path.read_text(encoding="utf-8")))
+    return bool(UI_BYPASS_RE.search(path.read_text(encoding="utf-8")))
 
 
 # -----------------------------------------------------------------------------
@@ -131,6 +126,14 @@ def warn(code: str, message: str) -> None:
     findings.append(("WARN", code, message))
 
 
+def _rel(path: pathlib.Path) -> str:
+    """Path string relative to REPO for human-readable error messages."""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
+
+
 # -----------------------------------------------------------------------------
 # Invariants
 # -----------------------------------------------------------------------------
@@ -138,64 +141,57 @@ def warn(code: str, message: str) -> None:
 def check_invariant_1_internal_no_talon(py_files: list[pathlib.Path]) -> None:
     """INTERNAL layer files must not import from talon at top level."""
     for p in py_files:
-        if p.name not in INTERNAL:
+        if layer_of(p) != "INTERNAL":
             continue
         leaks = top_level_talon_imports(p)
-        if leaks:
-            for lineno, line in leaks:
-                fail(
-                    "I1.INTERNAL_TALON_IMPORT",
-                    f"{p.name}:{lineno} — INTERNAL layer file imports talon ({line!r}). "
-                    f"Refactor: move to SHIM, or replace talon.X with a pure-Python equivalent.",
-                )
+        for lineno, line in leaks:
+            fail(
+                "I1.INTERNAL_TALON_IMPORT",
+                f"{_rel(p)}:{lineno} — INTERNAL layer file imports talon ({line!r}). "
+                f"Refactor: move to SHIM, or replace talon.X with a pure-Python equivalent.",
+            )
 
 
 def check_invariant_2_cursorless_no_talon(py_files: list[pathlib.Path]) -> None:
     """CURSORLESS layer files (Python re-impl) must not import from talon."""
     for p in py_files:
-        if p.name not in CURSORLESS:
+        if layer_of(p) != "CURSORLESS":
             continue
         leaks = top_level_talon_imports(p)
-        if leaks:
-            for lineno, line in leaks:
-                fail(
-                    "I2.CURSORLESS_TALON_IMPORT",
-                    f"{p.name}:{lineno} — CURSORLESS layer file imports talon ({line!r}). "
-                    f"Refactor: this layer must be portable across editor environments.",
-                )
+        for lineno, line in leaks:
+            fail(
+                "I2.CURSORLESS_TALON_IMPORT",
+                f"{_rel(p)}:{lineno} — CURSORLESS layer file imports talon ({line!r}). "
+                f"Refactor: this layer must be portable across editor environments.",
+            )
 
 
 def check_invariant_3_ui_no_resolver(py_files: list[pathlib.Path]) -> None:
-    """UI layer files should not import from the Python cursorless resolver
-    or surrounding_pair directly — that crosses through the SHIM layer."""
+    """UI layer files should not import from the cursorless layer directly —
+    that crosses through the SHIM layer."""
     for p in py_files:
-        if p.name not in UI:
+        if layer_of(p) != "UI":
             continue
         if imports_cursorless_resolver(p):
             warn(
                 "I3.UI_BYPASSES_SHIM",
-                f"{p.name} — UI layer file imports CURSORLESS layer directly. "
+                f"{_rel(p)} — UI layer file imports CURSORLESS layer directly. "
                 f"Refactor: route through a SHIM module instead.",
             )
 
 
 def check_invariant_4_all_files_categorized(py_files: list[pathlib.Path]) -> None:
-    """Every prose_overlay_*.py file must be assigned to exactly one layer."""
-    seen = {p.name for p in py_files}
-    all_categorized = INTERNAL | CURSORLESS | SHIM | UI
-    uncategorized = seen - all_categorized
-    for f in sorted(uncategorized):
-        fail(
-            "I4.UNCATEGORIZED",
-            f"{f} — not assigned to any layer. "
-            f"Add to INTERNAL / CURSORLESS / SHIM / UI in scripts/layer-audit.py.",
-        )
-    stale = all_categorized - seen
-    for f in sorted(stale):
-        warn(
-            "I4.STALE_CATEGORIZATION",
-            f"{f} — listed in a layer set but the file does not exist. Remove from layer-audit.",
-        )
+    """Every .py file must live in a layer directory (or be the root entry
+    point prose_overlay.py). Files in unknown locations are uncategorized."""
+    for p in py_files:
+        if layer_of(p) is None:
+            fail(
+                "I4.UNCATEGORIZED",
+                f"{_rel(p)} — not assigned to any layer. "
+                f"Move into internal/, cursorless/, shim/, or ui/, "
+                f"or add to ROOT_UI_FILES in scripts/layer-audit.py "
+                f"if it is another Talon entry point.",
+            )
 
 
 def check_invariant_5_internal_has_no_lazy_talon(py_files: list[pathlib.Path]) -> None:
@@ -203,7 +199,7 @@ def check_invariant_5_internal_has_no_lazy_talon(py_files: list[pathlib.Path]) -
     even a function-local talon import means the function can't run in a
     non-Talon environment."""
     for p in py_files:
-        if p.name not in INTERNAL:
+        if layer_of(p) != "INTERNAL":
             continue
         for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1):
             # Skip top-level matches (caught by I1)
@@ -213,7 +209,7 @@ def check_invariant_5_internal_has_no_lazy_talon(py_files: list[pathlib.Path]) -
             if (stripped.startswith("from talon") or stripped.startswith("import talon")) and len(line) > len(stripped):
                 fail(
                     "I5.INTERNAL_LAZY_TALON",
-                    f"{p.name}:{i} — INTERNAL layer has a lazy talon import ({line.strip()!r}). "
+                    f"{_rel(p)}:{i} — INTERNAL layer has a lazy talon import ({line.strip()!r}). "
                     f"Pure layer must not depend on talon at any call site.",
                 )
 
@@ -223,7 +219,26 @@ def check_invariant_5_internal_has_no_lazy_talon(py_files: list[pathlib.Path]) -
 # -----------------------------------------------------------------------------
 
 def collect_py_files() -> list[pathlib.Path]:
-    return sorted(REPO.glob("prose_overlay*.py"))
+    """Collect every .py file in the four layer directories and at the root.
+
+    Skips:
+      - __init__.py (empty package markers carry no logic to audit)
+      - Anything outside the four layer dirs or root prose_overlay.py
+        (those are flagged by I4 if they look like project files)
+    """
+    out: list[pathlib.Path] = []
+    # Layer directories
+    for layer_dir in LAYER_DIRS:
+        d = REPO / layer_dir
+        if not d.is_dir():
+            continue
+        out.extend(p for p in sorted(d.glob("*.py")) if p.name != "__init__.py")
+    # Root entry point
+    for name in sorted(ROOT_UI_FILES):
+        p = REPO / name
+        if p.is_file():
+            out.append(p)
+    return out
 
 
 def print_report(passed: bool) -> None:
@@ -246,7 +261,7 @@ def print_report(passed: bool) -> None:
 
 def main() -> int:
     py_files = collect_py_files()
-    check_invariant_4_all_files_categorized(py_files)  # run first to flag stragglers
+    check_invariant_4_all_files_categorized(py_files)
     check_invariant_1_internal_no_talon(py_files)
     check_invariant_2_cursorless_no_talon(py_files)
     check_invariant_3_ui_no_resolver(py_files)

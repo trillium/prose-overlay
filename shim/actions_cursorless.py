@@ -10,22 +10,22 @@ from typing import Any
 
 from talon import Module, actions
 
-from .prose_overlay_instance import instance
-from .prose_overlay_state import EditKind
-from .prose_overlay_actions_core import _recompute_hats
-from .prose_overlay_actions_flash import _flash_tokens, _action_color
-from .prose_overlay_cursorless_resolve import (
+from ..internal.instance import instance
+from ..internal.state import EditKind
+from .actions_core import _recompute_hats
+from ..ui.actions_flash import _flash_tokens, _action_color
+from ..cursorless.resolve import (
     _resolve_target_to_token_range,
     _cursorless_symbol_to_token_index,
     _SUPPORTED_SIMPLE_ACTIONS,
 )
-from .prose_overlay_actions_cursorless_edit import (
+from .actions_cursorless_edit import (
     _po_matcher_misfire,
     _token_char_range,
     _cursor_to_char,
     _apply_edit_plan,
 )
-from . import prose_overlay_actions_js as _js
+from . import actions_js as _js
 
 mod = Module()
 

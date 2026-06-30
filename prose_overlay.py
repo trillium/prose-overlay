@@ -9,18 +9,18 @@ from typing import Optional
 
 from talon import Context, Module, actions, settings, ui
 
-from .prose_overlay_canvas import OverlayCanvas
-from . import prose_overlay_draw as _draw_mod_ref
-from .prose_overlay_state import ProseBuffer
-from .prose_overlay_viewport import Viewport
+from .ui.canvas import OverlayCanvas
+from .ui import draw as _draw_mod_ref
+from .internal.state import ProseBuffer
+from .internal.viewport import Viewport
 from ...utils.overlay_kit import DismissibleOverlay
-from .prose_overlay_cursorless_resolve import (
+from .cursorless.resolve import (
     _state as _resolve_state,
 )
-from .prose_overlay_instance import instance
-from .prose_overlay_actions_core import _recompute_hats, _sync_tags, _hat_to_index
-from . import prose_overlay_trail  # noqa: F401
-from . import prose_overlay_test_driver  # noqa: F401
+from .internal.instance import instance
+from .shim.actions_core import _recompute_hats, _sync_tags, _hat_to_index
+from .internal import trail  # noqa: F401
+from .ui import test_driver  # noqa: F401
 
 mod = Module()
 
@@ -150,7 +150,7 @@ instance.canvas = OverlayCanvas(instance.buffer)
 # ---------------------------------------------------------------------------
 # Import helpers from history module now that instance.canvas and
 # instance.draw_mod are set.
-from .prose_overlay_actions_history import _on_draw_history, _on_history_overlay_hide  # noqa: E402
+from .ui.actions_history import _on_draw_history, _on_history_overlay_hide  # noqa: E402
 
 instance.history_overlay = DismissibleOverlay(
     on_draw=_on_draw_history,
@@ -164,7 +164,7 @@ instance.history_overlay = DismissibleOverlay(
 # ---------------------------------------------------------------------------
 # Load persisted preferences
 # ---------------------------------------------------------------------------
-from .prose_overlay_actions_visibility import _load_prefs  # noqa: E402
+from .ui.actions_visibility import _load_prefs  # noqa: E402
 _load_prefs()
 
 
@@ -219,9 +219,9 @@ class _ShimActions:
 # ---------------------------------------------------------------------------
 # Import action sub-modules so Talon registers their action classes
 # ---------------------------------------------------------------------------
-from . import prose_overlay_actions_cursor      # noqa: F401, E402
-from . import prose_overlay_actions_layout      # noqa: F401, E402
-from . import prose_overlay_actions_history     # noqa: F401, E402
-from . import prose_overlay_actions_help        # noqa: F401, E402
-from . import prose_overlay_actions_visibility  # noqa: F401, E402
-from . import prose_overlay_actions_cursorless  # noqa: F401, E402
+from .ui import actions_cursor      # noqa: F401, E402
+from .ui import actions_layout      # noqa: F401, E402
+from .ui import actions_history     # noqa: F401, E402
+from .ui import actions_help        # noqa: F401, E402
+from .ui import actions_visibility  # noqa: F401, E402
+from .shim import actions_cursorless  # noqa: F401, E402

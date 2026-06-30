@@ -30,7 +30,7 @@ import talon.lib.js as js
 # Module-level JS context — created once, reused across calls
 # ---------------------------------------------------------------------------
 
-_JS_BUNDLE = os.path.join(os.path.dirname(__file__), "js", "prose_actions.js")
+_JS_BUNDLE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "js", "prose_actions.js")
 
 _ctx: js.Context | None = None
 _fn = None  # js.Object — the proseRunAction function

@@ -11,12 +11,12 @@ from talon import ui
 from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect
 
-from ...utils.overlay_kit import (
+from ....utils.overlay_kit import (
     DismissibleOverlay,
     draw_panel_frame,
     draw_separator,
 )
-from .prose_overlay_draw_constants import (
+from ..internal.draw_constants import (
     PANEL_RADIUS, PANEL_PAD,
     BG_COLOR, BORDER_COLOR, TOKEN_COLOR,
     HINT_COLOR, HINT_CMD_COLOR, SEP_COLOR, HELP_TITLE_COLOR,

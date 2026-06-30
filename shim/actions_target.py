@@ -11,7 +11,7 @@ Contains:
 
 from talon import Module, actions
 
-from .prose_overlay_instance import instance
+from ..internal.instance import instance
 
 mod = Module()
 

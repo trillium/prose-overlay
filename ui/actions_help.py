@@ -9,7 +9,7 @@ Never imports prose_overlay.py.
 
 from talon import Module
 
-from .prose_overlay_instance import instance
+from ..internal.instance import instance
 
 mod = Module()
 
@@ -31,13 +31,13 @@ class Actions:
 
     def prose_overlay_help_next():
         """Advance to next help page (wraps)."""
-        from .prose_overlay_help import HELP_PAGES
+        from .help import HELP_PAGES
         instance.help_page = (instance.help_page + 1) % len(HELP_PAGES)
         instance.canvas.refresh()
 
     def prose_overlay_help_back():
         """Go to previous help page (wraps)."""
-        from .prose_overlay_help import HELP_PAGES
+        from .help import HELP_PAGES
         instance.help_page = (instance.help_page - 1) % len(HELP_PAGES)
         instance.canvas.refresh()
 

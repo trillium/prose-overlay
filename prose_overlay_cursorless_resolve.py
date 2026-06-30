@@ -4,7 +4,6 @@ via the module-level ``_state``.
 """
 
 import re
-from talon import actions, settings  # noqa: F401
 
 from .prose_overlay_surrounding_pair import (
     _char_range_to_token_range,
@@ -222,6 +221,7 @@ def _resolve_implicit_target() -> "list[tuple[int, int]] | None":
 
 def _resolve_target_to_token_range(target) -> "list[tuple[int, int]] | None":
     """Dispatch any CursorlessTarget; routes through the JS bundle when enabled."""
+    from talon import settings  # lazy: keeps top-level CURSORLESS layer talon-free
     if settings.get("user.prose_overlay_use_js_resolver", False):
         from . import prose_overlay_targets_js  # lazy: avoids circular dep
         try:

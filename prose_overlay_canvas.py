@@ -27,8 +27,10 @@ class OverlayCanvas:
     def __init__(self, buffer: ProseBuffer):
         self._buffer = buffer
         self._hat_assignments: dict[int, tuple[int, str]] | None = None
+        self._suppress_on_hide = False
         self._overlay = DismissibleOverlay(
             on_draw=self._on_draw,
+            on_hide=self._on_dismissed_externally,
             auto_hide=None,
             close_hint_text='"overlay dismiss"',
             close_hint_size=12,
@@ -57,7 +59,17 @@ class OverlayCanvas:
 
     def hide(self):
         """Tear down the canvas."""
-        self._overlay.hide()
+        self._suppress_on_hide = True
+        try:
+            self._overlay.hide()
+        finally:
+            self._suppress_on_hide = False
+
+    def _on_dismissed_externally(self):
+        # Suppressed when the voice path already ran prose_overlay_hide(), preventing recursion.
+        if self._suppress_on_hide:
+            return
+        actions.user.prose_overlay_hide()
 
     def _on_draw(self, c: SkiaCanvas, overlay: DismissibleOverlay):
         """Draw callback: delegates to the draw module, reports panel rect(s).

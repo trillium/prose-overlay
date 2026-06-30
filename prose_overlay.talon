@@ -39,6 +39,13 @@ overlay debug off: user.prose_overlay_debug(0)
 # Dump current buffer + hat state to the Talon log (one-shot, no flag needed)
 overlay dump: user.prose_overlay_dump_state()
 
+# Headless test driver — enables file-driven dispatch from scripts/test-overlay.sh
+# without needing PROSE_OVERLAY_TEST=1 at Talon launch. Sticky across hot-reload
+# via ~/.talon/prose_overlay_test_enabled.
+overlay test on: user.prose_overlay_test_set(1)
+overlay test off: user.prose_overlay_test_set(0)
+overlay test status: user.prose_overlay_test_status()
+
 # Homophone underline indicator (slice A — docs/HOMOPHONE_UI_PLAN.md)
 overlay hints homo on: user.prose_overlay_set_homophone_hint(1)
 overlay hints homo off: user.prose_overlay_set_homophone_hint(0)

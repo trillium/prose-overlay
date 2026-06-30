@@ -1,11 +1,16 @@
 """File-driven command queue for headless overlay testing.
 
-Gated on env var ``PROSE_OVERLAY_TEST=1`` (default off — production users
-don't need a polling cron). When enabled, a 200 ms cron tails
-``~/.talon/prose_overlay_test_queue.jsonl`` and dispatches each new JSON line
-as a Talon action call. Lets external processes (shells, scripts, agents)
-drive the overlay as if dictating, without going through the voice loop or
-the cursorless RPC.
+Activation paths (any of):
+  * env var ``PROSE_OVERLAY_TEST=1`` at Talon launch  (legacy / boot-on)
+  * flag file ``~/.talon/prose_overlay_test_enabled`` exists at module import
+  * voice command ``overlay test on`` mid-session (action
+    ``prose_overlay_test_set(1)``), which creates the flag file as a sticky
+    enable so hot-reload survives.
+
+When active, a 200 ms cron tails ``~/.talon/prose_overlay_test_queue.jsonl``
+and dispatches each new JSON line as a Talon action call. Lets external
+processes (shells, scripts, agents) drive the overlay as if dictating,
+without going through the voice loop or the cursorless RPC.
 
 The watcher tracks file position by byte offset; appending lines is
 sufficient, no signal needed. Pairs with the always-on debug JSONL
@@ -33,12 +38,70 @@ Shell shortcut: ``scripts/test-overlay.sh <verb> [args...]`` wraps the JSON.
 import json
 import os
 
-from talon import actions, cron
+from talon import Module, actions, cron
 
 
 _QUEUE = os.path.expanduser("~/.talon/prose_overlay_test_queue.jsonl")
+_FLAG_FILE = os.path.expanduser("~/.talon/prose_overlay_test_enabled")
 _pos = 0  # byte offset; advance as we consume lines
 _job = None
+_enabled = False
+
+
+def _start_cron() -> None:
+    global _pos, _job, _enabled
+    if _job is not None:
+        return
+    try:
+        _pos = os.path.getsize(_QUEUE)
+    except FileNotFoundError:
+        _pos = 0
+    _job = cron.interval("200ms", _tick)
+    _enabled = True
+    print(f"prose_overlay test: driver ACTIVE — append commands to {_QUEUE}")
+
+
+def _stop_cron() -> None:
+    global _job, _enabled
+    if _job is None:
+        return
+    cron.cancel(_job)
+    _job = None
+    _enabled = False
+    print("prose_overlay test: driver INACTIVE")
+
+
+mod = Module()
+
+
+@mod.action_class
+class Actions:
+    def prose_overlay_test_set(enabled: int):
+        """Enable (1) or disable (0) the headless test driver at runtime.
+        Enabling persists across hot-reload via ~/.talon/prose_overlay_test_enabled.
+        """
+        if enabled:
+            try:
+                open(_FLAG_FILE, "w").close()
+            except OSError as e:
+                print(f"prose_overlay test: flag-file create failed: {e}")
+            _start_cron()
+        else:
+            try:
+                if os.path.exists(_FLAG_FILE):
+                    os.remove(_FLAG_FILE)
+            except OSError as e:
+                print(f"prose_overlay test: flag-file remove failed: {e}")
+            _stop_cron()
+
+    def prose_overlay_test_status():
+        """Print whether the headless test driver is currently active."""
+        flag = os.path.exists(_FLAG_FILE)
+        env = os.environ.get("PROSE_OVERLAY_TEST") == "1"
+        print(
+            f"prose_overlay test: enabled={_enabled} "
+            f"(flag_file={flag}, env={env}, queue={_QUEUE})"
+        )
 
 
 def _dispatch(cmd: dict) -> None:
@@ -106,12 +169,5 @@ def _tick() -> None:
         _dispatch(cmd)
 
 
-if os.environ.get("PROSE_OVERLAY_TEST") == "1":
-    # Start the cursor at end-of-file so we don't re-process queue contents
-    # that were sitting around from a prior Talon session.
-    try:
-        _pos = os.path.getsize(_QUEUE)
-    except FileNotFoundError:
-        _pos = 0
-    _job = cron.interval("200ms", _tick)
-    print(f"prose_overlay test: driver active — append commands to {_QUEUE}")
+if os.environ.get("PROSE_OVERLAY_TEST") == "1" or os.path.exists(_FLAG_FILE):
+    _start_cron()

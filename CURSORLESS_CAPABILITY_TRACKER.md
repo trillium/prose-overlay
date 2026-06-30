@@ -70,14 +70,19 @@ Can the overlay resolve different target shapes?
   - Maps to `_state.cursor` (gap index converted to token index)
   - Deletes one token at cursor position
 
+### RangeTarget with implicit anchor
+- **"chuck past this"** — ✅ Fixed (commit 46c93fc)
+  - `anchor.type == "implicit"` now resolves to `max(0, cursor - 1)` instead of returning None
+  - Range runs from one-before-cursor through the active hat
+
 - **"change this"** — ✅ Works
   - Same, but action is "clearAndSetSelection", enters change mode
 
 ### List Target (Multi-target `and` expressions)
-- **"chuck air and bat"** — ❌ Not implemented
-  - `_resolve_target_to_token_range()` detects type=="list" and logs:
-    > "prose_overlay: ListTarget (multi-target 'and' expressions) are not supported — operate on targets individually"
-  - Returns None, action is a no-op
+- **"chuck air and bat"** — ✅ Fixed (commit 46c93fc)
+  - `_resolve_target_to_token_range()` iterates `target["elements"]`, resolves each recursively
+  - Returns `list[tuple[int,int]]`; all callers iterate in reverse order for index stability
+  - Both targets flashed, both deleted
 
 ---
 
@@ -165,6 +170,17 @@ For each action, does it work and does it have visual feedback?
   - Flash: green before executing
   - If no cursor active, no-ops with error log
 
+### format <formatters> at <cursorless_target> (applyFormatter)
+- **"format snake at air"** — ✅ Works
+  - Grammar: `{user.cursorless_reformat_action} <user.formatters> at <user.cursorless_target>`
+  - Maps to `prose_overlay_apply_formatter(target, formatters)`
+  - Resolves target to token range, joins tokens with spaces, calls `actions.user.reformat_text(text, formatters)`
+  - Replaces source tokens with formatted result (single token for joined forms like snake_case, multiple for spaced forms)
+  - Flash: purple before executing
+  - Supports all community formatters: snake, camel, hammer (PascalCase), kebab, constant (ALL_CAPS,SNAKE_CASE), smash, dotted, all cap, all down, etc.
+  - Supports range targets: "format snake at air past bat" reformats the entire range
+  - Undo support via snapshot() before mutation
+
 ---
 
 ## 3. Visual Feedback
@@ -180,6 +196,7 @@ What does the user see when commands execute?
   - clearAndSetSelection: amber (e5a02c)
   - setSelectionBefore/After: white (ffffff)
   - replaceWithTarget/moveToTarget: green (36b33f)
+  - applyFormatter: purple (a855f7)
 - **Implementation:** Flash state stored in `instance.flash_state` dict, callback scheduled via `cron.after(f"{duration_ms}ms", _after_flash)`
 
 ### Selection Highlight (Persistent)
@@ -226,16 +243,15 @@ For each scope modifier, does it resolve correctly?
 | `word` | "sub" | Single token at cursor | ✅ |
 | `identifier` | "identifier" | Single token at cursor | ✅ |
 | `character` | "char" | Single token at cursor (lossy) | ⚠️ |
-| *(all others)* | *(not in Cursorless prose scope list)* | Logs error, returns None | ❌ |
+| `nonWhitespaceSequence` | (Cursorless internal) | Regex `\S+` match containing cursor | ✅ Fixed (46c93fc) |
+| `url` | "url" | URL regex match containing cursor | ✅ Fixed (46c93fc) |
+| *(code scopes)* | statement, comment, class, etc. | Logs error, returns None | ❌ |
 
 **Scope type gaps:**
-- Only 8 scope types recognized (hardcoded in `_WHOLE_BUFFER_SCOPE_TYPES` and `_WORD_SCOPE_TYPES`)
-- Real Cursorless has 50+ scope types (statement, comment, class, function, regex, etc.)
+- 10 scope types now recognized; code-structure scopes (statement, function, class, etc.) remain ❌
 - Any scope type not in the hardcoded sets → logs "unrecognized scope type" and returns None
-- **Example fails:**
-  - "chuck statement" → ❌ (scopeType.type == "statement" not recognized)
-  - "chuck comment" → ❌
-  - "chuck regex" → ❌
+- **Prose-level scopes implementable without a language server** (see section 8 below)
+- **Example still fails:** "chuck statement", "chuck comment", "chuck function" → ❌
 
 ---
 
@@ -316,46 +332,26 @@ For each scope modifier, does it resolve correctly?
 ### Multi-token copy/move limitation
 - **Command:** "bring air past bat to cap" where air="hello", bat="world"
 - **Expected (real Cursorless):** cap becomes "hello world" (two-token replacement)
-- **Actual:** cap becomes "hello" (only first token copied)
-- **Reason:** `replace_token()` uses `words[0]` after splitting on whitespace
-- **Impact:** Multi-word phrases can't be fully copied via bring/move; lose everything after first word
-- **Fix available:** Switch from word-split to character-range replace. Cursorless's
-  `ProseTextEditorEdit.replace(range, text)` in `proseShim.ts` handles multi-word correctly
-  by treating the source as a character range, not individual tokens. Small adaptation.
+- **Actual:** ✅ Fixed (commit 46c93fc) — `bring_hat_to_hat` and `move_hat_to_hat` now use
+  `snapshot()` + `_tokens.pop()` + `_tokens.insert()` directly, bypassing the old `replace_token()`
+  which was `words[0]`-only
 
 ### ListTarget multi-target AND expressions
 - **Command:** "chuck air and bat"
-- **Expected:** Deletes both air and bat
-- **Actual:** Logs error "multi-target 'and' expressions are not supported", no-ops
-- **Workaround:** Execute as two separate commands: "chuck air" then "chuck bat"
-- **Fix available:** Cursorless's `TargetPipelineRunner.ts:90–95` handles ListTarget with a
-  simple `target.elements.flatMap(...)`. Drop-in: iterate elements, resolve each to a token
-  range, apply action to each independently.
+- **Status:** ✅ Fixed (commit 46c93fc)
 
 ### RangeTarget with implicit anchor
-- **Command:** "chuck past this" (no explicit anchor, implicit range from current to target)
-- **Expected (real Cursorless):** Range from cursor to target
-- **Actual:** Logs error "RangeTarget with implicit anchor is not supported", returns None
-- **Reason:** Code explicitly rejects `anchor.type == "implicit"` in range resolution
-- **Fix available:** Cursorless's `ImplicitStage.ts` resolves implicit anchor by reading
-  current selection from `ide()`. For prose overlay, replace that with `_resolve_state.cursor`.
-  Small adaptation — one guard removal + cursor lookup.
+- **Command:** "chuck past this"
+- **Status:** ✅ Fixed (commit 46c93fc)
 
 ### Unrecognized scope types (silent fail)
 - **Command:** "chuck statement"
 - **Expected:** Deletes statement-level scope
 - **Actual:** Logs "unrecognized scope type 'statement'", returns None, command is no-op
-- **Reason:** Only 8 scope types hardcoded; Cursorless has 50+
 - **User experience:** No error feedback visible in overlay; only in Talon logs
-- **Partial fix available (text-only scopes):** Several Cursorless scope types are pure regex
-  with no language server dependency — extractable from `RegexScopeHandler.ts`:
-  - `nonWhitespaceSequence` — regex `/\S+/g`
-  - `url` — full URL regex
-  - `character` — Unicode-aware `/\p{L}\p{M}*|.../gu`
-  - `glyph` — arbitrary char match
-  - `customRegex` — user-provided regex
-  These are drop-in bundles. Parse-tree scopes (statement, function, class) can never be
-  supported without a language server — those stay ❌.
+- **Regex scopes fixed:** `nonWhitespaceSequence` and `url` now implemented (commit 46c93fc)
+- **Prose scopes roadmap:** See section 8 below — sentence/clause/quoted-string achievable with zero deps
+- **Parse-tree scopes:** statement, function, class, comment stay ❌ — require a language server
 
 ### Non-ASCII hat allocation (Python fallback)
 - **Command:** Using cursor position to trigger hat allocation for accented text (café, Zürich, etc.)
@@ -411,9 +407,11 @@ For each scope modifier, does it resolve correctly?
 ### Fully Working (✅)
 - Single hat targets with or without color
 - Range targets (anchor past active)
-- Scope targets (8 types: file, line, block, token, word, identifier, char)
+- List targets (and expressions) — fixed 46c93fc
+- RangeTarget with implicit anchor (past this) — fixed 46c93fc
+- Scope targets (10 types: file, line, block, token, word, identifier, char, nonWhitespaceSequence, url)
 - Actions: remove, setSelection, clearAndSetSelection, setSelectionBefore/After
-- Bring and move (hat-to-hat copy/cut)
+- Bring and move (hat-to-hat copy/cut, multi-token) — fixed 46c93fc
 - Bring/move to cursor position
 - Visual feedback: flash highlight (all colors), selection highlight (blue), cursor (white/amber), hat dots (colors), cursor blink
 - Head and tail range modifiers
@@ -422,15 +420,14 @@ For each scope modifier, does it resolve correctly?
 - Implicit target (this / cursor position)
 
 ### Partially Working (⚠️)
-- Multi-token copy/move (limited to first token)
 - Char scope (resolves to entire token, not individual chars)
 - Non-ASCII hats (JS path perfect, Python fallback lossy)
 - Selection persistence (doesn't always clear; may highlight stale tokens)
 
 ### Not Implemented (❌)
-- ListTarget (and expressions)
-- RangeTarget with implicit anchor (past this)
-- 40+ scope types (only 8 supported)
+- Prose-level scopes: sentence, clause, quoted_string, number (achievable — see section 8)
+- Noun-phrase scope (requires spaCy — see section 8)
+- Code/AST scopes: statement, function, class, comment (require language server — will never work)
 - VS Code-only actions (scroll, fold, wrap, etc.)
 - Multi-codepoint grapheme support in Python fallback
 - User-visible error messages (logs only)
@@ -485,3 +482,80 @@ bunx esbuild \
 
 **Risk:** If `proseStandalone.ts` changes in Cursorless upstream, bundle must be rebuilt.
 
+---
+
+## 8. Prose-Level Scope Expansion Roadmap
+
+**Background:** Research (2026-05-23) confirmed that tree-sitter has no English prose grammar
+and cannot be used for natural language scope detection. Code-structure scopes (statement,
+function, class) require a language server and will never work in the overlay. However, several
+prose-level scopes are achievable without any external dependencies.
+
+### Tier 1 — Zero dependencies (stdlib regex only)
+
+All of these can be added to `_REGEX_SCOPE_PATTERNS` in `prose_overlay_cursorless_resolve.py`:
+
+| Scope type | Regex approach | Notes |
+|---|---|---|
+| `sentence` | Lookbehind on `.?!` + whitespace | Fails on `Dr.`, `e.g.`, `U.S.` — use pysbd (Tier 2) instead |
+| `clause` | Comma before FANBOYS conjunction | Approximate; misses subordinate clauses without leading comma |
+| `quoted_string` | `"[^"]*"` | Exact |
+| `number` | `\b\d+(?:[,.]\d+)*\b` | Integer and decimal, localized formats |
+| `email` | Standard email regex | Exact |
+| `url` | Already implemented ✅ | — |
+| `nonWhitespaceSequence` | Already implemented ✅ | — |
+
+### Tier 2 — pysbd (69KB, pure Python, zero C extensions)
+
+`pysbd` is a Python port of the same Pragmatic Segmenter that Cursorless's JS `sbd` package
+uses for its `sentence` scope handler. It correctly handles `Dr.`, `Mr.`, `U.S.`, `e.g.`
+
+**Install:** `~/.talon/.venv/bin/pip install pysbd`
+
+Talon's `.venv` pip path is officially supported (confirmed from `sitecustomize.py` in
+`/Applications/Talon.app`). Packages installed there are importable in any Talon script with
+no restarts or path hacks.
+
+**Alternative:** Vendor `pysbd/` as a `.subtrees/` directory (like `talon-gaze-ocr` does)
+for distribution without requiring a user pip step.
+
+**Performance:** 0.23ms per call — fast enough for interactive use.
+
+### Tier 3 — onnxruntime + numpy (already bundled in Talon, already signed)
+
+Talon ships `onnxruntime 1.22.0` and `numpy 2.3.2` under its own Team ID (`D7SCFBXQXZ`).
+These load without restriction. A quantized ONNX-exported POS tagger could power `noun_phrase`
+and `verb_phrase` scope detection in ~5MB with sub-millisecond inference. No such model is
+packaged for this use case yet — building one is the realistic long-term path to linguistically-
+parsed scopes.
+
+### Why spaCy, NLTK, and tree-sitter are permanently blocked
+
+Talon's macOS hardened runtime (`com.apple.security.cs.runtime`, Team ID `D7SCFBXQXZ`) requires
+that any native `.so` extension share the same Team ID as Talon. Pip-installed packages have
+`TeamIdentifier=not set`. macOS rejects the load unconditionally — ad-hoc re-signing does not
+fix the mismatch. This blocks:
+
+- **spaCy**: `thinc/backends/numpy_ops.cpython-313-darwin.so` → blocked
+- **tree-sitter Python**: `_binding.cpython-313-darwin.so` → blocked (also: no prose grammar exists)
+- **NLTK**: imports `regex` C extension at `__init__` → blocked (individual pure-Python files
+  like `nltk.tokenize.punkt` can be manually loaded via `importlib`, but pysbd is simpler)
+
+The only path to richer linguistic scopes is either: (a) build an ONNX model that runs on
+Talon's already-signed `onnxruntime`, or (b) the Talon author co-signs a spaCy distribution
+under Team ID `D7SCFBXQXZ`.
+
+### What Cursorless already ships for prose
+
+For reference, Cursorless's own sentence scope uses `sbd` npm package (JS rule-based).
+Cursorless does NOT have a `clause` or `noun_phrase` scope. These would be novel additions.
+
+| Cursorless scope | Implementation |
+|---|---|
+| `paragraph` | Pure newline iteration |
+| `sentence` | `sbd` npm package (JS port of Pragmatic Segmenter) |
+| `line`, `fullLine` | Newline iteration |
+| `word`, `token`, `identifier` | Regex + camelCase split |
+| `character` | Character indexing |
+| `url`, `customRegex` | `RegexScopeHandler.ts` |
+| `surroundingPair` | Bracket/quote matching |

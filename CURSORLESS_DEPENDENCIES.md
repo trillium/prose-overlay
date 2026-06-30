@@ -39,13 +39,14 @@ into Talon's QuickJS engine by `prose_overlay_hats_js.py`.
 
 **Build command:**
 ```bash
-cd ~/code/cursorless
-bunx esbuild \
-  packages/cursorless-engine/src/util/allocateHats/proseStandalone.ts \
-  --bundle --format=iife --platform=browser --target=es2020 \
-  "--alias:lodash-es=lodash" \
-  --outfile=~/.talon/user/trillium_talon/trillium/plugin/prose_overlay/js/prose_allocate_hats.js
+cd ~/code/prose-overlay
+bun scripts/build-js.ts hats     # this bundle
+bun scripts/build-js.ts targets  # the target/scope resolver (see §4)
+bun scripts/build-js.ts all      # both, with size-ratio check
 ```
+The script writes into `~/code/prose-overlay/js/`; `sync-to-talon.ts` then
+propagates the bundle to the live Talon dir. Override the cursorless source
+location with `CURSORLESS_DIR=…` if you're not using `~/code/cursorless`.
 
 **Exported function:** `proseAllocateHats(tokensJson, oldAssignmentsJson, stability, cursorPosJson)`
 

@@ -15,54 +15,105 @@
 
 Top → bottom in dependency direction (UI calls SHIM calls {CURSORLESS, INTERNAL}; nothing calls UI).
 
-### 4. UI — Talon-specific render + voice surface
+Each layer lives in its own directory. New files inherit their layer from the directory they sit in — there is no per-file allowlist to maintain.
+
+```
+prose-overlay/
+├── prose_overlay.py            # UI — Talon entry point (settings, tags, wiring)
+├── internal/                   # INTERNAL — pure substrate
+│   ├── __init__.py
+│   ├── state.py
+│   ├── instance.py
+│   ├── homophones.py
+│   ├── debug.py
+│   ├── draw_constants.py
+│   ├── trail.py
+│   └── viewport.py
+├── cursorless/                 # CURSORLESS — Python re-impl of cursorless logic
+│   ├── __init__.py
+│   ├── resolve.py
+│   └── surrounding_pair.py
+├── shim/                       # SHIM — Talon ↔ {INTERNAL, CURSORLESS} bridges
+│   ├── __init__.py
+│   ├── hats_js.py
+│   ├── targets_js.py
+│   ├── actions_js.py
+│   ├── actions_cursorless.py
+│   ├── actions_cursorless_edit.py
+│   ├── actions_target.py
+│   ├── actions_core.py
+│   └── shapes.py
+├── ui/                         # UI — Talon canvas, voice grammar, action classes
+│   ├── __init__.py
+│   ├── canvas.py
+│   ├── draw.py
+│   ├── draw_tokens.py
+│   ├── help.py
+│   ├── history_panel.py
+│   ├── test_driver.py
+│   ├── actions_bring_move.py
+│   ├── actions_cursor.py
+│   ├── actions_delete.py
+│   ├── actions_flash.py
+│   ├── actions_help.py
+│   ├── actions_history.py
+│   ├── actions_layout.py
+│   └── actions_visibility.py
+├── js/                         # cursorless JS bundles (build artifacts)
+├── svg/                        # vendored shape SVGs (shim/shapes.py reads)
+├── docs/                       # plan + design docs
+├── scripts/                    # headless-verify.py, layer-audit.py, sync-to-talon.ts
+└── *.talon                     # voice grammar — Talon discovers via dir scan
+```
+
+### 4. UI — Talon-specific render + voice surface (`ui/` + root `prose_overlay.py`)
 
 Freely Talon-bound. Owns the Skia canvas, the action classes, the voice grammar (`.talon` files), and the orchestration in `prose_overlay.py`.
 
-Files (16):
-- `prose_overlay.py` — Module/Context/tag wiring, settings, top-level imports
-- `prose_overlay_canvas.py` — Skia canvas wrapper
-- `prose_overlay_draw.py`, `prose_overlay_draw_tokens.py` — Skia paint
-- `prose_overlay_help.py`, `prose_overlay_history_panel.py` — panel render
-- `prose_overlay_actions_*.py` — Talon `@mod.action_class` classes (bring_move, cursor, delete, flash, help, history, layout, visibility)
-- `prose_overlay_test_driver.py` — Talon `cron.interval` polling
+Files (15):
+- `prose_overlay.py` — Module/Context/tag wiring, settings, top-level imports (root entry; classified UI)
+- `ui/canvas.py` — Skia canvas wrapper
+- `ui/draw.py`, `ui/draw_tokens.py` — Skia paint
+- `ui/help.py`, `ui/history_panel.py` — panel render
+- `ui/actions_*.py` — Talon `@mod.action_class` classes (bring_move, cursor, delete, flash, help, history, layout, visibility)
+- `ui/test_driver.py` — Talon `cron.interval` polling
 
-### 3. SHIM — Talon ↔ {CURSORLESS, INTERNAL} bridges
+### 3. SHIM — Talon ↔ {CURSORLESS, INTERNAL} bridges (`shim/`)
 
 The ONLY layer allowed to import both Talon AND internal-logic primitives. Replace this layer to port to another environment.
 
 Files (8):
-- `prose_overlay_hats_js.py` — Talon → QuickJS bridge for cursorless hat allocator (talon.lib.js)
-- `prose_overlay_targets_js.py` — Talon → QuickJS bridge for cursorless target resolver
-- `prose_overlay_actions_js.py` — Talon action methods invoking the JS bridges
-- `prose_overlay_actions_cursorless.py` — Talon action surface routing to cursorless verbs
-- `prose_overlay_actions_cursorless_edit.py` — applies edit plans from the resolver
-- `prose_overlay_actions_target.py` — target dispatch shim
-- `prose_overlay_actions_core.py` — `_recompute_hats`, `_hat_to_index` (Talon-state mgmt across layers)
-- `prose_overlay_shapes.py` — SVG vocab (portable) + Skia paint (Talon, LAZY-imported at call site)
+- `shim/hats_js.py` — Talon → QuickJS bridge for cursorless hat allocator (talon.lib.js)
+- `shim/targets_js.py` — Talon → QuickJS bridge for cursorless target resolver
+- `shim/actions_js.py` — Talon action methods invoking the JS bridges
+- `shim/actions_cursorless.py` — Talon action surface routing to cursorless verbs
+- `shim/actions_cursorless_edit.py` — applies edit plans from the resolver
+- `shim/actions_target.py` — target dispatch shim
+- `shim/actions_core.py` — `_recompute_hats`, `_hat_to_index` (Talon-state mgmt across layers)
+- `shim/shapes.py` — SVG vocab (portable) + Skia paint (Talon, LAZY-imported at call site)
 
-### 2. CURSORLESS — Python re-impl of cursorless processing
+### 2. CURSORLESS — Python re-impl of cursorless processing (`cursorless/`)
 
 Pure logic. Portable to any environment with a token/text buffer. The JS bundles in `js/` are also cursorless layer but live as build artifacts.
 
 Files (2):
-- `prose_overlay_cursorless_resolve.py` — Python re-impl of processTargets
-- `prose_overlay_surrounding_pair.py` — delimiter pair resolver
+- `cursorless/resolve.py` — Python re-impl of processTargets
+- `cursorless/surrounding_pair.py` — delimiter pair resolver
 
-### 1. INTERNAL — Pure substrate
+### 1. INTERNAL — Pure substrate (`internal/`)
 
 Environment-agnostic. ProseBuffer + undo/redo + hat allocation Python fallback + homophone CSV + viewport math + JSONL debug. Should import nothing from talon at any level.
 
 Files (7):
-- `prose_overlay_state.py` (561 LOC — the substrate)
-- `prose_overlay_instance.py` — shared state container
-- `prose_overlay_homophones.py` — CSV loader + flag lookup
-- `prose_overlay_debug.py` — JSONL snapshot writer
-- `prose_overlay_draw_constants.py` — pure visual constants
-- `prose_overlay_trail.py` — faulthandler + atomic JSON
-- `prose_overlay_viewport.py` — scroll/anchor math
+- `internal/state.py` (the substrate)
+- `internal/instance.py` — shared state container
+- `internal/homophones.py` — CSV loader + flag lookup
+- `internal/debug.py` — JSONL snapshot writer
+- `internal/draw_constants.py` — pure visual constants
+- `internal/trail.py` — faulthandler + atomic JSON
+- `internal/viewport.py` — scroll/anchor math
 
-**Total:** 33 files. Every prose_overlay_*.py is categorized.
+**Total:** 32 source files (15 UI + 8 SHIM + 2 CURSORLESS + 7 INTERNAL). Plus 4 empty `__init__.py` package markers. Every file lives in exactly one layer directory (or at the root, where `prose_overlay.py` is classified as UI).
 
 ## 2. Invariants
 
@@ -150,21 +201,31 @@ Voice grammar can also be ported (Vosk/Whisper + a different command surface) bu
 
 ## 6. Maintenance rule
 
-When adding a new `prose_overlay_*.py`:
-1. Update `scripts/layer-audit.py` — add the filename to one of `INTERNAL` / `CURSORLESS` / `SHIM` / `UI`.
-2. Run `python3 scripts/layer-audit.py`. Confirm green (or document the new overfit if it's intentional and add a TODO row to this file).
-3. The headless suite's L4 will catch uncategorized new files automatically (invariant I4).
+Files inherit their layer from the directory they sit in. Adding a new module is a one-step decision: pick the directory.
+
+When adding a new Python module:
+1. Decide which layer it belongs to.
+   - Pure logic, no talon — `internal/`
+   - Cursorless re-impl, no talon — `cursorless/`
+   - Talon ↔ logic bridge — `shim/`
+   - Talon canvas / voice / action class — `ui/`
+2. Drop the file in that directory. The module's filename becomes its identity (e.g. `internal/foo.py` → `prose_overlay.internal.foo`).
+3. Run `python3 scripts/layer-audit.py`. Confirm green.
+4. The headless suite's L4 will catch any new module that lives outside the four layer directories (invariant I4 — UNCATEGORIZED).
 
 When refactoring:
-- Moving a file across layers is allowed — update both the layer set in the audit script AND the corresponding section in this doc.
-- Adding a talon import to an INTERNAL file IS an overfit. The audit will catch it; resolution is either to refactor or to re-categorize the file as SHIM.
+- Moving a file across layers is just `git mv internal/foo.py shim/foo.py` plus updating its callers' import paths (`from ..internal.foo` → `from ..shim.foo`, etc.). No allowlist to maintain.
+- Adding a talon import to an INTERNAL or CURSORLESS file IS an overfit. The audit will catch it; resolution is either to refactor or to move the file to SHIM.
 
-When the audit goes green:
-- Update this doc's status from RED to GREEN.
-- Add a Changelog entry noting which file became portable.
-- The portability claim in §5 is now true.
+Adding a new top-level Talon entry-point file (rare — `prose_overlay.py` is currently the only one): add its filename to `ROOT_UI_FILES` in `scripts/layer-audit.py`. Files at the package root that are NOT in that set are uncategorized and will FAIL invariant I4.
+
+When the audit goes red:
+- Read the FAIL list. Each entry names the file and the violation.
+- Fix the leak (refactor or relocate the file) — do not silence the audit.
 
 ## 7. Changelog
+
+- **2026-06-30** — Layer membership flipped from a metadata allowlist to a directory tree. The 33 files that previously sat flat at the package root were moved into `internal/`, `cursorless/`, `shim/`, and `ui/` (plus `prose_overlay.py` at the root as the Talon entry point). `scripts/layer-audit.py` was rewritten to detect layer from the parent directory rather than a per-file set. The invariants are unchanged; their enforcement is now structural. The two pre-existing WARN findings (`prose_overlay.py` and `ui/actions_cursor.py` importing CURSORLESS directly) survive — the re-categorize-vs-refactor question described under §3 WARN is still open.
 
 - **2026-06-30** — Layer 4 flipped **RED → GREEN**. Three FAIL items resolved in three commits:
   - `28f1aa3` `refactor(cursorless): drop stale talon actions import, lazy settings` — closes I2 leak in `prose_overlay_cursorless_resolve.py`.

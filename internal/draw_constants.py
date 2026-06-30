@@ -103,11 +103,10 @@ BUBBLE_SHAPE_SCALE = 1.1       # 2× prior (0.55 → 1.1); shape is now the visu
 # chip's saturated color.
 #
 # BUBBLE_ROW_H is the fixed vertical footprint reserved for the bubble
-# band. Bumped 2026-06-30 with BUBBLE_SHAPE_SCALE = 1.1 — the shape's
-# backdrop now spans ~16*1.1*1.15 ≈ 20 px, so 18 would clip. Chip
-# height (FONT_SIZE + 2*PAD_Y = 11 + 4 = 15) still fits; the shape
-# is the taller element now.
-BUBBLE_ROW_H = 24
+# band. Bumped 2026-06-30: backdrop now spans ~16*1.1*1.55 ≈ 27 px (was
+# 20), so 24 would clip the disc edges. Chip height (FONT_SIZE + 2*PAD_Y
+# = 11 + 4 = 15) still fits — the backdrop is the taller element.
+BUBBLE_ROW_H = 30
 
 # Backdrop circle behind the homophone shape glyph inside the bubble. The
 # chip backgrounds are bright Cursorless palette colors; the amber shape
@@ -116,10 +115,15 @@ BUBBLE_ROW_H = 24
 # background) gives the glyph a consistent contrast surface.
 #
 # BACKDROP_FACTOR scales the circle radius relative to the shape's own
-# native radius (_SVG_W * BUBBLE_SHAPE_SCALE / 2). 1.15 gives a thin halo
-# without crowding the chips next to it. Tune by eye after first paint.
+# native radius (_SVG_W * BUBBLE_SHAPE_SCALE / 2). User 2026-06-30: shape
+# was kissing the backdrop edge — bumped 1.15 → 1.55 so the black disc
+# clearly surrounds the shape with visible padding. With INNER_GAP=0
+# (chips contiguous) the backdrop can grow without colliding with chip
+# rects — the backdrop overhangs into the chip's rounded corner zone
+# but the chip paints first so the black ring lands on top, reading
+# as "shape sits in front of both."
 BUBBLE_SHAPE_BACKDROP_COLOR = "000000cc"
-BUBBLE_SHAPE_BACKDROP_FACTOR = 1.15
+BUBBLE_SHAPE_BACKDROP_FACTOR = 1.55
 
 # Hat dot colors — matches Cursorless palette
 HAT_COLOR_HEX: dict[str, str] = {

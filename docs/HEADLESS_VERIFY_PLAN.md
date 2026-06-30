@@ -54,6 +54,8 @@ to be.
 | L1.12 | Letter-extend then undo restores prior single-letter token | undo round-trip |
 | L1.13 | `ProseOverlayState.reset()` wipes every data field to defaults | debug reset |
 | L1.14 | `reset()` preserves object identity (buffer/canvas refs not reassigned) | safe re-init |
+| L1.15 | `hint_enabled()` returns True by default (keep-verdict regression) | slice A default-on |
+| L1.16 | `is_flagged("their")` and `is_flagged("there")` return True | CSV load smoke |
 
 ### Layer 2 — JS bundle via `bun` (no Talon)
 

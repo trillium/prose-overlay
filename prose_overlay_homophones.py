@@ -40,7 +40,9 @@ _FLAGGED: frozenset[str] = _load()
 # Read by the draw module instead of (or in addition to) the static
 # user.prose_overlay_homophone_hint setting — Talon doesn't have a public
 # live-setter for module settings, so we keep the toggle here.
-_hint_enabled: bool = False
+# Default ON per user keep verdict 2026-06-30 (slice A KEEP). Toggle off
+# at runtime via `overlay hints homo off`.
+_hint_enabled: bool = True
 
 
 def set_hint_enabled(v: bool) -> None:

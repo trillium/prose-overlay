@@ -72,12 +72,13 @@ mod.setting(
 mod.setting(
     "prose_overlay_homophone_hint",
     type=bool,
-    default=False,
+    default=True,
     desc=(
         "When true, paint a dotted underline under every token whose "
         "lowercase appears in the trillium_talon homophone CSV. Slice A "
-        "of the homophone-UI exploration (docs/HOMOPHONE_UI_PLAN.md). "
-        "No swap action, no confidence model — pure visual flag."
+        "of the homophone-UI exploration (docs/HOMOPHONE_UI_PLAN.md) — "
+        "user keep verdict received 2026-06-30, so default is ON. "
+        "Toggle at runtime via 'overlay hints homo off'."
     ),
 )
 

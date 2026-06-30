@@ -214,6 +214,29 @@ def run_layer_1() -> None:
         inst.reset()
         assert id(inst.buffer) == b_id, "buffer object identity should be preserved"
 
+    homophones_spec = importlib.util.spec_from_file_location(
+        "prose_overlay_homophones",
+        REPO / "prose_overlay_homophones.py",
+    )
+    homophones = importlib.util.module_from_spec(homophones_spec)
+    homophones_spec.loader.exec_module(homophones)
+
+    with test("L1", "L1.15", "homophone hint is ON by default (slice A KEEP verdict)"):
+        assert homophones.hint_enabled() is True, (
+            "default should be ON after 2026-06-30 keep verdict; got "
+            f"{homophones.hint_enabled()!r}"
+        )
+
+    with test("L1", "L1.16", "homophone flag set is populated from CSV (non-empty)"):
+        # The CSV path is hardcoded to trillium_talon's homophones.csv; if the
+        # path doesn't exist on this machine the load function returns an empty
+        # set with a printed warning. On Trillium's machine the file exists.
+        assert isinstance(homophones._FLAGGED, frozenset)
+        # Spot-check a canonical homophone pair: "their"/"there"/"they're"
+        # should all flag (case-insensitive, after _STRIP).
+        assert homophones.is_flagged("their"), "'their' should be flagged"
+        assert homophones.is_flagged("there"), "'there' should be flagged"
+
 
 # =============================================================================
 # Layer 2 — JS bundle via bun

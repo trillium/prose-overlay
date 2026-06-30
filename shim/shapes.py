@@ -178,6 +178,125 @@ def shape_pool() -> tuple[str, ...]:
     return HAT_SHAPES
 
 
+# ---------------------------------------------------------------------------
+# Slice 2 — deterministic per-flag shape allocator
+# ---------------------------------------------------------------------------
+# Replaces Slice 1's `flagged_rank % 10` round-robin in ui/draw_tokens.py with
+# a stable allocator that survives edits to other tokens. See
+# docs/HOMOPHONE_SHAPES_PLAN.md §3 Slice 2.
+#
+# Stability strategy (per plan):
+#   1. Keep each prior assignment whose token-index is still in the flagged
+#      set. The shape "follows" the token through buffer edits — adding a new
+#      flagged token elsewhere should not re-stamp the shapes already in use.
+#   2. Assign shapes to newly-flagged indices from the pool of UNUSED shapes
+#      (HAT_SHAPES minus shapes already claimed by surviving prior entries).
+#   3. If the unused pool runs out (>10 flagged tokens), OMIT the overflow
+#      indices from the output dict. Callers (ui/draw_tokens.py) treat a
+#      missing entry as "fall back to underline only" — the underline draw
+#      is always-on per HOMOPHONE_SHAPES_PLAN.md §4.8 spillover semantics, so
+#      no separate fallback path is needed here.
+#
+# Memoization keyed on `(rev, frozenset(flagged), tokens-at-flagged-indices)`
+# so repeated calls with identical inputs return the same dict reference
+# (used by the draw module's no-op short-circuit). Token text at the flagged
+# positions is part of the key so an edit that changes a flagged word while
+# keeping the flagged set invalidates the cache.
+
+_SHAPE_CACHE: dict[
+    tuple[int, frozenset[int], tuple[str, ...]],
+    dict[int, str],
+] = {}
+_CACHE_KEY_LIMIT = 8  # bounded — keep last N cache entries to avoid growth
+
+
+def _clear_shape_cache() -> None:
+    """Reset the memoization cache. Used by instance.reset() and by tests."""
+    _SHAPE_CACHE.clear()
+
+
+def compute_shape_assignments(
+    tokens,
+    flagged,
+    rev: int,
+    prior: "dict[int, str] | None" = None,
+) -> dict[int, str]:
+    """Return ``token_idx -> shape_name`` for the currently flagged tokens.
+
+    Parameters:
+        tokens: ordered sequence of buffer tokens (list[str] or tuple[str, ...])
+        flagged: set/frozenset of token indices that are flagged homophones
+        rev: buffer rev counter — included in the memoization key so the
+             cache invalidates on every buffer mutation
+        prior: previous assignment dict (typically ``instance.shape_assignments``
+               from the last allocator run); shapes for indices still in the
+               flagged set are preserved across calls
+
+    Stability strategy (see module-level comment):
+      Pass 1 keeps prior assignments where the prior shape is still in
+      HAT_SHAPES and the index is still flagged. Pass 2 fills the remaining
+      flagged indices from the pool of unused shapes. If the pool exhausts,
+      the overflow indices are omitted — the caller falls back to underline.
+
+    Memoization: keyed on ``(rev, frozenset(flagged), tokens-at-flagged)``;
+    repeated calls with identical inputs return the same dict reference.
+    The cache is bounded at ``_CACHE_KEY_LIMIT`` entries; oldest entries are
+    dropped on insert to prevent unbounded growth across a long session.
+    """
+    flagged_fz = (
+        flagged if isinstance(flagged, frozenset) else frozenset(flagged)
+    )
+    sorted_flagged = sorted(flagged_fz)
+    # Include the tokens at the flagged positions in the cache key so that
+    # a text change at a flagged index invalidates the cache (otherwise the
+    # rev-keyed entry would survive any same-set, different-text edit).
+    flagged_tokens = tuple(
+        tokens[i] for i in sorted_flagged if 0 <= i < len(tokens)
+    )
+    cache_key = (rev, flagged_fz, flagged_tokens)
+    cached = _SHAPE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    prior_map: dict[int, str] = prior or {}
+    result: dict[int, str] = {}
+    used_shapes: set[str] = set()
+
+    # Pass 1 — keep prior assignments that are still valid.
+    for idx in sorted_flagged:
+        if idx in prior_map:
+            prior_shape = prior_map[idx]
+            if prior_shape in HAT_SHAPES and prior_shape not in used_shapes:
+                result[idx] = prior_shape
+                used_shapes.add(prior_shape)
+
+    # Pass 2 — assign shapes to newly-flagged indices from the unused pool.
+    # Iteration over HAT_SHAPES preserves the canonical pool order; the
+    # first not-yet-used shape goes to the lowest unassigned flagged index.
+    unused_iter = iter(s for s in HAT_SHAPES if s not in used_shapes)
+    for idx in sorted_flagged:
+        if idx in result:
+            continue
+        try:
+            result[idx] = next(unused_iter)
+        except StopIteration:
+            # Pool exhausted — overflow. Omit this and remaining indices
+            # per HOMOPHONE_SHAPES_PLAN.md §4.8 (caller falls back to
+            # underline, which already paints unconditionally on flagged
+            # tokens). Break (rather than continue) so the omitted set is
+            # the contiguous tail of the sorted flagged list, which is
+            # documented and testable behavior.
+            break
+
+    # Bounded cache — drop oldest entry if at limit. Insertion order is
+    # preserved by Python's dict so the FIRST key is the oldest.
+    if len(_SHAPE_CACHE) >= _CACHE_KEY_LIMIT:
+        oldest = next(iter(_SHAPE_CACHE))
+        del _SHAPE_CACHE[oldest]
+    _SHAPE_CACHE[cache_key] = result
+    return result
+
+
 # Native SVG viewBox is 12 wide × 9 tall — matches mouse-clock.
 _SVG_W = 12.0
 _SVG_H = 9.0

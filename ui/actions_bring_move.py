@@ -10,9 +10,9 @@ Contains:
 
 from talon import Module
 
-from .internal.instance import instance
-from .shim.actions_core import _hat_to_index, _recompute_hats
-from .internal.state import EditKind
+from ..internal.instance import instance
+from ..shim.actions_core import _hat_to_index, _recompute_hats
+from ..internal.state import EditKind
 
 mod = Module()
 

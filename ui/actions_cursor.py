@@ -8,10 +8,10 @@ Never imports prose_overlay.py.
 
 from talon import Module, actions, cron, ui
 
-from .internal.instance import instance
-from .cursorless.resolve import _state as _resolve_state
-from .shim.actions_core import _recompute_hats, _hat_to_index
-from .prose_overlay_actions_flash import _flash_tokens, _action_color
+from ..internal.instance import instance
+from ..cursorless.resolve import _state as _resolve_state
+from ..shim.actions_core import _recompute_hats, _hat_to_index
+from .actions_flash import _flash_tokens, _action_color
 
 mod = Module()
 
@@ -38,7 +38,7 @@ def _set_cursor(gap, change_mode: bool = False) -> None:
     instance.cursor = gap
     instance.change_mode = change_mode
     _resolve_state.cursor = gap
-    from .internal.debug import emit_if_changed
+    from ..internal.debug import emit_if_changed
     emit_if_changed("set_cursor")
 
 

@@ -10,7 +10,7 @@ Never imports prose_overlay.py.
 
 from talon import Module, actions, ui
 
-from .internal.instance import instance
+from ..internal.instance import instance
 
 mod = Module()
 
@@ -56,7 +56,7 @@ ui.register("win_move", _on_win_move)
 
 def _save_prefs_from_layout():
     """Delegate to visibility module's _save_prefs without circular import."""
-    from .prose_overlay_actions_visibility import _save_prefs
+    from .actions_visibility import _save_prefs
     _save_prefs()
 
 

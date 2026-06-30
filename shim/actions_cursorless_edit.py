@@ -9,7 +9,7 @@ from talon import actions
 
 from ..internal.instance import instance
 from ..internal.state import EditKind
-from ..prose_overlay_actions_cursor import (
+from ..ui.actions_cursor import (
     _prose_overlay_set_cursor,
     _prose_overlay_clear_cursor,
     _auto_scroll_to_cursor,

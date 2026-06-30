@@ -11,7 +11,7 @@ from typing import Optional
 from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect
 
-from ...utils.overlay_kit import draw_panel_frame, draw_separator
+from ....utils.overlay_kit import draw_panel_frame, draw_separator
 
 # ---------------------------------------------------------------------------
 # Visual constants (mirrored from prose_overlay_draw for standalone use)

@@ -19,7 +19,7 @@ from contextlib import contextmanager
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STATE_PY = REPO / "internal" / "state.py"
 HAT_JS = REPO / "js" / "prose_allocate_hats.js"
-TEST_DRIVER_PY = REPO / "prose_overlay_test_driver.py"
+TEST_DRIVER_PY = REPO / "ui" / "test_driver.py"
 
 GREEN = "\033[32m"
 RED = "\033[31m"

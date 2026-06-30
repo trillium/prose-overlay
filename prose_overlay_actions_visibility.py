@@ -166,6 +166,21 @@ class Actions:
             instance.canvas.refresh()
         print(f"prose_overlay: homophone hint {'ON' if enabled else 'OFF'}")
 
+    def prose_overlay_set_homophone_shapes(enabled: int):
+        """Enable (1) or disable (0) the homophone hat-shape overlay (slice 1).
+
+        Slice 1 of docs/HOMOPHONE_SHAPES_PLAN.md. Mutates the module-level
+        flag in prose_overlay_shapes (parallel to prose_overlay_homophones._
+        hint_enabled). The draw module ORs this against the static
+        user.prose_overlay_homophone_shapes setting so either path turns
+        shapes on.
+        """
+        from . import prose_overlay_shapes as _s
+        _s.set_shapes_enabled(bool(enabled))
+        if instance.canvas.is_showing:
+            instance.canvas.refresh()
+        print(f"prose_overlay: homophone shapes {'ON' if enabled else 'OFF'}")
+
     def prose_overlay_reset():
         """Wipe ALL per-session prose-overlay state back to defaults.
 

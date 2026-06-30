@@ -55,6 +55,10 @@ overlay test status: user.prose_overlay_test_status()
 overlay hints homo on: user.prose_overlay_set_homophone_hint(1)
 overlay hints homo off: user.prose_overlay_set_homophone_hint(0)
 
+# Homophone hat-shape overlay (slice 1 — docs/HOMOPHONE_SHAPES_PLAN.md)
+overlay shapes homo on: user.prose_overlay_set_homophone_shapes(1)
+overlay shapes homo off: user.prose_overlay_set_homophone_shapes(0)
+
 # Toggle auto-show on all dictation phrases
 overlay auto: user.prose_overlay_toggle_auto_dictation()
 

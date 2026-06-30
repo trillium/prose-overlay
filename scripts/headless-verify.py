@@ -521,6 +521,11 @@ def run_layer_3() -> None:
             ("prose_overlay_insert_format_code", (["the_quick_brown_fox"],), {}),
         ], actions_log
 
+    with test("L3", "L3.5e", "_dispatch clear_buffer → prose_overlay_clear_buffer"):
+        actions_log.clear()
+        td._dispatch({"cmd": "clear_buffer"})
+        assert actions_log == [("prose_overlay_clear_buffer", (), {})], actions_log
+
     with test("L3", "L3.6", "_dispatch bogus cmd does not raise"):
         actions_log.clear()
         td._dispatch({"cmd": "definitely-not-a-real-cmd"})

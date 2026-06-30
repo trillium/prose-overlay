@@ -181,6 +181,35 @@ class Actions:
             instance.canvas.refresh()
         print(f"prose_overlay: homophone shapes {'ON' if enabled else 'OFF'}")
 
+    def prose_overlay_clear_buffer():
+        """Clear the buffer + cursor + flash but KEEP the canvas showing.
+
+        Bound to "prose overlay" while the overlay is already active — without
+        this rule, the utterance falls through to <user.raw_prose> in the
+        dictation intercept and the words "prose overlay" enter the buffer.
+        Semantic: re-saying the launch phrase = fresh start, not dismiss.
+
+        Distinct from prose_overlay_reset (which hides the canvas + wipes
+        global state) and from prose_overlay_hide (which dismisses and
+        clears the buffer). This keeps the panel visible and returns the
+        buffer to its post-show empty state.
+        """
+        from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
+        from .prose_overlay_actions_flash import _clear_flash
+        _prose_overlay_clear_cursor()
+        _clear_flash()
+        instance.buffer.clear()
+        instance.viewport.set_scroll_offset(0)
+        instance.change_mode = False
+        instance._last_input_source = "init"
+        from .prose_overlay_actions_core import _recompute_hats
+        _recompute_hats()
+        if instance.canvas is not None:
+            instance.canvas.refresh()
+        from .prose_overlay_debug import emit_if_changed
+        emit_if_changed("clear_buffer")
+        print("prose_overlay: buffer cleared (canvas still showing)")
+
     def prose_overlay_reset():
         """Wipe ALL per-session prose-overlay state back to defaults.
 

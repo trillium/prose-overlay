@@ -32,6 +32,13 @@ overlay speak: user.prose_overlay_speak()
 # triggers abort_update_phrase before the rule can fire). Use "overlay dismiss" instead.
 overlay dismiss: user.prose_overlay_hide()
 
+# Re-saying the launch phrase while the overlay is already active = fresh
+# buffer (keeps canvas open). Without this rule it gets eaten by
+# <user.raw_prose> in the dictation intercept and the words "prose overlay"
+# enter the buffer instead. The start-rule version in prose_overlay_start.talon
+# fires only when the overlay is INACTIVE (lower context specificity).
+^prose overlay$: user.prose_overlay_clear_buffer()
+
 # Debug: emit JSONL state diffs to ~/.talon/prose_overlay_debug.jsonl
 overlay debug on: user.prose_overlay_debug(1)
 overlay debug off: user.prose_overlay_debug(0)

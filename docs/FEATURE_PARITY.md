@@ -186,7 +186,7 @@ When a row has a commit SHA or ISC reference, that's the durable record.
 | `[x]` | Formatter prefixes (snake/camel/etc.) outrank raw_prose | "snake the quick" → "the_quick" not raw | `31df606` |
 | `[x]` | NATO letter sequences outrank raw_prose | "trap trap" → "tt" not "trap trap" | rule specificity |
 | `[x]` | Symbol keys outrank raw_prose | "downscore" → "_" not "downscore" | shipped |
-| `[ ]` | **`^prose overlay$` outranks raw_prose when overlay already active** | "prose overlay" while open should reset, not dictate the words | `prose_overlay_start.talon` has 1 mode + 0 tags; dictation intercept has 1 mode + 1 tag and wins context-specificity. Fix queued. |
+| `[x]` | **`^prose overlay$` outranks raw_prose when overlay already active** | "prose overlay" while open clears buffer + keeps canvas showing | `prose_overlay.talon` rule (1 mode + 1 tag, ties context with dictation intercept; literal-anchored rule beats raw_prose capture). Action: `prose_overlay_clear_buffer`. |
 | `[x]` | `overlay redo` / `overlay undo` etc. recognized inside the overlay | not consumed as dictation | shipped |
 | `[ ]` | Audit: every top-level `^... overlay$` global command works when overlay is active | survey each rule in `prose_overlay_start.talon` | follow-up |
 

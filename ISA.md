@@ -1,126 +1,154 @@
 ---
-task: Build MVP prose dictation overlay for Talon Voice
-slug: prose-overlay-mvp
-effort: E3
-phase: observe
-progress: 0/36
+task: Voice-first prose editor for Talon — Cursorless verbs on a floating buffer
+slug: prose-overlay-v2
+effort: E4
+phase: build
+progress: 9/24
 mode: build
 started: 2026-05-21T00:00:00Z
-updated: 2026-05-21T00:00:00Z
+updated: 2026-06-30T00:00:00Z
 project: prose_overlay
 ---
 
 ## Problem
 
-Voice dictation in Talon types directly into the focused application with no buffer, preview, or editing step. Misrecognitions get committed immediately. The user cannot review, correct, or restructure dictated text before it lands. There is no visual feedback showing individual word tokens or a way to target specific words for deletion by voice.
+The original MVP (Phase 1) shipped a buffered dictation panel with gray hats and delete-by-hat. Six weeks of usage made the actual problem clear: voice-first prose editing isn't a buffer problem, it's a *verb-surface* problem. Cursorless gives you "chuck air", "take blue bat", "change sentence", "format snake at fox past bat" on text in a host editor; the moment you dictate into a window without a Cursorless host, you lose the entire vocabulary. Misrecognized homophones lose silently. Stack overflows in the JS hat allocator die without trace. You can't ask the assistant to repro a bug because there's no way to drive the tool except through the mic.
 
 ## Vision
 
-A translucent overlay panel appears on screen showing each dictated word as a distinct token with a gray Cursorless-style hat letter above it. The user sees their dictation accumulate in real time, can say "chuck bat" to delete the word under hat "b", and when satisfied says "bravely" to paste the entire buffer into the previously focused window. The experience feels like a voice-first text editor floating above the desktop.
+A floating Talon canvas that is, for the duration of an utterance, *the editor Cursorless is editing*. Every Cursorless verb — simple actions, ranges, lists, scope modifiers (including prose-level scopes like sentence/clause/string/number/email and the seven surrounding-pair delimiters), bring/move, applyFormatter — works against the in-window buffer instead of a host application. Visual ambiguity gets surfaced: homophones underlined, hat-allocator fallback signaled by an orange chrome, scope previews rendered before execution. The state stream is captured to disk continuously so post-mortem debugging is the default. The assistant can drive the whole thing headlessly via a JSON queue file, so feature work doesn't depend on the mic being live or the cursorless RPC being healthy.
 
-## Out of Scope
+## Out of Scope (real, not aspirational)
 
-- Misrecognition store or correction history
-- Homophone detection or suggestion
-- Color-coded hats (gray only for MVP)
-- Custom confirm grammar (reuse existing line-enders)
-- Code/AST editing or syntax awareness
-- Sentence/paragraph scope targeting
-- Multi-line cursor or selection model
-- Undo/redo within the overlay
-- Browser panel rendering (canvas only)
+- AI-driven correction/suggestion (this is voice + visual + Cursorless, not LLM-assisted typing)
+- Multi-buffer or multi-document workflows (single panel, single buffer per session)
+- Cross-session buffer persistence (buffer is ephemeral — confirm or discard)
+- Replacing Cursorless inside host editors — PO is a peer, gated by `user.prose_overlay_active` tag; cursorless owns the host
+- Mobile / non-macOS targets
+- Browser-DOM rendering — Talon canvas only
 
 ## Principles
 
-- Reuse existing Talon community infrastructure (user.letter list, line-ender commands) rather than reinventing
-- Non-invasive: overlay must not steal focus from the previously active application
-- Minimal grammar surface: only the commands needed for MVP, nothing speculative
-- Single-file-per-concern: separate rendering, state, and grammar
+- **Composability with Cursorless > parallel reimplementation.** The end state of the F9 migration is that target/scope resolution runs through cursorless's actual `processTargets` pipeline via the QuickJS bridge — we lift, we don't reinvent.
+- **Modular, reversible, exploration-first features.** Every non-trivial feature lands as a slice tree with explicit kill criteria and feature-flag gates (see `docs/*_PLAN.md`). Slice A first, decide, then B.
+- **Observability is first-class.** Continuous JSONL state-diff capture (`prose_overlay_debug.jsonl`), opt-in crash paper-trail (`prose_overlay_trail.py`), structured snapshots that include token list + per-token hat marks + flagged indices + JS-fallback flag.
+- **The assistant must be able to drive the tool.** Headless command queue (`prose_overlay_test_driver.py`) lets external processes pipe verbs in via `~/.talon/prose_overlay_test_queue.jsonl`; the always-on debug log is the read channel.
+- **Single-file-per-concern, modules ≤250 LOC.** The post-refactor file shapes (viewport/draw/draw_constants/draw_tokens, cursorless_resolve/surrounding_pair, actions_cursorless/_edit) reflect this; new growth should split when it crosses.
+- **Forge for code, Architect for plans, Explore for locates.** Workflow conventions from the PAI multi-agent harness — keeps research deliberate and code rigorous.
 
-## Constraints
+## Constraints (current reality)
 
-- Python-only Talon scripting (no JS, no subprocess, no external servers)
-- Talon canvas for rendering (Canvas.from_screen pattern from friction_overlay.py)
-- Must live in /Users/trilliumsmith/.talon/user/trillium/plugin/prose_overlay/
-- Must use the existing user.letter list (air=a, bat=b, cap=c, ..., zip=z) for hat identifiers
-- Hat alphabet limited to 26 letters; if buffer exceeds 26 tokens, later tokens get no hat
-- Must hook into existing dictation_ender mechanism for confirm (bravely/gravely/slap/lap)
-- canvas.blocks_mouse = False (non-blocking overlay)
+- Python + embedded JS via Talon's `talon.lib.js` (QuickJS). Two bundles: hat allocator (`js/prose_allocate_hats.js`) and target resolver (`js/prose_resolve_targets.js`), both built by `scripts/build-js.ts`.
+- Source-of-truth at `~/code/prose-overlay/`; **hardlinked** to live Talon path `~/.talon/user/trillium_talon/trillium/plugin/prose_overlay/` (edits are immediately live, no sync watcher needed in practice).
+- Cursorless `processTargets` is the canonical target/scope authority — Python re-implementation in `prose_overlay_cursorless_resolve.py` exists for v1 parity and gets retired once F9 is verified.
+- Hat alphabet (26 letters) × color palette (9) gives ~234 addressable slots before overflow; non-letter tokens (digits, pure punctuation) get NO hat by design (commit `3c8c9e9`).
+- Render model: every state mutation → `instance.canvas.refresh()` → `draw_overlay()` → `emit_if_changed("draw")`. Single hook covers all mutations via this chain.
+- Voice grammar gates on `mode: dictation|command` + `tag: user.prose_overlay_active`; mutually exclusive with cursorless.talon via `not tag: user.prose_overlay_active` in cursorless's matcher.
+- No subprocess and no external RPC servers from this plugin (the test driver uses a polled queue file, not a server). Cursorless's RPC is *cursorless's* — we don't depend on it.
 
 ## Goal
 
-Deliver a working Talon plugin with: (1) a canvas overlay that renders dictation buffer tokens with gray hat letters, (2) dictation capture that intercepts text and routes it to the buffer instead of the focused app, (3) hat-targeted delete commands, (4) confirm-and-paste via existing line-enders, and (5) a setting toggle.
+Phase 2: full Cursorless verb surface on the in-window buffer with visible ambiguity feedback and continuous observability, durable enough that the assistant can develop and debug features without the user being present at the mic.
 
 ## Criteria
 
-- [x] ISC-1: Directory exists at /Users/trilliumsmith/.talon/user/trillium/plugin/prose_overlay/
-- [x] ISC-2: prose_overlay_state.py exists and defines a ProseBuffer class with tokens list, add_text(), delete_token(index), delete_through(index), get_tokens(), clear(), and get_text() methods
-- [x] ISC-3: ProseBuffer.add_text("hello world") results in tokens ["hello", "world"]
-- [x] ISC-4: ProseBuffer.delete_token(1) on ["hello", "world"] results in ["hello"]
-- [x] ISC-5: ProseBuffer.delete_through(1) on ["hello", "world", "foo"] results in ["hello"] (deletes from hat position through end)
-- [x] ISC-6: ProseBuffer.get_text() returns tokens joined with spaces
-- [x] ISC-7: prose_overlay_draw.py exists with a draw function that renders tokens as text with gray hat letters above each
-- [x] ISC-8: Hat letters are assigned sequentially a-z from the user.letter list values
-- [x] ISC-9: Hat rendering uses gray color (not colored) for the hat letter text
-- [x] ISC-10: Tokens beyond index 25 render without hats (no crash, graceful degradation)
-- [x] ISC-11: prose_overlay_canvas.py exists managing Canvas lifecycle (show/hide/freeze)
-- [x] ISC-12: Canvas uses Canvas.from_screen pattern (consistent with friction_overlay.py)
-- [x] ISC-13: Canvas sets blocks_mouse = False
-- [x] ISC-14: prose_overlay.py exists as the main module with actions and settings
-- [x] ISC-15: Setting user.prose_overlay_enabled exists (type bool, default true)
-- [x] ISC-16: Action user.prose_overlay_show() creates and shows the canvas overlay
-- [x] ISC-17: Action user.prose_overlay_hide() destroys the canvas overlay and clears buffer
-- [x] ISC-18: Action user.prose_overlay_add_text(text) adds text to buffer and refreshes canvas
-- [x] ISC-19: Action user.prose_overlay_delete_hat(letter) deletes the token at the hat letter's index
-- [x] ISC-20: Action user.prose_overlay_delete_past_hat(letter) deletes from end back through the hat letter's token
-- [x] ISC-21: Action user.prose_overlay_confirm() pastes buffer text to previously focused window and clears
-- [x] ISC-22: prose_overlay.py captures the active window (ui.active_window()) before showing the overlay
-- [x] ISC-23: On confirm, focus is restored to the captured window before pasting
-- [x] ISC-24: prose_overlay.talon exists with tag-gated grammar for overlay commands
-- [x] ISC-25: Tag user.prose_overlay_active is defined and set when overlay is visible
-- [x] ISC-26: Command "chuck <user.letter>" calls user.prose_overlay_delete_hat with the letter value
-- [x] ISC-27: Command "chuck past <user.letter>" calls user.prose_overlay_delete_past_hat
-- [x] ISC-28: prose_overlay_dictation.talon exists to intercept dictation when overlay is active
-- [x] ISC-29: When tag user.prose_overlay_active is set and mode is dictation, raw_prose routes to overlay buffer instead of direct insertion
-- [x] ISC-30: prose_overlay_ender.talon hooks into dictation_ender pattern to trigger confirm on bravely/gravely/slap/lap
-- [x] ISC-31: After confirm, the overlay hides and buffer clears
-- [x] ISC-32: Anti: Overlay canvas must NOT steal focus from the previously active window
-- [x] ISC-33: Anti: Plugin must NOT redefine the user.letter list or user.dictation_ender list
-- [x] ISC-34: Anti: No files outside prose_overlay/ directory are modified
-- [x] ISC-35: Antecedent: Canvas.from_screen and canvas.freeze pattern works (validated by friction_overlay.py existing precedent)
-- [x] ISC-36: All .py files have no syntax errors (python3 -m py_compile succeeds)
+### Phase 1 — MVP (shipped, 2026-05-21, all 36 ISCs green)
+
+Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation intercept, confirm-and-paste, focus restore, anti-redefinition guards. Verified pre-Phase-2 refactor (see `## Changelog` → Phase 1 close).
+
+### Phase 2 — Cursorless verb parity
+
+- [x] ISC-1: `cursorless_simple_action` rule binds against PO buffer (chuck, take, change, clear, replace) — `prose_overlay_actions_cursorless.py`
+- [x] ISC-2: RangeTarget with implicit anchor resolves (`chuck past this` → cursor-1..hat) — `cursorless_resolve.py:_resolve_range_target`
+- [x] ISC-3: ListTarget multi-target ("chuck air and bat") iterates elements, flashes all, deletes in reverse — `cursorless_resolve.py:_resolve_target_to_token_range`
+- [x] ISC-4: Prose-level scopes (sentence, clause, string, number, email, nonWhitespaceSequence) — `cursorless_resolve.py:_REGEX_SCOPE_PATTERNS` + `_scope_regex`
+- [x] ISC-5: Seven surrounding-pair delimiters (round/box/curly/diamond/quad/twin/skis) + `any`/`pair` aggregation — `prose_overlay_surrounding_pair.py`
+- [x] ISC-6: bring/move (`cursorless_bring_move_action`) — `prose_overlay_actions_cursorless.py:prose_overlay_bring_move`
+- [x] ISC-7: applyFormatter (`format snake at fox`) with purple flash — `prose_overlay_actions_cursorless.py:prose_overlay_apply_formatter`
+- [ ] ISC-8: JS resolver behind `user.prose_overlay_use_js_resolver` setting passes parity for every row in `MANUAL_VERIFICATION.md`
+- [ ] ISC-9: Python resolver fallback removed once ISC-8 holds for 3 consecutive sessions
+
+### Phase 3 — Visual ambiguity feedback
+
+- [x] ISC-10: Hat-allocator fallback paints orange chrome (BG_COLOR_FALLBACK + BORDER_COLOR_FALLBACK) — `prose_overlay_draw.py` + `prose_overlay_actions_core.py`
+- [x] ISC-11: Homophone slice A — dotted underline under any token whose lowercase appears in pimentel CSV, behind `user.prose_overlay_homophone_hint` (default off) — `prose_overlay_homophones.py`
+- [x] ISC-12: Voice toggle for homophone hint (`overlay hints homo on/off`) — `prose_overlay_actions_visibility.py:prose_overlay_set_homophone_hint`
+- [ ] ISC-13: Homophone slice B — `phone <hat>` cycles to next group member (per `docs/HOMOPHONE_UI_PLAN.md`)
+- [ ] ISC-14: Hat shape vocabulary integrated for shape-coded homophone swap (per `docs/HOMOPHONE_SHAPES_LOCATION.md`)
+- [ ] ISC-15: Scope-preview flash before execution — when user speaks a scope verb, the resolved range flashes before the destructive action
+
+### Phase 4 — Observability + headless driving
+
+- [x] ISC-16: Always-on debug JSONL with rich snapshot (tokens, per-token hat marks, flagged indices, hat_js_fallback, buffer rev, cursor, change_mode, scroll) — `prose_overlay_debug.py`
+- [x] ISC-17: Single draw-time hook covers every mutation; log rotates at 5 MB — `prose_overlay_draw.py:draw_overlay` + `prose_overlay_debug._rotate_if_needed`
+- [x] ISC-18: Stack-overflow paper-trail slice A — faulthandler to `~/Library/Logs/prose_overlay_trail/faulthandler.log` behind `PROSE_OVERLAY_TRAIL=1` — `prose_overlay_trail.py`
+- [x] ISC-19: Headless command queue — `scripts/test-overlay.sh <verb>` enqueues to `~/.talon/prose_overlay_test_queue.jsonl`, cron in `prose_overlay_test_driver.py` dispatches behind `PROSE_OVERLAY_TEST=1`
+- [ ] ISC-20: Paper-trail slice B verified — `last_command.json` preamble captures pre-crash command context (pending HAT_ALLOC_OVERFLOW reproduction)
+
+### Phase 5 — Modular substrate (foundation for downstream slices)
+
+- [x] ISC-21: Buffer revision counter (`ProseBuffer.rev`) bumped on every mutation — substrate for paragraph cache + undo plan + debug invalidation
+- [x] ISC-22: Viewport class owns scroll + anchor + recenter state — Helix `align(top/center/bottom)` + Emacs `recenter` cycling via voice — `prose_overlay_viewport.py`
+- [ ] ISC-23: Undo/redo with CM6 two-deque + Helix `(forward, inverse)` delta pairs + Emacs `commit_start`/`commit_end` boundary (per `docs/UNDO_REDO_PLAN.md`)
+- [ ] ISC-24: SkParagraph-based text measurement + per-line cache keyed by `buffer_rev` (per `docs/VIEWPORT_RESEARCH.md` §1; only if measurable layout wins emerge)
 
 ## Test Strategy
 
-| ISC | Type | Check | Threshold | Tool |
-|-----|------|-------|-----------|------|
-| ISC-1 | filesystem | directory exists | exists | Bash ls |
-| ISC-2 | code | class and methods defined | all present | Grep |
-| ISC-3..6 | logic | buffer operations correct | exact match | Read (code review) |
-| ISC-7..10 | code | draw function with hat rendering | present | Read/Grep |
-| ISC-11..13 | code | canvas lifecycle | pattern match | Read |
-| ISC-14..23 | code | actions and settings | defined | Grep |
-| ISC-24..30 | code | talon grammar files | correct syntax | Read |
-| ISC-31 | code | confirm clears buffer | present | Read |
-| ISC-32..34 | anti | no focus steal, no redefinition, no external mods | absence | Grep |
-| ISC-35 | antecedent | canvas pattern precedent | exists | Read |
-| ISC-36 | build | syntax check | exit 0 | Bash py_compile |
+| ISC | Type | Check | Tool |
+|---|---|---|---|
+| 1–7 | integration | speak verb against scripted buffer, observe expected mutation in debug log | test-overlay.sh + tail debug.jsonl |
+| 8 | parity | every row of MANUAL_VERIFICATION.md PASS under JS resolver flag | manual + diff vs. Python output |
+| 9 | code | grep for `prose_overlay_cursorless_resolve` imports returns 0 (after retirement) | Grep |
+| 10 | visual | force JS allocator failure, assert orange chrome appears | manual or screenshot diff |
+| 11–12 | logic | dictate flagged words with hint on, assert underline drawn (via debug log `flagged` field) | test-overlay.sh + grep flagged |
+| 13–14 | feature | per HOMOPHONE_UI_PLAN slice criteria | future slices |
+| 15 | visual | speak scope verb, assert flash event in debug log before mutation | grep flash_indices in debug.jsonl |
+| 16–17 | observability | mutate buffer 1000×, assert log grew + rotated at 5 MB | test-overlay.sh + wc/ls -la |
+| 18 | crash | reproduce HAT_ALLOC overflow under PROSE_OVERLAY_TRAIL=1, assert traceback in faulthandler.log | manual repro |
+| 19 | integration | shell pipes 10 commands, debug log shows 10 diffs | test-overlay.sh batch + grep |
+| 20 | crash | last_command.json updated before each JS call | test-overlay.sh + stat preamble file |
+| 21 | code | grep `self.rev +=` returns 9 sites in prose_overlay_state.py | Grep |
+| 22 | voice | `overlay show top/bottom/center` + `overlay center` cycle | test-overlay.sh + dump cursor row |
+| 23 | per-plan | per UNDO_REDO_PLAN slice criteria | future slices |
+| 24 | bench | layout-time regression under 16 ms p99 across 200-token buffer | future bench |
 
-## Features
+## Features (post-Phase-1 work shipped + planned)
 
-| Name | Description | Satisfies | Depends On | Parallelizable |
-|------|-------------|-----------|------------|----------------|
-| ProseBuffer | State management for word token buffer | ISC-2..6 | none | yes |
-| OverlayDraw | Canvas draw callback rendering tokens with gray hats | ISC-7..10 | ProseBuffer | yes |
-| CanvasLifecycle | Canvas creation, show, hide, freeze | ISC-11..13 | OverlayDraw | no |
-| MainModule | Actions, settings, window capture, confirm flow | ISC-14..23 | ProseBuffer, CanvasLifecycle | no |
-| EditGrammar | .talon file for chuck commands | ISC-24..27 | MainModule | yes |
-| DictationIntercept | .talon file routing dictation to buffer | ISC-28..29 | MainModule | yes |
-| EnderHook | .talon file for line-ender confirm | ISC-30..31 | MainModule | yes |
-| AntiChecks | Verify no focus steal, no redefinitions | ISC-32..34 | all | no |
+| Name | Description | Satisfies | Status |
+|---|---|---|---|
+| CursorlessResolver | Python re-impl of processTargets (primitive/range/list/implicit + scopes) | ISC-1..7 | shipped |
+| JSResolverBridge | QuickJS bridge to cursorless processTargets, gated by setting | ISC-8..9 | scaffolded |
+| HatJSFallbackChrome | Orange BG/BORDER when JS allocator fails | ISC-10 | shipped |
+| HomophoneSliceA | Static dotted underline behind opt-in flag | ISC-11..12 | shipped |
+| HomophoneSwap | `phone <hat>` cycle (slice B) | ISC-13 | planned |
+| HatShapeIntegration | Lift mouse-clock shape vocabulary for swap UI | ISC-14 | located |
+| ScopePreviewFlash | Pre-execution flash of resolved scope | ISC-15 | planned |
+| DebugStreamRich | Always-on JSONL with full snapshot + rotation | ISC-16..17 | shipped |
+| StackOverflowTrail | Paper-trail slice tree (A: faulthandler; B: preamble) | ISC-18, ISC-20 | A shipped |
+| TestDriver | Headless JSON queue for shell-driven dispatch | ISC-19 | shipped |
+| BufferRev | Monotonic revision counter, cache-invalidation substrate | ISC-21 | shipped |
+| ViewportClass | Scroll/anchor/recenter state, Helix+Emacs voice surface | ISC-22 | shipped |
+| UndoRedo | CM6 two-deque + Helix inversions + Emacs boundary | ISC-23 | planned |
+| ParagraphCache | SkParagraph layout cache keyed by buffer_rev | ISC-24 | researched |
 
 ## Decisions
 
+- **2026-06-30 — Module-level `_hint_enabled` flag instead of `ctx.settings[...] =`** for the homophone voice toggle. The supported Talon API exists (item-assignment on a Context's settings dict — verified by ClaudeResearcher against talon.wiki), but it's context-scoped and would silently revert when the overlay dismisses, while the toggle wants process-global session semantics. Module flag is the right tool *for this toggle specifically*; use `ctx.settings[...]` when an override genuinely is context-scoped.
+- **2026-06-30 — Numbers and pure-punctuation tokens get NO hat** (commit `3c8c9e9`). The prior fallback used `token[0]` as the hat letter even for digits, but Talon's `user.letter` capture only accepts a-z so the hat could never be selected — dead pixels. Real number addressing (e.g. `chuck num 1`) requires a separate hat namespace + voice capture; planned for a future slice if usage warrants.
+- **2026-06-30 — Debug mode default ON.** Off-by-default observability is bad practice — nobody enables it before the bug they wanted to diagnose. The 5 MB log rotation bounds disk use.
+- **2026-06-29 — Cursorless rule shape: LIST + CAPTURE not CAPTURE + CAPTURE** (commit `44a01a5`). Wins specificity tie-break against cursorless.talon's CAPTURE + CAPTURE rule whenever the PO context is active.
+
 ## Changelog
 
+- **2026-06-30** — Phase 2 active. 9/24 ISCs green. Today's session shipped: viewport extraction (ISC-22), buffer rev counter (ISC-21), homophone slice A (ISC-11, ISC-12), hat-shape locate (ISC-14 substrate), stack-overflow trail slice A (ISC-18), always-on debug + draw hook (ISC-16, ISC-17), test driver (ISC-19). Plus three plan docs: `docs/UNDO_REDO_PLAN.md`, `docs/HOMOPHONE_UI_PLAN.md`, `docs/STACK_OVERFLOW_PAPER_TRAIL_PLAN.md`.
+- **2026-06-04** — Cursorless verb surface filled (ISCs 1–7 green via commits `44a01a5`, `46c93fc`, `170a0f7`).
+- **2026-05-31** — Wave 3 refactor (cursor, layout, history, help, visibility action files split out of monolithic prose_overlay.py).
+- **2026-05-21** — Phase 1 MVP shipped (all 36 original ISCs green; preserved in repo history at this date).
+
 ## Verification
+
+Continuous via `~/.talon/prose_overlay_debug.jsonl` — every state mutation produces a diff entry. Run `tail -f` for live; grep for `"trigger": "draw"` for the canonical post-mutation snapshot.
+
+Headless feature verification via `scripts/test-overlay.sh` (requires `PROSE_OVERLAY_TEST=1` at Talon launch). Scriptable repro of any ISC that isn't visual-only.
+
+Crash verification via `~/Library/Logs/prose_overlay_trail/faulthandler.log` (requires `PROSE_OVERLAY_TRAIL=1` at Talon launch). Catches the JS hat allocator overflow class documented in `HAT_ALLOC_OVERFLOW_ANALYSIS.md`.

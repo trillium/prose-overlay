@@ -25,6 +25,10 @@ _JS_BUNDLE = os.path.join(os.path.dirname(__file__), "js", "prose_allocate_hats.
 _ctx: js.Context | None = None
 _fn = None  # js.Object — the proseAllocateHats function
 
+# True when JS allocator failed and the Python fallback is being used.
+# Read by prose_overlay_actions_core._recompute_hats() to sync instance.hat_js_fallback.
+_using_fallback: bool = False
+
 
 def _ensure_loaded() -> None:
     global _ctx, _fn
@@ -58,10 +62,12 @@ def compute_hat_assignments(
     Returns:
         dict mapping token_index -> (char_index_within_word, letter, color)
     """
+    global _using_fallback
     try:
         _ensure_loaded()
     except Exception as e:
         print(f"prose_overlay: hat JS load failed ({e}), using Python fallback")
+        _using_fallback = True
         return _py_compute_hat_assignments(tokens, cursor_pos=len(tokens) if cursor_pos is None else cursor_pos)
 
     # Convert old_assignments to the JSON shape the JS function expects
@@ -87,10 +93,13 @@ def compute_hat_assignments(
         ))
         raw: dict[str, dict] = json.loads(result_json)
         # Convert {"0": {charIdx, letter, color}, ...} -> {0: (charIdx, letter, color), ...}
-        return {
+        result = {
             int(k): (v["charIdx"], v["letter"], v["color"])
             for k, v in raw.items()
         }
+        _using_fallback = False
+        return result
     except Exception as e:
         print(f"prose_overlay: hat JS call failed ({e}), using Python fallback")
+        _using_fallback = True
         return _py_compute_hat_assignments(tokens, cursor_pos=len(tokens) if cursor_pos is None else cursor_pos)

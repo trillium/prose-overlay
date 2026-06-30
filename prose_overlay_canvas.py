@@ -14,6 +14,7 @@ from talon.skia.canvas import Canvas as SkiaCanvas
 from ...utils.overlay_kit import DismissibleOverlay
 
 from .prose_overlay_draw import draw_overlay, draw_help_panel
+from .prose_overlay_instance import instance
 from .prose_overlay_state import ProseBuffer
 
 
@@ -100,6 +101,7 @@ class OverlayCanvas:
             cursor=cursor, change_mode=change_mode, blink_on=blink_on,
             flash_indices=flash_indices, flash_color=flash_color,
             selection=selection, target_label=target_label,
+            using_fallback=instance.hat_js_fallback,
         )
         if not panel_rect:
             return

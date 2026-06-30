@@ -11,6 +11,7 @@ Contains:
 
 from .prose_overlay_instance import instance
 from .prose_overlay_hats_js import compute_hat_assignments
+from . import prose_overlay_hats_js as _hats_js_mod
 from .prose_overlay_cursorless_resolve import (
     _state as _resolve_state,
 )
@@ -30,6 +31,7 @@ def _recompute_hats():
     instance.hat_assignments = compute_hat_assignments(
         tokens, old_assignments=instance.hat_assignments, cursor_pos=cursor_for_hats
     )
+    instance.hat_js_fallback = _hats_js_mod._using_fallback
     instance.hat_to_token = {
         (letter, color): idx
         for idx, (_, letter, color) in instance.hat_assignments.items()

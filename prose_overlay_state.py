@@ -8,9 +8,22 @@ that spoken hat names (air/bat/cap/..., optionally prefixed with a color) unambi
 identify words. Matches Cursorless collision resolution: same letter, different color.
 """
 
+from collections import deque
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
+import time
+
 # Color priority order: gray is default (no prefix spoken), then colors in order.
 # When two tokens share the same best letter, the second gets the next available color.
 HAT_COLOR_PRIORITY = ["gray", "blue", "green", "red", "pink", "yellow", "purple", "black", "white"]
+
+
+# Module-level coalescing window. Default 0.0 (OFF — every mutation outside a
+# commit_start/commit_end bracket becomes its own undo record, matching the
+# pre-refactor behavior). Flip to a positive value (CM6 uses 0.400) via
+# prose_overlay_undo_group_set(True) to opt into dictation merging.
+_GROUP_DELAY_S: float = 0.0
 
 
 def compute_hat_assignments(
@@ -86,10 +99,39 @@ def compute_hat_assignments(
     return assignments
 
 
+class EditKind(Enum):
+    """Classification of an undo record's originating edit."""
+    DICTATION = "dictation"        # add_text / insert_at from voice dictation
+    STRUCTURAL = "structural"      # Cursorless edit-plan, formatter, bring/move
+    EXPLICIT = "explicit"          # named voice command (delete_hat, change_hat, etc.)
+    PROGRAMMATIC = "programmatic"  # internal — reserved
+
+
+@dataclass
+class TokenDelta:
+    """One contiguous token-range replacement."""
+    start: int                     # token index where replacement begins
+    old_tokens: list[str]          # displaced tokens (needed for inverse)
+    new_tokens: Optional[list[str]]  # tokens inserted in place; None = full-buffer snapshot resolved at undo
+
+
+@dataclass
+class UndoRecord:
+    """One undoable group. Holds deltas in apply order plus selection."""
+    deltas: list[TokenDelta]
+    kind: EditKind
+    label: str
+    timestamp: float
+    selection_before: Optional[tuple[int, int]]
+    selection_after: Optional[tuple[int, int]]
+    sealed: bool = False
+
+
 class ProseBuffer:
     """Manages a list of word tokens captured from dictation."""
 
-    _HISTORY_MAX = 20
+    _HISTORY_MAX = 200
+    _MAX_COMPOSED_DELTAS = 64
     TRAILING_PUNCT = ".?!,;:)"
 
     def _split_trailing_punct(self, word: str) -> list[str]:
@@ -112,25 +154,87 @@ class ProseBuffer:
 
     def __init__(self):
         self._tokens: list[str] = []
-        self._history: list[list[str]] = []
+        self._done: deque[UndoRecord] = deque(maxlen=self._HISTORY_MAX)
+        self._undone: deque[UndoRecord] = deque(maxlen=self._HISTORY_MAX)
+        self._open_group: Optional[UndoRecord] = None
         self._selection: tuple[int, int] | None = None  # (start_idx, end_idx) inclusive
         self.rev: int = 0
 
     # ---------------------------------------------------------------------------
-    # Undo stack
+    # Undo / redo
     # ---------------------------------------------------------------------------
 
     def snapshot(self):
-        """Save current state to undo stack (call before any mutation)."""
-        self._history.append(list(self._tokens))
-        if len(self._history) > self._HISTORY_MAX:
-            self._history.pop(0)
+        """Save current state to undo stack (call before any mutation).
+
+        Phase 1 shim: records a full-buffer snapshot as a single UndoRecord whose
+        sole delta has new_tokens=None — meaning "the post-state is whatever the
+        buffer currently holds when undo() is invoked." This preserves the
+        behavior of legacy callers that mutate _tokens directly after snapshot()
+        (e.g. prose_overlay_actions_bring_move) and of callers that subsequently
+        invoke set_tokens_raw() (e.g. _apply_edit_plan).
+        """
+        # If a group is open, the snapshot is implicit in that group — no-op.
+        if self._open_group is not None:
+            return
+        delta = TokenDelta(start=0, old_tokens=list(self._tokens), new_tokens=None)
+        record = UndoRecord(
+            deltas=[delta],
+            kind=EditKind.PROGRAMMATIC,
+            label="snapshot",
+            timestamp=time.monotonic(),
+            selection_before=self._selection,
+            selection_after=None,
+            sealed=True,
+        )
+        self._done.append(record)
+        self._undone.clear()
+        self.rev += 1
 
     def undo(self) -> bool:
         """Restore previous state. Returns True if undo was available."""
-        if not self._history:
+        if not self._done:
             return False
-        self._tokens = self._history.pop()
+        record = self._done.pop()
+        # Capture current tokens to build the redo-record before mutating.
+        current = list(self._tokens)
+        # Apply inverse: walk deltas in reverse order, replacing new with old.
+        # Snapshot-style deltas (new_tokens=None) are full-buffer restores.
+        for delta in reversed(record.deltas):
+            if delta.new_tokens is None:
+                # Full-buffer restore.
+                self._tokens = list(delta.old_tokens)
+            else:
+                # Splice: replace tokens[start:start+len(new)] with old.
+                end = delta.start + len(delta.new_tokens)
+                self._tokens[delta.start:end] = list(delta.old_tokens)
+        # Build redo record. For snapshot-style records, capture the full current.
+        # For delta records, we already know forward shape, so reuse it.
+        redo_deltas: list[TokenDelta] = []
+        for delta in record.deltas:
+            if delta.new_tokens is None:
+                # Snapshot-style: redo restores the captured current state.
+                redo_deltas.append(TokenDelta(
+                    start=0,
+                    old_tokens=list(delta.old_tokens),
+                    new_tokens=list(current),
+                ))
+            else:
+                redo_deltas.append(TokenDelta(
+                    start=delta.start,
+                    old_tokens=list(delta.old_tokens),
+                    new_tokens=list(delta.new_tokens),
+                ))
+        redo_record = UndoRecord(
+            deltas=redo_deltas,
+            kind=record.kind,
+            label=record.label,
+            timestamp=record.timestamp,
+            selection_before=record.selection_before,
+            selection_after=record.selection_after,
+            sealed=True,
+        )
+        self._undone.append(redo_record)
         self._selection = None
         self.rev += 1
         return True
@@ -152,7 +256,87 @@ class ProseBuffer:
         return self._selection
 
     # ---------------------------------------------------------------------------
-    # Mutations (each calls snapshot() first, then clears selection)
+    # Internal: delta recording with CM6-style coalescing
+    # ---------------------------------------------------------------------------
+
+    def _record(self, delta: TokenDelta, kind: EditKind, label: str) -> None:
+        """Append delta to open group, or open + close a new group.
+
+        Honors CM6-style time+adjacency coalescing when _GROUP_DELAY_S > 0.
+        Always clears _undone (CM6 linear-redo rule). Bumps rev.
+        """
+        now = time.monotonic()
+
+        # Inside an open commit_start/commit_end group: append, with cap split.
+        if self._open_group is not None:
+            if len(self._open_group.deltas) >= self._MAX_COMPOSED_DELTAS:
+                # Cap reached. Close the current group and open a fresh one with
+                # the same kind/label so the bracket stays semantically intact.
+                self._open_group.sealed = True
+                self._open_group.selection_after = self._selection
+                self._done.append(self._open_group)
+                self._open_group = UndoRecord(
+                    deltas=[delta],
+                    kind=self._open_group.kind,
+                    label=self._open_group.label,
+                    timestamp=now,
+                    selection_before=self._selection,
+                    selection_after=None,
+                )
+            else:
+                self._open_group.deltas.append(delta)
+            self._undone.clear()
+            self.rev += 1
+            return
+
+        # Outside any bracket: maybe coalesce into the previous record.
+        merged = False
+        if (
+            _GROUP_DELAY_S > 0.0
+            and self._done
+            and not self._done[-1].sealed
+            and self._done[-1].kind == EditKind.DICTATION
+            and kind == EditKind.DICTATION
+            and (now - self._done[-1].timestamp) < _GROUP_DELAY_S
+            and len(self._done[-1].deltas) < self._MAX_COMPOSED_DELTAS
+            and self._touches_previous(self._done[-1], delta)
+        ):
+            self._done[-1].deltas.append(delta)
+            self._done[-1].timestamp = now
+            self._done[-1].selection_after = self._selection
+            merged = True
+
+        if not merged:
+            record = UndoRecord(
+                deltas=[delta],
+                kind=kind,
+                label=label,
+                timestamp=now,
+                selection_before=self._selection,
+                selection_after=self._selection,
+                sealed=False,
+            )
+            self._done.append(record)
+
+        self._undone.clear()
+        self.rev += 1
+
+    def _touches_previous(self, prev: UndoRecord, new_delta: TokenDelta) -> bool:
+        """CM6 adjacency rule: new delta's start touches the previous delta's range.
+
+        For token-grained edits, "touches" means the new delta begins at or
+        one past the end of the previous delta's affected forward range.
+        """
+        if not prev.deltas:
+            return False
+        last = prev.deltas[-1]
+        if last.new_tokens is None:
+            return False
+        last_end = last.start + len(last.new_tokens)
+        return last.start <= new_delta.start <= last_end
+
+    # ---------------------------------------------------------------------------
+    # Mutations -- each builds a TokenDelta and routes through _record
     # ---------------------------------------------------------------------------
 
     def add_text(self, text: str):
@@ -161,23 +345,27 @@ class ProseBuffer:
         Trailing punctuation is split off each word into its own token,
         e.g. "hello world." -> ["hello", "world", "."].
         """
-        self.rev += 1
-        self.snapshot()
         self._selection = None
         words = text.strip().split()
-        split_tokens = []
+        split_tokens: list[str] = []
         for word in words:
             if word:
                 split_tokens.extend(self._split_trailing_punct(word))
+        if not split_tokens:
+            return
+        start = len(self._tokens)
+        delta = TokenDelta(start=start, old_tokens=[], new_tokens=list(split_tokens))
         self._tokens.extend(split_tokens)
+        self._record(delta, EditKind.DICTATION, "add_text")
 
     def delete_token(self, index: int):
         """Delete the token at the given index. No-op if out of range."""
         if 0 <= index < len(self._tokens):
-            self.rev += 1
-            self.snapshot()
             self._selection = None
+            old = [self._tokens[index]]
+            delta = TokenDelta(start=index, old_tokens=old, new_tokens=[])
             self._tokens.pop(index)
+            self._record(delta, EditKind.EXPLICIT, "delete_token")
 
     def delete_through(self, index: int):
         """Delete from the end back through and including the token at index.
@@ -187,10 +375,11 @@ class ProseBuffer:
         hat's word and everything after it.
         """
         if 0 <= index < len(self._tokens):
-            self.rev += 1
-            self.snapshot()
             self._selection = None
+            old = list(self._tokens[index:])
+            delta = TokenDelta(start=index, old_tokens=old, new_tokens=[])
             self._tokens = self._tokens[:index]
+            self._record(delta, EditKind.EXPLICIT, "delete_through")
 
     def delete_head(self, index: int):
         """Delete from the start through and including the token at index.
@@ -200,28 +389,33 @@ class ProseBuffer:
         the hat's word.
         """
         if 0 <= index < len(self._tokens):
-            self.rev += 1
-            self.snapshot()
             self._selection = None
+            old = list(self._tokens[:index + 1])
+            delta = TokenDelta(start=0, old_tokens=old, new_tokens=[])
             self._tokens = self._tokens[index + 1:]
+            self._record(delta, EditKind.EXPLICIT, "delete_head")
 
     def replace_token(self, index: int, text: str):
         """Replace the token at index with the first word of text."""
         if 0 <= index < len(self._tokens):
-            self.rev += 1
-            self.snapshot()
             self._selection = None
             words = text.strip().split()
             if words:
+                old = [self._tokens[index]]
+                new = [words[0]]
+                delta = TokenDelta(start=index, old_tokens=old, new_tokens=new)
                 self._tokens[index] = words[0]
+                self._record(delta, EditKind.EXPLICIT, "replace_token")
 
     def insert_at(self, index: int, text: str):
         """Insert words from text at gap index (0 = before all, N = after all)."""
-        self.rev += 1
-        self.snapshot()
         self._selection = None
         words = text.strip().split()
+        if not words:
+            return
+        delta = TokenDelta(start=index, old_tokens=[], new_tokens=list(words))
         self._tokens[index:index] = words
+        self._record(delta, EditKind.DICTATION, "insert_at")
 
     def get_tokens(self) -> list[str]:
         """Return a copy of the current token list."""
@@ -234,17 +428,19 @@ class ProseBuffer:
     def set_tokens_raw(self, tokens: list[str]):
         """Overwrite token list directly without snapshotting or clearing history.
 
-        Used by _apply_edit_plan, which takes a manual snapshot before calling this.
+        Used by _apply_edit_plan after a manual snapshot() / commit_start().
         """
         self.rev += 1
         self._tokens = list(tokens)
         self._selection = None
 
     def clear(self):
-        """Remove all tokens."""
+        """Remove all tokens and clear history."""
         self.rev += 1
         self._tokens.clear()
-        self._history.clear()
+        self._done.clear()
+        self._undone.clear()
+        self._open_group = None
         self._selection = None
 
     def __len__(self) -> int:

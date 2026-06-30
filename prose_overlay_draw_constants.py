@@ -29,9 +29,13 @@ LISTENING_COLOR = "666677cc"
 SEP_COLOR = "44556688"
 HELP_TITLE_COLOR = "66aaccee"
 
-# Homophone-hint underline — Slice A. Low-saturation slate, ~40% alpha so it
-# reads as a sub-syntactic hint without competing with hat dots.
-HOMOPHONE_UNDERLINE_COLOR = "8899aa66"
+# Homophone-hint underline — Slice A. Was a sub-pixel (0.5px) dotted slate at
+# 40% alpha (8899aa66) which most displays rasterized to nothing — user
+# reported the homophones "look identical to any other token." Bumped to a
+# spell-checker-style amber solid underline so it's unmistakable. Override at
+# runtime if you want it subtler — keep contrast high enough to actually read.
+HOMOPHONE_UNDERLINE_COLOR = "ffb74dee"      # amber, ~93% alpha
+HOMOPHONE_UNDERLINE_HEIGHT = 1.5             # px — visible at standard DPI
 
 # Hat dot colors — matches Cursorless palette
 HAT_COLOR_HEX: dict[str, str] = {

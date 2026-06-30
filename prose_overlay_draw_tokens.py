@@ -18,7 +18,7 @@ from .prose_overlay_draw_constants import (
     TOKEN_COLOR, HAT_COLOR, HAT_COLOR_HEX, HAT_ALPHABET,
     CURSOR_COLOR_NAVIGATE, CURSOR_COLOR_CHANGE,
     CURSOR_WIDTH, CURSOR_CHANGE_ZONE_WIDTH, CURSOR_CHANGE_ZONE_ALPHA,
-    HOMOPHONE_UNDERLINE_COLOR,
+    HOMOPHONE_UNDERLINE_COLOR, HOMOPHONE_UNDERLINE_HEIGHT,
 )
 
 
@@ -178,10 +178,7 @@ def _draw_token_rows(
                 underline_y = y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE + 2
                 c.paint.style = c.paint.Style.FILL
                 c.paint.color = HOMOPHONE_UNDERLINE_COLOR
-                dot_x = x
-                while dot_x < x + tw:
-                    c.draw_circle(dot_x, underline_y, 0.5)
-                    dot_x += 2
+                c.draw_rect(Rect(x, underline_y, tw, HOMOPHONE_UNDERLINE_HEIGHT))
 
             x += tw + TOKEN_GAP_X
 

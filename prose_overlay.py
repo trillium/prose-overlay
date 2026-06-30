@@ -59,13 +59,17 @@ mod.setting(
 mod.setting(
     "prose_overlay_use_js_resolver",
     type=bool,
-    default=False,
+    default=True,
     desc=(
-        "When true, target/scope resolution flows through cursorless's "
-        "processTargets pipeline bundled at js/prose_resolve_targets.js. "
-        "When false (default), the legacy Python resolver in "
-        "prose_overlay_cursorless_resolve.py is used. Toggle for the F5 "
-        "JS-resolver migration; remove the Python path once parity verified."
+        "When true (default since 2026-06-30 F9 migration), target/scope "
+        "resolution flows through cursorless's full processTargets pipeline "
+        "via the QuickJS bridge (bundle at js/prose_resolve_targets.js). "
+        "This is the native cursorless path — every modifier cursorless "
+        "supports (relativeScope, ordinal, compound, …) comes for free. "
+        "Set to false to fall back to the Python re-impl in "
+        "prose_overlay_cursorless_resolve.py, retained as a safety net "
+        "until ISC-9 retires it. Strategic goal stated 2026-06-30: native "
+        "cursorless, not rewritten."
     ),
 )
 

@@ -225,3 +225,4 @@ from .ui import actions_history     # noqa: F401, E402
 from .ui import actions_help        # noqa: F401, E402
 from .ui import actions_visibility  # noqa: F401, E402
 from .shim import actions_cursorless  # noqa: F401, E402
+from .shim import actions_homophones   # noqa: F401, E402

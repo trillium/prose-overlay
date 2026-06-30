@@ -37,6 +37,15 @@ Commands (one JSON object per line):
   {"cmd": "clear_buffer"}       # wipe buffer + cursor; KEEPS canvas showing
   {"cmd": "clear_queue"}        # truncate the queue file, reset cursor
 
+  # Homophone swap (Slice A of docs/PHONES_SPEC.md)
+  {"cmd": "phone_shape", "shape": "wing"}
+  # Slice B
+  {"cmd": "phone_word", "word": "there"}
+  {"cmd": "phone_letter", "letter": "a"}
+  {"cmd": "phone_letter", "letter": "h", "color": "blue"}
+  # Slice C
+  {"cmd": "phone_color_shape", "color": "gold", "shape": "play"}
+
 Shell shortcut: ``scripts/test-overlay.sh <verb> [args...]`` wraps the JSON.
 """
 
@@ -141,6 +150,14 @@ def _dispatch(cmd: dict) -> None:
             actions.user.prose_overlay_undo()
         elif name == "homophone_hint":
             actions.user.prose_overlay_set_homophone_hint(1 if cmd.get("enabled") else 0)
+        elif name == "phone_shape":
+            actions.user.prose_overlay_phone_shape(cmd["shape"])
+        elif name == "phone_word":
+            actions.user.prose_overlay_phone_word(cmd["word"])
+        elif name == "phone_letter":
+            actions.user.prose_overlay_phone_letter(cmd["letter"], cmd.get("color", "gray"))
+        elif name == "phone_color_shape":
+            actions.user.prose_overlay_phone_color_shape(cmd["color"], cmd["shape"])
         elif name == "reset":
             actions.user.prose_overlay_reset()
         elif name == "clear_buffer":

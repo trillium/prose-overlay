@@ -510,6 +510,42 @@ def run_layer_1() -> None:
             f"expected 3-member their/there/they're group; got {g!r}"
         )
 
+    with test("L1", "L1.42", "buffer-level cycle: their→there→they're→their = 3 undo records"):
+        # Mirrors what shim.actions_homophones._swap_token does at the
+        # buffer level (commit_start → set_tokens_raw → commit_end). Each
+        # call to that path must produce exactly one new undo record,
+        # because Scenario 12 requires `overlay undo` to step back the
+        # individual swaps one at a time, not collapse them into one.
+        b = ProseBuffer()
+        b.add_text("their")
+        starting_history = len(b._done)
+        # Cycle 1: their → there
+        b.commit_start("phone wing", EditKind.STRUCTURAL)
+        b.set_tokens_raw(["there"])
+        b.commit_end()
+        # Cycle 2: there → they're
+        b.commit_start("phone wing", EditKind.STRUCTURAL)
+        b.set_tokens_raw(["they're"])
+        b.commit_end()
+        # Cycle 3: they're → their (wrap)
+        b.commit_start("phone wing", EditKind.STRUCTURAL)
+        b.set_tokens_raw(["their"])
+        b.commit_end()
+        new_records = len(b._done) - starting_history
+        assert new_records == 3, (
+            f"expected 3 new undo records (one per swap); got {new_records}"
+        )
+        assert b.get_tokens() == ["their"], (
+            f"expected wrap back to 'their'; got {b.get_tokens()!r}"
+        )
+        # Undo three times — should walk back through they're → there → their's-prior.
+        assert b.undo()
+        assert b.get_tokens() == ["they're"], b.get_tokens()
+        assert b.undo()
+        assert b.get_tokens() == ["there"], b.get_tokens()
+        assert b.undo()
+        assert b.get_tokens() == ["their"], b.get_tokens()
+
 
 # =============================================================================
 # Layer 2 — JS bundle via bun
@@ -701,6 +737,14 @@ def run_layer_3() -> None:
         actions_log.clear()
         td._dispatch({"cmd": "clear_buffer"})
         assert actions_log == [("prose_overlay_clear_buffer", (), {})], actions_log
+
+    # Slice A of docs/PHONES_SPEC.md — phone_shape dispatch
+    with test("L3", "L3.5f", "_dispatch phone_shape → prose_overlay_phone_shape(shape)"):
+        actions_log.clear()
+        td._dispatch({"cmd": "phone_shape", "shape": "wing"})
+        assert actions_log == [
+            ("prose_overlay_phone_shape", ("wing",), {}),
+        ], actions_log
 
     with test("L3", "L3.6", "_dispatch bogus cmd does not raise"):
         actions_log.clear()

@@ -1,14 +1,7 @@
 """Cursorless dispatch actions for the prose overlay.
 
-Migrated from prose_overlay.py in wave 4.
-
-Contains:
-  _token_char_range       — compute (start_char, end_char) for a token index
-  _apply_edit_plan        — apply JS shim edit plan to instance.buffer
-  prose_overlay_run_action         — action method
-  prose_overlay_run_action_range   — action method
-  prose_overlay_apply_formatter    — action method (reformat tokens via community formatters)
-  prose_overlay_bring_move         — action method
+Migrated from prose_overlay.py in wave 4. Edit-plan execution and
+matcher-misfire diagnostics live in prose_overlay_actions_cursorless_edit.
 
 All state access uses instance.*. Never imports prose_overlay.py.
 """
@@ -18,214 +11,40 @@ from typing import Any
 from talon import Module, actions
 
 from .prose_overlay_instance import instance
-from .prose_overlay_actions_core import _recompute_hats, _hat_to_index  # noqa: F401
+from .prose_overlay_actions_core import _recompute_hats
 from .prose_overlay_actions_flash import _flash_tokens, _action_color
-from .prose_overlay_actions_cursor import (
-    _prose_overlay_set_cursor,
-    _prose_overlay_clear_cursor,
-    _auto_scroll_to_cursor,
-    _set_cursor,
-)
 from .prose_overlay_cursorless_resolve import (
     _resolve_target_to_token_range,
     _cursorless_symbol_to_token_index,
     _SUPPORTED_SIMPLE_ACTIONS,
-    _WORD_SCOPE_TYPES,
-    _WHOLE_BUFFER_SCOPE_TYPES,
+)
+from .prose_overlay_actions_cursorless_edit import (
+    _po_matcher_misfire,
+    _token_char_range,
+    _cursor_to_char,
+    _apply_edit_plan,
 )
 from . import prose_overlay_actions_js as _js
 
 mod = Module()
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _po_matcher_misfire(site: str, action_name: str, target: Any) -> None:
-    """Capture the registry/scope/grammar state at the moment a PO cursorless
-    rule fired despite the canvas being closed.
-
-    prose_overlay_cursorless.talon's header requires `tag: user.prose_overlay_active`,
-    which is only set when `instance.canvas.is_showing` is True (see
-    `_sync_tags` in prose_overlay_actions_core.py). If we reach a PO action
-    body with the canvas closed, Talon's matcher has bound a rule whose
-    context predicate is provably unsatisfied — a routing anomaly that
-    swallows the user's command instead of letting cursorless handle it.
-
-    This helper appends one JSONL line to ~/.talon/registry_probe.jsonl with
-    the full registry snapshot at the anomaly moment, and prints one audible
-    line to the Talon log so the misfire is not silent. Tracked by task #28.
-    """
-    label = "po_anomaly_canvas_closed"
-    extras = {
-        "site": site,
-        "action_name": action_name,
-        "target_type": type(target).__name__,
-        "canvas_is_showing": False,
-        "ctx_tags": list(getattr(instance.ctx, "tags", None) or []),
-    }
-    try:
-        actions.user.registry_probe_dump(label, extras)
-    except Exception as e:
-        print(f"prose_overlay: registry_probe_dump failed ({e})")
-    print(
-        f"prose_overlay: matcher misfire — canvas closed but PO rule bound; "
-        f"re-dispatching to cursorless. site={site} action={action_name} "
-        f"label={label}"
-    )
-
-
-def _cursor_to_char(cursor: int | None, tokens: list[str], text: str) -> int:
-    """Convert a cursor gap index to a character offset in space-joined text.
-
-    cursor=None or cursor=0 → 0 (before all tokens)
-    cursor>=len(tokens) → len(text) (after all tokens)
-    otherwise → one past the end of the token left of the gap
-    """
-    if cursor is None or cursor == 0:
-        return 0
-    if cursor >= len(tokens):
-        return len(text)
-    _, tok_end = _token_char_range(cursor - 1, tokens)
-    return tok_end + 1  # one past the trailing space of the previous token
-
-
-def _token_char_range(token_index: int, tokens: list[str]) -> tuple[int, int]:
-    """Return (start_char, end_char) for the token at token_index in space-joined text.
-
-    The document text is " ".join(tokens), so each token occupies its own
-    character run separated by a single space.  end_char is exclusive.
-    """
-    start = 0
-    for i, tok in enumerate(tokens):
-        if i == token_index:
-            return start, start + len(tok)
-        start += len(tok) + 1  # +1 for the space separator
-    return 0, 0
-
-
-def _apply_edit_plan(plan: dict) -> None:
-    """Apply the edit plan returned by the JS shim to instance.buffer and set the cursor.
-
-    Edits are applied in reverse character-offset order to prevent index shift
-    errors when multiple edits touch the same buffer string.
-
-    Supported edit types:
-      delete  — remove characters in range from the flat string representation,
-                then rebuild the token list from the result.
-      insert  — insert text at position, then rebuild tokens.
-      replace — delete range and insert text, then rebuild tokens.
-
-    After all edits, the buffer is rebuilt from the modified flat string.
-    newSelections is used to update the cursor gap position (line=0, char offset).
-    """
-    if "error" in plan:
-        print(f"prose_overlay: JS action error: {plan['error']}")
-        return
-
-    edits = plan.get("edits", [])
-    new_selections = plan.get("newSelections", [])
-
-    # Snapshot before any mutation so the edit is undoable.
-    instance.buffer.snapshot()
-
-    # Work on a mutable flat string (single-line buffer).
-    text = instance.buffer.get_text()
-
-    # Sort edits in reverse start-char order so later edits don't shift
-    # earlier offsets.  "insert" edits use a "position" key; all others
-    # use a "range" key with a "start".
-    def _edit_start(edit: dict) -> int:
-        if "range" in edit:
-            return edit["range"]["start"]["character"]
-        if "position" in edit:
-            return edit["position"]["character"]
-        return 0
-
-    sorted_edits = sorted(edits, key=_edit_start, reverse=True)
-
-    for edit in sorted_edits:
-        etype = edit.get("type")
-        if etype == "delete":
-            r = edit["range"]
-            s = r["start"]["character"]
-            e = r["end"]["character"]
-            text = text[:s] + text[e:]
-        elif etype == "insert":
-            pos = edit["position"]["character"]
-            inserted = edit.get("text", "")
-            text = text[:pos] + inserted + text[pos:]
-        elif etype == "replace":
-            r = edit["range"]
-            s = r["start"]["character"]
-            e = r["end"]["character"]
-            inserted = edit.get("text", "")
-            text = text[:s] + inserted + text[e:]
-
-    # Rebuild buffer from the modified flat string.
-    # Use set_tokens_raw to avoid a second snapshot (we already snapshotted above)
-    # and to avoid clearing _history via clear().
-    new_tokens = text.strip().split() if text.strip() else []
-    instance.buffer.set_tokens_raw(new_tokens)
-
-    # Update cursor from newSelections (active char offset → gap index).
-    if new_selections:
-        active_char = new_selections[0].get("active", {}).get("character", None)
-        if active_char is not None:
-            # Convert character offset to gap index: count how many tokens
-            # end before or at active_char.
-            tokens = instance.buffer.get_tokens()
-            gap = 0
-            pos = 0
-            for i, tok in enumerate(tokens):
-                tok_end = pos + len(tok)
-                if active_char <= tok_end:
-                    # Cursor is within or at end of this token
-                    gap = i if active_char <= pos else i + 1
-                    break
-                pos = tok_end + 1  # advance past the space
-                gap = i + 1
-            _prose_overlay_set_cursor(gap)
-        else:
-            _prose_overlay_clear_cursor()
-    _auto_scroll_to_cursor()
-
-
-# ---------------------------------------------------------------------------
-# Actions
-# ---------------------------------------------------------------------------
-
 @mod.action_class
 class Actions:
     def prose_overlay_run_action(
         cursorless_simple_action: str, cursorless_target: Any
     ):
-        """Run a prose overlay action via the JS shim for any CursorlessTarget.
+        """Dispatch a cursorless simple action via the JS shim.
 
-        Bound to `{user.cursorless_simple_action} <user.cursorless_target>` in
-        prose_overlay_cursorless.talon. The LIST + CAPTURE shape beats
-        cursorless's CAPTURE + CAPTURE rule on grammar specificity, so this
-        action runs instead of cursorless's command-server dispatch whenever
-        the prose overlay context is active. Cursorless's context excludes
-        `user.prose_overlay_active`, so mutual exclusion is enforced upstream.
-
-        Resolves cursorless_target (PrimitiveTarget, RangeTarget, or
-        ListTarget) to a token range, computes the corresponding character
-        range in the flat buffer string, calls the JS shim to get an edit
-        plan, applies the edits, and redraws. Flashes all tokens in the
-        resolved range before executing. Tracks selection for setSelection
-        and clearAndSetSelection actions.
-
-        Supported action values: remove, setSelection, clearAndSetSelection,
-        setSelectionBefore, setSelectionAfter.
+        Bound to `{user.cursorless_simple_action} <user.cursorless_target>` —
+        the LIST+CAPTURE shape outranks cursorless's CAPTURE+CAPTURE rule, so
+        this fires whenever `user.prose_overlay_active` is set (mutual
+        exclusion is enforced upstream).
         """
         action_name = cursorless_simple_action
 
         if not instance.canvas.is_showing:
-            _po_matcher_misfire(
-                "run_action", action_name, cursorless_target
-            )
+            _po_matcher_misfire("run_action", action_name, cursorless_target)
             actions.user.cursorless_command(action_name, cursorless_target)
             return
 
@@ -238,14 +57,12 @@ class Actions:
             print(f"prose_overlay: unresolvable target for action '{action_name}'")
             return
 
-        # Collect all token indices for flashing, then execute each range.
         all_indices: list[int] = []
         for first_idx, last_idx in token_ranges:
             all_indices.extend(range(first_idx, last_idx + 1))
 
         def _execute():
-            # Apply action to each range in reverse order so earlier indices
-            # stay valid after edits delete/modify later tokens.
+            # Apply each range in reverse order so earlier indices stay valid.
             for first_idx, last_idx in sorted(token_ranges, reverse=True):
                 tokens = instance.buffer.get_tokens()
                 text = " ".join(tokens)
@@ -253,10 +70,7 @@ class Actions:
                 _, src_end = _token_char_range(last_idx, tokens)
                 cursor_char = _cursor_to_char(instance.cursor, tokens, text)
                 plan = _js.run_action(
-                    action_name,
-                    src_start,
-                    src_end,
-                    text,
+                    action_name, src_start, src_end, text,
                     cursor_anchor_char=cursor_char,
                     cursor_active_char=cursor_char,
                 )
@@ -268,19 +82,8 @@ class Actions:
 
         _flash_tokens(all_indices, _action_color(action_name), _execute)
 
-    def prose_overlay_run_action_range(
-        action_name: str, anchor: dict, active: dict
-    ):
-        """Run a range-target action (anchor past active) via the JS shim.
-
-        Resolves both decorated symbols to token indices and builds a
-        character range spanning from anchor token start to active token end.
-        The anchor and active ordering follows Cursorless conventions: the
-        range runs from whichever is earlier to whichever is later in the
-        buffer (selection direction is not reversed here).
-
-        Flashes all tokens in the range before executing.
-        """
+    def prose_overlay_run_action_range(action_name: str, anchor: dict, active: dict):
+        """Run a range-target action: spans from earlier to later token (anchor past active)."""
         if action_name not in _SUPPORTED_SIMPLE_ACTIONS:
             print(f"prose_overlay: unsupported action '{action_name}' (VS Code-only?)")
             return
@@ -292,23 +95,16 @@ class Actions:
 
         tokens = instance.buffer.get_tokens()
         text = " ".join(tokens)
-
-        # Build the range: earlier token start → later token end.
         first_idx = min(anchor_idx, active_idx)
         last_idx = max(anchor_idx, active_idx)
         src_start, _ = _token_char_range(first_idx, tokens)
         _, src_end = _token_char_range(last_idx, tokens)
-
         cursor_char = _cursor_to_char(instance.cursor, tokens, text)
-
         range_indices = list(range(first_idx, last_idx + 1))
 
         def _execute():
             plan = _js.run_action(
-                action_name,
-                src_start,
-                src_end,
-                text,
+                action_name, src_start, src_end, text,
                 cursor_anchor_char=cursor_char,
                 cursor_active_char=cursor_char,
             )
@@ -321,27 +117,18 @@ class Actions:
         _flash_tokens(range_indices, _action_color(action_name), _execute)
 
     def prose_overlay_apply_formatter(cursorless_target: Any, formatters: str):
-        """Apply text formatter(s) to the resolved target tokens.
+        """Apply community-formatter pipeline (user.reformat_text) to the target tokens.
 
-        Resolves the cursorless_target to a token range, extracts the text,
-        runs it through the community formatter pipeline (user.reformat_text),
-        and replaces the original tokens with the formatted result.
-
-        formatters is a comma-separated string of formatter IDs (e.g.
-        'SNAKE_CASE', 'ALL_CAPS,SNAKE_CASE' for CONSTANT_CASE).
-
-        Flashes the target tokens before executing the reformat.
+        formatters is a comma-separated list of formatter IDs (e.g. 'SNAKE_CASE',
+        'ALL_CAPS,SNAKE_CASE' for CONSTANT_CASE).
         """
         if not instance.canvas.is_showing:
+            # Reformat re-dispatch: cursorless's IDE-side reformat entry point
+            # lives behind a different rule shape. The matcher misfire signal
+            # is the priority here; the no-op is acceptable until #28 lands.
             _po_matcher_misfire(
                 "apply_formatter", f"reformat:{formatters}", cursorless_target
             )
-            # Reformat re-dispatch: feed the text through the community
-            # formatter pipeline locally — cursorless's IDE-side reformat
-            # entry point lives behind a different rule shape. Surfacing
-            # the misfire via registry_probe is the priority; the
-            # formatter case is rare enough that a no-op here is acceptable
-            # until #28 root-causes the matcher.
             return
 
         token_ranges = _resolve_target_to_token_range(cursorless_target)
@@ -354,52 +141,31 @@ class Actions:
             all_indices.extend(range(first_idx, last_idx + 1))
 
         def _execute():
-            # Apply to each range in reverse order so earlier indices stay valid.
             for first_idx, last_idx in sorted(token_ranges, reverse=True):
                 tokens = instance.buffer.get_tokens()
-                # Extract the raw token text for the range.
-                source_tokens = tokens[first_idx : last_idx + 1]
-                source_text = " ".join(source_tokens)
-
-                # Use the community reformat_text action which handles
-                # splitting (de-camel, de-snake, etc.) and re-joining.
+                source_text = " ".join(tokens[first_idx : last_idx + 1])
+                # reformat_text handles split (de-camel, de-snake) and rejoin.
                 formatted = actions.user.reformat_text(source_text, formatters)
-
-                # Snapshot before mutation for undo support.
                 instance.buffer.snapshot()
-
-                # Replace the token range with the formatted result.
-                # The formatted text may be a single joined token (snake_case,
-                # camelCase) or multiple space-separated words (title case).
+                # Formatted may be one joined token (snake/camel) or several
+                # space-separated words (title case).
                 new_tokens = formatted.split() if formatted else []
                 current_tokens = list(instance.buffer.get_tokens())
                 current_tokens[first_idx : last_idx + 1] = new_tokens
                 instance.buffer.set_tokens_raw(current_tokens)
-
             _recompute_hats()
             instance.canvas.refresh()
 
         _flash_tokens(all_indices, _action_color("applyFormatter"), _execute)
 
     def prose_overlay_bring_move(action_name: str, cursorless_target: Any):
-        """Bring or move: replaceWithTarget / moveToTarget to the cursor position.
-
-        Source is resolved from cursorless_target (PrimitiveTarget, RangeTarget,
-        or ListTarget) via _resolve_target_to_token_range. Destination is the
-        current cursor position in the buffer (collapsed selection at the cursor
-        gap).
-
-        For 'move' (moveToTarget), the JS shim returns two edits: the
-        destination insert and the source delete. _apply_edit_plan applies
-        them in reverse character-offset order to avoid shift errors.
-
-        Flashes the source token(s) before executing.
-        If no cursor is active, the action is a no-op (nowhere to bring to).
+        """replaceWithTarget / moveToTarget — source is resolved from
+        cursorless_target, destination is the current cursor gap (no-op if no
+        active cursor). For 'move' the JS shim returns two edits (insert at
+        dest, delete at source); _apply_edit_plan handles ordering.
         """
         if not instance.canvas.is_showing:
-            _po_matcher_misfire(
-                "bring_move", action_name, cursorless_target
-            )
+            _po_matcher_misfire("bring_move", action_name, cursorless_target)
             actions.user.cursorless_command(action_name, cursorless_target)
             return
 
@@ -424,10 +190,7 @@ class Actions:
                 _, src_end = _token_char_range(last_idx, tokens)
                 cursor_char = _cursor_to_char(instance.cursor, tokens, text)
                 plan = _js.run_action(
-                    action_name,
-                    src_start,
-                    src_end,
-                    text,
+                    action_name, src_start, src_end, text,
                     dest_start_char=cursor_char,
                     dest_end_char=cursor_char,
                     cursor_anchor_char=cursor_char,

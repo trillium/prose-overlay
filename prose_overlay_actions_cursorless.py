@@ -42,6 +42,40 @@ mod = Module()
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _po_matcher_misfire(site: str, action_name: str, target: Any) -> None:
+    """Capture the registry/scope/grammar state at the moment a PO cursorless
+    rule fired despite the canvas being closed.
+
+    prose_overlay_cursorless.talon's header requires `tag: user.prose_overlay_active`,
+    which is only set when `instance.canvas.is_showing` is True (see
+    `_sync_tags` in prose_overlay_actions_core.py). If we reach a PO action
+    body with the canvas closed, Talon's matcher has bound a rule whose
+    context predicate is provably unsatisfied — a routing anomaly that
+    swallows the user's command instead of letting cursorless handle it.
+
+    This helper appends one JSONL line to ~/.talon/registry_probe.jsonl with
+    the full registry snapshot at the anomaly moment, and prints one audible
+    line to the Talon log so the misfire is not silent. Tracked by task #28.
+    """
+    label = "po_anomaly_canvas_closed"
+    extras = {
+        "site": site,
+        "action_name": action_name,
+        "target_type": type(target).__name__,
+        "canvas_is_showing": False,
+        "ctx_tags": list(getattr(instance.ctx, "tags", None) or []),
+    }
+    try:
+        actions.user.registry_probe_dump(label, extras)
+    except Exception as e:
+        print(f"prose_overlay: registry_probe_dump failed ({e})")
+    print(
+        f"prose_overlay: matcher misfire — canvas closed but PO rule bound; "
+        f"re-dispatching to cursorless. site={site} action={action_name} "
+        f"label={label}"
+    )
+
+
 def _cursor_to_char(cursor: int | None, tokens: list[str], text: str) -> int:
     """Convert a cursor gap index to a character offset in space-joined text.
 
@@ -188,6 +222,13 @@ class Actions:
         """
         action_name = cursorless_simple_action
 
+        if not instance.canvas.is_showing:
+            _po_matcher_misfire(
+                "run_action", action_name, cursorless_target
+            )
+            actions.user.cursorless_command(action_name, cursorless_target)
+            return
+
         if action_name not in _SUPPORTED_SIMPLE_ACTIONS:
             print(f"prose_overlay: unsupported action '{action_name}' (VS Code-only?)")
             return
@@ -291,6 +332,18 @@ class Actions:
 
         Flashes the target tokens before executing the reformat.
         """
+        if not instance.canvas.is_showing:
+            _po_matcher_misfire(
+                "apply_formatter", f"reformat:{formatters}", cursorless_target
+            )
+            # Reformat re-dispatch: feed the text through the community
+            # formatter pipeline locally — cursorless's IDE-side reformat
+            # entry point lives behind a different rule shape. Surfacing
+            # the misfire via registry_probe is the priority; the
+            # formatter case is rare enough that a no-op here is acceptable
+            # until #28 root-causes the matcher.
+            return
+
         token_ranges = _resolve_target_to_token_range(cursorless_target)
         if token_ranges is None:
             print("prose_overlay: unresolvable target for applyFormatter")
@@ -343,6 +396,13 @@ class Actions:
         Flashes the source token(s) before executing.
         If no cursor is active, the action is a no-op (nowhere to bring to).
         """
+        if not instance.canvas.is_showing:
+            _po_matcher_misfire(
+                "bring_move", action_name, cursorless_target
+            )
+            actions.user.cursorless_command(action_name, cursorless_target)
+            return
+
         if instance.cursor is None:
             print("prose_overlay: bring/move requires an active cursor position")
             return

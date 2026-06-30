@@ -43,14 +43,15 @@ and not tag: user.clock_ring_showing
 # Mutual exclusion: cursorless.talon excludes `user.prose_overlay_active`,
 # so cursorless's rule is only ever in the grammar when PO is off — meaning
 # we don't shadow cursorless outside the overlay. Safe.
+# This command is the issue
 {user.cursorless_simple_action} <user.cursorless_target>:
     user.prose_overlay_run_action(cursorless_simple_action, cursorless_target)
 
-# # Bring / move to cursor position
+# # # Bring / move to cursor position
 {user.cursorless_bring_move_action} <user.cursorless_target>:
     user.prose_overlay_bring_move(cursorless_bring_move_action, cursorless_target)
 
-# # Reformat target with formatter(s) (e.g. "format snake air", "format camel air past bat")
+# # # Reformat target with formatter(s) (e.g. "format snake air", "format camel air past bat")
 {user.cursorless_reformat_action} <user.formatters> at <user.cursorless_target>:
     user.prose_overlay_apply_formatter(cursorless_target, formatters)
 

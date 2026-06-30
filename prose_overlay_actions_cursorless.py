@@ -14,7 +14,7 @@ from .internal.instance import instance
 from .internal.state import EditKind
 from .prose_overlay_actions_core import _recompute_hats
 from .prose_overlay_actions_flash import _flash_tokens, _action_color
-from .prose_overlay_cursorless_resolve import (
+from .cursorless.resolve import (
     _resolve_target_to_token_range,
     _cursorless_symbol_to_token_index,
     _SUPPORTED_SIMPLE_ACTIONS,

@@ -14,7 +14,7 @@ from . import prose_overlay_draw as _draw_mod_ref
 from .internal.state import ProseBuffer
 from .internal.viewport import Viewport
 from ...utils.overlay_kit import DismissibleOverlay
-from .prose_overlay_cursorless_resolve import (
+from .cursorless.resolve import (
     _state as _resolve_state,
 )
 from .internal.instance import instance

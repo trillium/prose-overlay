@@ -9,7 +9,7 @@ Never imports prose_overlay.py.
 from talon import Module, actions, cron, ui
 
 from .internal.instance import instance
-from .prose_overlay_cursorless_resolve import _state as _resolve_state
+from .cursorless.resolve import _state as _resolve_state
 from .prose_overlay_actions_core import _recompute_hats, _hat_to_index
 from .prose_overlay_actions_flash import _flash_tokens, _action_color
 

@@ -12,7 +12,7 @@ Contains:
 from .internal.instance import instance
 from .prose_overlay_hats_js import compute_hat_assignments
 from . import prose_overlay_hats_js as _hats_js_mod
-from .prose_overlay_cursorless_resolve import (
+from .cursorless.resolve import (
     _state as _resolve_state,
 )
 

@@ -22,8 +22,8 @@ import os
 import talon.lib.js as js
 
 from .internal.instance import instance
-from .prose_overlay_cursorless_resolve import _state
-from .prose_overlay_surrounding_pair import (
+from .cursorless.resolve import _state
+from .cursorless.surrounding_pair import (
     _char_range_to_token_range,
     _cursor_gap_to_char_offset,
 )

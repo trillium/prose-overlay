@@ -2725,7 +2725,7 @@
             return result2;
           }
           function flatRest(func) {
-            return setToString(overRest(func, undefined2, flatten), func + "");
+            return setToString(overRest(func, undefined2, flatten3), func + "");
           }
           function getAllKeys(object) {
             return baseGetAllKeys(object, keys, getSymbols);
@@ -3187,7 +3187,7 @@
             }
             return result2;
           }
-          function concat() {
+          function concat2() {
             var length = arguments.length;
             if (!length) {
               return [];
@@ -3272,7 +3272,7 @@
             }
             return baseFindIndex(array, getIteratee(predicate, 3), index, true);
           }
-          function flatten(array) {
+          function flatten3(array) {
             var length = array == null ? 0 : array.length;
             return length ? baseFlatten(array, 1) : [];
           }
@@ -3487,7 +3487,7 @@
             comparator = typeof comparator == "function" ? comparator : undefined2;
             return baseUniq(baseFlatten(arrays, 1, isArrayLikeObject, true), undefined2, comparator);
           });
-          function uniq(array) {
+          function uniq2(array) {
             return array && array.length ? baseUniq(array) : [];
           }
           function uniqBy(array, iteratee2) {
@@ -4588,7 +4588,7 @@
             string = toString3(string);
             return string && reHasUnescapedHtml.test(string) ? string.replace(reUnescapedHtml, escapeHtmlChar) : string;
           }
-          function escapeRegExp(string) {
+          function escapeRegExp2(string) {
             string = toString3(string);
             return string && reHasRegExpChar.test(string) ? string.replace(reRegExpChar, "\\$&") : string;
           }
@@ -4864,7 +4864,7 @@
           function defaultTo(value, defaultValue) {
             return value == null || value !== value ? defaultValue : value;
           }
-          var flow = createFlow();
+          var flow2 = createFlow();
           var flowRight = createFlow(true);
           function identity(value) {
             return value;
@@ -4940,7 +4940,7 @@
               return object == null ? undefined2 : baseGet(object, path);
             };
           }
-          var range = createRange();
+          var range2 = createRange();
           var rangeRight = createRange(true);
           function stubArray() {
             return [];
@@ -5035,7 +5035,7 @@
           lodash.chain = chain;
           lodash.chunk = chunk;
           lodash.compact = compact;
-          lodash.concat = concat;
+          lodash.concat = concat2;
           lodash.cond = cond;
           lodash.conforms = conforms;
           lodash.constant = constant;
@@ -5060,11 +5060,11 @@
           lodash.flatMap = flatMap;
           lodash.flatMapDeep = flatMapDeep;
           lodash.flatMapDepth = flatMapDepth;
-          lodash.flatten = flatten;
+          lodash.flatten = flatten3;
           lodash.flattenDeep = flattenDeep;
           lodash.flattenDepth = flattenDepth;
           lodash.flip = flip2;
-          lodash.flow = flow;
+          lodash.flow = flow2;
           lodash.flowRight = flowRight;
           lodash.fromPairs = fromPairs;
           lodash.functions = functions;
@@ -5114,7 +5114,7 @@
           lodash.pullAllBy = pullAllBy;
           lodash.pullAllWith = pullAllWith;
           lodash.pullAt = pullAt;
-          lodash.range = range;
+          lodash.range = range2;
           lodash.rangeRight = rangeRight;
           lodash.rearg = rearg;
           lodash.reject = reject;
@@ -5149,7 +5149,7 @@
           lodash.union = union;
           lodash.unionBy = unionBy;
           lodash.unionWith = unionWith;
-          lodash.uniq = uniq;
+          lodash.uniq = uniq2;
           lodash.uniqBy = uniqBy;
           lodash.uniqWith = uniqWith2;
           lodash.unset = unset;
@@ -5191,7 +5191,7 @@
           lodash.endsWith = endsWith;
           lodash.eq = eq;
           lodash.escape = escape;
-          lodash.escapeRegExp = escapeRegExp;
+          lodash.escapeRegExp = escapeRegExp2;
           lodash.every = every;
           lodash.find = find;
           lodash.findIndex = findIndex;
@@ -12334,6 +12334,271 @@
     };
   }
 
+  // packages/cursorless-engine/src/util/allocateHats/getRankedTokens.ts
+  var import_lodash3 = __toESM(require_lodash(), 1);
+
+  // packages/cursorless-engine/src/util/allocateHats/getDisplayLineMap.ts
+  var import_lodash = __toESM(require_lodash(), 1);
+  function getDisplayLineMap(editor, extraLines = []) {
+    return new Map(
+      (0, import_lodash.flow)(
+        import_lodash.flatten,
+        import_lodash.uniq
+      )(
+        (0, import_lodash.concat)(
+          [extraLines],
+          editor.visibleRanges.map(
+            (visibleRange) => (0, import_lodash.range)(visibleRange.start.line, visibleRange.end.line + 1)
+          )
+        )
+      ).sort((a, b) => a - b).map((value, index) => [value, index])
+    );
+  }
+
+  // packages/cursorless-engine/src/util/allocateHats/getTokenComparator.ts
+  function getTokenComparator(selectionDisplayLine, selectionCharacterIndex) {
+    return (token1, token2) => {
+      const token1LineDiff = Math.abs(token1.displayLine - selectionDisplayLine);
+      const token2LineDiff = Math.abs(token2.displayLine - selectionDisplayLine);
+      if (token1LineDiff < token2LineDiff) {
+        return -1;
+      }
+      if (token1LineDiff > token2LineDiff) {
+        return 1;
+      }
+      const token1CharacterDiff = Math.abs(
+        token1.range.start.character - selectionCharacterIndex
+      );
+      const token2CharacterDiff = Math.abs(
+        token2.range.start.character - selectionCharacterIndex
+      );
+      return token1CharacterDiff - token2CharacterDiff;
+    };
+  }
+
+  // packages/cursorless-engine/src/tokenizer/tokenizer.ts
+  var import_lodash2 = __toESM(require_lodash(), 1);
+
+  // packages/cursorless-engine/src/singletons/ide.singleton.ts
+  var ide_;
+  function ide() {
+    if (ide_ == null) {
+      throw Error("Tried to access ide before it was injected");
+    }
+    return ide_;
+  }
+
+  // packages/cursorless-engine/src/util/regex.ts
+  function _rightAnchored2(regex) {
+    const { source, flags } = regex;
+    return new RegExp(`(${source})$`, flags.replace("m", ""));
+  }
+  function _leftAnchored2(regex) {
+    const { source, flags } = regex;
+    return new RegExp(`^(${source})`, flags.replace("m", ""));
+  }
+  function makeCache2(func) {
+    const cache = /* @__PURE__ */ new Map();
+    function wrapper(arg) {
+      let cachedValue = cache.get(arg);
+      if (cachedValue == null) {
+        cachedValue = func(arg);
+        cache.set(arg, cachedValue);
+      }
+      return cachedValue;
+    }
+    return wrapper;
+  }
+  var rightAnchored2 = makeCache2(_rightAnchored2);
+  var leftAnchored2 = makeCache2(_leftAnchored2);
+  function matchAll(text, regex, mapfn) {
+    regex.lastIndex = 0;
+    return Array.from(text.matchAll(regex), mapfn);
+  }
+
+  // packages/cursorless-engine/src/tokenizer/tokenizer.ts
+  var REPEATABLE_SYMBOLS = [
+    "-",
+    "+",
+    "*",
+    "/",
+    "=",
+    "<",
+    ">",
+    "_",
+    "#",
+    ".",
+    "|",
+    "&",
+    ":"
+  ];
+  var FIXED_TOKENS = [
+    "!==",
+    "!=",
+    "+=",
+    "-=",
+    "*=",
+    "/=",
+    "%=",
+    "<=",
+    ">=",
+    "=>",
+    "->",
+    "??",
+    '"""',
+    "```",
+    "/*",
+    "*/",
+    "<!--",
+    "-->"
+  ];
+  var IDENTIFIER_WORD_REGEXES = ["\\p{L}", "\\p{M}", "\\p{N}"];
+  var SINGLE_SYMBOLS_REGEX = "[^\\s\\w]";
+  var NUMBERS_REGEX = "(?<![.\\d])\\d+\\.\\d+(?![.\\d])";
+  function generateMatcher(languageComponents) {
+    const {
+      fixedTokens,
+      repeatableSymbols,
+      identifierWordRegexes,
+      identifierWordDelimiters,
+      numbersRegex,
+      singleSymbolsRegex
+    } = languageComponents;
+    const repeatableSymbolsRegex = repeatableSymbols.map(import_lodash2.escapeRegExp).map((s) => `${s}+`).join("|");
+    const fixedTokensRegex = fixedTokens.map(import_lodash2.escapeRegExp).join("|");
+    const identifierComponents = identifierWordRegexes.concat(
+      identifierWordDelimiters.map(import_lodash2.escapeRegExp)
+    );
+    const identifiersRegex = `(${identifierComponents.join("|")})+`;
+    const wordRegex = `(${identifierWordRegexes.join("|")})+`;
+    const regex = [
+      fixedTokensRegex,
+      numbersRegex,
+      identifiersRegex,
+      repeatableSymbolsRegex,
+      singleSymbolsRegex
+    ].join("|");
+    return {
+      identifierMatcher: new RegExp(identifiersRegex, "gu"),
+      wordMatcher: new RegExp(wordRegex, "gu"),
+      tokenMatcher: new RegExp(regex, "gu")
+    };
+  }
+  var matchers2 = /* @__PURE__ */ new Map();
+  function getMatcher(languageId) {
+    const wordSeparators = ide().configuration.getOwnConfiguration(
+      "wordSeparators",
+      {
+        languageId
+      }
+    );
+    const key = wordSeparators.join("\0");
+    if (!matchers2.has(key)) {
+      const components = {
+        fixedTokens: FIXED_TOKENS,
+        repeatableSymbols: REPEATABLE_SYMBOLS,
+        identifierWordRegexes: IDENTIFIER_WORD_REGEXES,
+        identifierWordDelimiters: wordSeparators,
+        numbersRegex: NUMBERS_REGEX,
+        singleSymbolsRegex: SINGLE_SYMBOLS_REGEX
+      };
+      matchers2.set(key, generateMatcher(components));
+    }
+    return matchers2.get(key);
+  }
+  function tokenize(text, languageId, mapfn) {
+    return matchAll(text, getMatcher(languageId).tokenMatcher, mapfn);
+  }
+
+  // packages/cursorless-engine/src/util/allocateHats/getTokensInRange.ts
+  function getTokensInRange(editor, range2) {
+    const languageId = editor.document.languageId;
+    const text = editor.document.getText(range2);
+    const rangeOffset = editor.document.offsetAt(range2.start);
+    return tokenize(text, languageId, (match) => {
+      const startOffset = rangeOffset + match.index;
+      const endOffset = rangeOffset + match.index + match[0].length;
+      const range3 = new Range(
+        editor.document.positionAt(startOffset),
+        editor.document.positionAt(endOffset)
+      );
+      return {
+        editor,
+        text: match[0],
+        range: range3,
+        offsets: { start: startOffset, end: endOffset }
+      };
+    });
+  }
+
+  // packages/cursorless-engine/src/util/allocateHats/getRankedTokens.ts
+  function getRankedTokens(activeTextEditor, visibleTextEditors, preTokenizedInput) {
+    if (preTokenizedInput != null) {
+      return rankPreTokenizedInput(preTokenizedInput, activeTextEditor);
+    }
+    const editors = getRankedEditors(
+      activeTextEditor,
+      visibleTextEditors
+    );
+    return editors.flatMap((editor) => {
+      const referencePosition = editor.selections[0].active;
+      const displayLineMap = getDisplayLineMap(editor, [referencePosition.line]);
+      const tokens = (0, import_lodash3.flatten)(
+        editor.visibleRanges.map(
+          (range2) => getTokensInRange(editor, range2).map((partialToken) => ({
+            ...partialToken,
+            displayLine: displayLineMap.get(partialToken.range.start.line)
+          }))
+        )
+      );
+      tokens.sort(
+        getTokenComparator(
+          displayLineMap.get(referencePosition.line),
+          referencePosition.character
+        )
+      );
+      return tokens.map((token, index) => ({ token, rank: -index }));
+    });
+  }
+  function rankPreTokenizedInput(preTokenizedInput, activeTextEditor) {
+    if (preTokenizedInput.length === 0) {
+      return [];
+    }
+    const referencePosition = activeTextEditor?.selections[0]?.active ?? ORIGIN_POSITION;
+    const lines = /* @__PURE__ */ new Set([referencePosition.line]);
+    for (const token of preTokenizedInput) {
+      lines.add(token.range.start.line);
+    }
+    const sortedLines = [...lines].sort((a, b) => a - b);
+    const displayLineMap = new Map(
+      sortedLines.map((line, index) => [line, index])
+    );
+    const tokens = preTokenizedInput.map((partialToken) => ({
+      ...partialToken,
+      displayLine: displayLineMap.get(partialToken.range.start.line)
+    }));
+    tokens.sort(
+      getTokenComparator(
+        displayLineMap.get(referencePosition.line),
+        referencePosition.character
+      )
+    );
+    return tokens.map((token, index) => ({ token, rank: -index }));
+  }
+  var ORIGIN_POSITION = new Position(0, 0);
+  function getRankedEditors(activeTextEditor, visibleTextEditors) {
+    let editors;
+    if (activeTextEditor == null) {
+      editors = visibleTextEditors;
+    } else {
+      editors = [
+        activeTextEditor,
+        ...visibleTextEditors.filter((editor) => editor !== activeTextEditor)
+      ];
+    }
+    return editors;
+  }
+
   // packages/cursorless-engine/src/util/allocateHats/proseStandalone.ts
   function deburr(str2) {
     return str2.normalize("NFC").replace(/[\u0300-\u036f\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/g, "");
@@ -12450,10 +12715,11 @@
     const splitter = new StandaloneGraphemeSplitter();
     const tokenObjects = tokens.map((text, i) => makeToken(text, i));
     const effectiveCursor = cursorGap >= 0 ? cursorGap : tokens.length;
-    const rankedTokens = tokenObjects.map((token, i) => {
-      const dist = i < effectiveCursor ? effectiveCursor - i - 1 : i - effectiveCursor;
-      return { token, rank: -Math.max(0, dist) };
-    });
+    const fakeEditorWithCursor = {
+      ...FAKE_EDITOR,
+      selections: [{ active: new Position(0, effectiveCursor) }]
+    };
+    const rankedTokens = getRankedTokens(fakeEditorWithCursor, [], tokenObjects);
     const tokenOldHatMap = new CompositeKeyMap(
       ({ editor, offsets }) => [editor.id, offsets.start, offsets.end]
     );

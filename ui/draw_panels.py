@@ -358,11 +358,14 @@ def _measure_bubble(
 def _draw_one_bubble(c: SkiaCanvas, b: _Bubble, y_top: float) -> None:
     """Render one bubble at `(b.x, y_top)`.
 
-    Pieces, left to right:
+    Paint order (back-to-front, so the shape sits ON TOP of BOTH chips):
       1. Left chip (color background, alt text on top)
-      2. Homophone shape glyph (small, amber, on a black backdrop
-         circle for contrast against the bright chip colors)
-      3. Right chip (when present; 3-member or 4+ groups)
+      2. Right chip (when present; 3-member or 4+ groups)
+      3. Homophone shape glyph + black backdrop disc — last so the disc
+         covers any chip edge that overlaps the shape footprint. With
+         BUBBLE_INNER_GAP=0 the chips are flush against the shape's
+         horizontal span; with a backdrop scale > 1 the disc clearly
+         overhangs into both chips and reads as "shape in front."
     """
     shape_w = _SHAPE_NATIVE_W * BUBBLE_SHAPE_SCALE
     # shape_h is implicit: shapes.draw_hat_shape centers the glyph on (cx, cy),
@@ -382,19 +385,20 @@ def _draw_one_bubble(c: SkiaCanvas, b: _Bubble, y_top: float) -> None:
     left_x = b.x
     _draw_chip(c, left_color, left_alt, left_x, chip_y, left_chip_w, chip_h)
 
-    # ----- Shape glyph (with backdrop) -------------------------------------
+    # ----- Right chip (when present) — painted BEFORE the shape so the -----
+    # ----- shape's backdrop disc lands on top of the chip's edge. ----------
     shape_x_left = left_x + left_chip_w + BUBBLE_INNER_GAP
+    if b.right_chip is not None:
+        right_color, right_alt, right_chip_w = b.right_chip
+        right_x = shape_x_left + shape_w + BUBBLE_INNER_GAP
+        _draw_chip(c, right_color, right_alt, right_x, chip_y, right_chip_w, chip_h)
+
+    # ----- Shape glyph (with backdrop) — LAST so it sits on top of both chips
     shape_cx = shape_x_left + shape_w / 2.0
     shape_cy = chip_mid_y
     _draw_shape_with_backdrop(
         c, shape_name=b.shape_name, cx=shape_cx, cy=shape_cy,
     )
-
-    # ----- Right chip (when present) ---------------------------------------
-    if b.right_chip is not None:
-        right_color, right_alt, right_chip_w = b.right_chip
-        right_x = shape_x_left + shape_w + BUBBLE_INNER_GAP
-        _draw_chip(c, right_color, right_alt, right_x, chip_y, right_chip_w, chip_h)
 
 
 def _draw_shape_with_backdrop(

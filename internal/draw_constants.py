@@ -84,7 +84,10 @@ HOMOPHONE_SHAPE_OUTLINE_HEX = "ffb74d"      # same amber for the stroke — no c
 # same horizontal band the right-hand bubble wraps to a second row below.
 BUBBLE_CHIP_FONT_SIZE = 11
 BUBBLE_CHIP_PAD_X = 4
-BUBBLE_CHIP_PAD_Y = 2
+# 2026-06-30 user verdict: chips were too short top-to-bottom. Bumped from
+# 2 -> 5 so the alt text has visible breathing room above and below.
+# Net chip height: 11 + 2*5 = 21 px.
+BUBBLE_CHIP_PAD_Y = 5
 BUBBLE_CHIP_RADIUS = 3
 # User verdict 2026-06-30: chip parts inside a bubble should touch (no inner
 # gap) so the bubble reads as one contiguous unit; shape doubled (100%
@@ -103,10 +106,10 @@ BUBBLE_SHAPE_SCALE = 1.1       # 2× prior (0.55 → 1.1); shape is now the visu
 # chip's saturated color.
 #
 # BUBBLE_ROW_H is the fixed vertical footprint reserved for the bubble
-# band. Bumped 2026-06-30: backdrop now spans ~16*1.1*1.55 ≈ 27 px (was
-# 20), so 24 would clip the disc edges. Chip height (FONT_SIZE + 2*PAD_Y
-# = 11 + 4 = 15) still fits — the backdrop is the taller element.
-BUBBLE_ROW_H = 30
+# band. Bumped 2026-06-30: backdrop spans ~16*1.1*1.55 ≈ 27 px and chip
+# height is now FONT_SIZE + 2*PAD_Y = 11 + 10 = 21 px (PAD_Y went 2->5).
+# 34 leaves a hair of breathing room above + below the backdrop disc.
+BUBBLE_ROW_H = 34
 
 # Backdrop circle behind the homophone shape glyph inside the bubble. The
 # chip backgrounds are bright Cursorless palette colors; the amber shape

@@ -223,9 +223,16 @@ For short tokens with many group members (e.g. "I" with a 4-member group), indiv
 > is the sum of left chip + shape + right chip + 2 gaps. Bubble height is
 > chip height (~14px).
 >
-> **Bubble anchor**: centered horizontally on the token (so the shape glyph
-> sits roughly below the token's shape hat). Vertically, anchored below the
-> segmented underline with a small gap.
+> **Bubble anchor — REVISED 2026-06-30 PM/2 after second user verdict.** Bubbles must sit COMPLETELY OUTSIDE the prose-overlay panel rect, on a single horizontal band:
+>
+> - If `viewport._anchor_position == "top"` (panel anchored to screen top): bubbles render in a band **BELOW** the panel's bottom edge.
+> - If `viewport._anchor_position == "bottom"` (panel anchored to screen bottom): bubbles render in a band **ABOVE** the panel's top edge.
+>
+> All bubbles share a single y coordinate — **NO vertical stacking** when bubbles overlap horizontally. If the total bubble row exceeds the screen width, bubbles clip at the screen edge (acceptable failure mode); the visual clarity of a single horizontal row beats the loss of off-screen alts. The prior collision-band-wrap behavior (commits `cf5f492` + `44bf2d8`) is removed.
+>
+> **Horizontal alignment per bubble** stays centered on its token's x position when possible, but constrained to keep the row contiguous: if two adjacent tokens would have overlapping centered bubbles, the bubbles either shift apart (preferred) or the second one shifts right until clear. No vertical collision logic; only horizontal nudging on the band.
+>
+> **Shape glyph inside the bubble needs a black circle background** so it reads against the chip's color background AND against the dark surroundings outside the panel. Render a small filled black (or near-black, `000000cc` for slight softness) circle at the shape's center, slightly larger than the shape's bounding box (e.g. `shape_radius * 1.15`), then paint the amber shape on top.
 >
 > **For 2-member groups** (e.g. `your,you're`): only one alt — render as
 > `[chip][shape]` (one chip + shape, no right side). Or `[shape][chip]` —

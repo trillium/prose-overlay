@@ -22,6 +22,7 @@ from .prose_overlay_draw_constants import (
     TOKEN_FONT_SIZE, DOT_RADIUS, DOT_GAP_Y, LINE_HEIGHT,
 )
 from .prose_overlay_draw_tokens import _fit_text, _flow_layout, draw_cursor, _draw_token_rows
+from . import prose_overlay_homophones as _homophones
 from .prose_overlay_help import draw_help_panel, rotate_help_ring_buffer, HELP_COMMAND_POOL
 from .prose_overlay_history_panel import draw_history_panel, HISTORY_PAGE_SIZE
 from .prose_overlay_instance import instance
@@ -155,6 +156,11 @@ def draw_overlay(
                 blink_on,
             )
     else:
+        flagged = (
+            _homophones.flagged_indices(tokens)
+            if settings.get("user.prose_overlay_homophone_hint")
+            else frozenset()
+        )
         _draw_token_rows(
             c, rows,
             x_origin=panel_x + PANEL_PAD,
@@ -167,6 +173,7 @@ def draw_overlay(
             flash_color=flash_color,
             selection=selection,
             tokens=tokens,
+            flagged_indices=flagged,
         )
 
     # Target window label — bottom-left of content zone (hidden during overflow)

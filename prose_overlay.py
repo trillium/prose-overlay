@@ -67,6 +67,18 @@ mod.setting(
     ),
 )
 
+mod.setting(
+    "prose_overlay_homophone_hint",
+    type=bool,
+    default=False,
+    desc=(
+        "When true, paint a dotted underline under every token whose "
+        "lowercase appears in the trillium_talon homophone CSV. Slice A "
+        "of the homophone-UI exploration (docs/HOMOPHONE_UI_PLAN.md). "
+        "No swap action, no confidence model — pure visual flag."
+    ),
+)
+
 
 @mod.capture(rule="red | blue | green | pink | yellow | purple | plum | gold | black | white")
 def prose_hat_color(m) -> str:

@@ -29,6 +29,10 @@ LISTENING_COLOR = "666677cc"
 SEP_COLOR = "44556688"
 HELP_TITLE_COLOR = "66aaccee"
 
+# Homophone-hint underline — Slice A. Low-saturation slate, ~40% alpha so it
+# reads as a sub-syntactic hint without competing with hat dots.
+HOMOPHONE_UNDERLINE_COLOR = "8899aa66"
+
 # Hat dot colors — matches Cursorless palette
 HAT_COLOR_HEX: dict[str, str] = {
     "gray":   "999999ff",

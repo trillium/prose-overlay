@@ -199,6 +199,7 @@ def run_layer_1() -> None:
         inst.hat_js_fallback = True
         inst.hat_assignments = {0: (0, "c", "gray")}
         inst.hat_to_token = {("c", "gray"): 0}
+        inst.shape_assignments = {0: "wing"}  # Slice 2 — must also wipe.
         inst.flash_state = {"indices": [1], "color": "ff0000"}
         inst.history = ["old", "stuff"]
         inst.history_page = 3
@@ -215,6 +216,9 @@ def run_layer_1() -> None:
         assert inst.hat_js_fallback is False
         assert inst.hat_assignments == {}
         assert inst.hat_to_token == {}
+        assert inst.shape_assignments == {}, (
+            f"shape_assignments not cleared by reset(): {inst.shape_assignments!r}"
+        )
         assert inst.flash_state == {}
         assert inst.history == []
         assert inst.history_page == 0
@@ -351,6 +355,75 @@ def run_layer_1() -> None:
         # an import-time silent skip (logged) but still pass length check.
         for stem, spoken, d, fill_rule in entries:
             assert d, f"empty path data for {spoken} ({stem}.svg)"
+
+    # -----------------------------------------------------------------------
+    # Homophone shape allocator (Slice 2 — docs/HOMOPHONE_SHAPES_PLAN.md §3)
+    # The allocator is a pure function with no Talon imports — fully
+    # headless-friendly. These tests cover the four contractual behaviors:
+    # basic assignment, memoization stability, prior-assignment carryover,
+    # and pool-overflow omission.
+    # -----------------------------------------------------------------------
+
+    with test("L1", "L1.24", "compute_shape_assignments: single flagged token gets one shape from HAT_SHAPES"):
+        shapes_mod._clear_shape_cache()
+        r = shapes_mod.compute_shape_assignments(["there"], frozenset({0}), rev=1)
+        assert 0 in r, f"expected idx 0 in result; got {r}"
+        assert r[0] in shapes_mod.HAT_SHAPES, (
+            f"shape {r[0]!r} not in HAT_SHAPES {shapes_mod.HAT_SHAPES}"
+        )
+
+    with test("L1", "L1.25", "compute_shape_assignments: memoization returns same dict reference"):
+        shapes_mod._clear_shape_cache()
+        r1 = shapes_mod.compute_shape_assignments(
+            ["there", "their"], frozenset({0, 1}), rev=1,
+        )
+        r2 = shapes_mod.compute_shape_assignments(
+            ["there", "their"], frozenset({0, 1}), rev=1,
+        )
+        assert r1 == r2, f"identical inputs should equal: {r1} vs {r2}"
+        # Memoization: identical inputs must return the SAME dict reference
+        # (not just equal). Lets the draw module short-circuit on identity.
+        assert r1 is r2, (
+            "memoized result should be the same object reference; "
+            f"got two different dicts: id={id(r1)} vs id={id(r2)}"
+        )
+
+    with test("L1", "L1.26", "compute_shape_assignments: prior assignment survives a new flag"):
+        shapes_mod._clear_shape_cache()
+        # idx 0 was assigned 'wing' on the previous allocator run. When idx
+        # 1 joins the flagged set, idx 0 should KEEP 'wing' and idx 1 should
+        # be allocated from the pool of unused shapes (i.e. not 'wing').
+        prior = {0: "wing"}
+        r = shapes_mod.compute_shape_assignments(
+            ["there", "their"], frozenset({0, 1}), rev=2, prior=prior,
+        )
+        assert r[0] == "wing", (
+            f"prior shape 'wing' should survive on idx 0; got {r!r}"
+        )
+        assert r[1] != "wing", (
+            f"new flagged idx should not duplicate a used shape; got {r!r}"
+        )
+        assert r[1] in shapes_mod.HAT_SHAPES, (
+            f"new shape {r[1]!r} not in HAT_SHAPES"
+        )
+
+    with test("L1", "L1.27", "compute_shape_assignments: 11 flagged tokens overflows — 11th omitted"):
+        shapes_mod._clear_shape_cache()
+        tokens = ["there"] * 11
+        flagged = frozenset(range(11))
+        r = shapes_mod.compute_shape_assignments(tokens, flagged, rev=1)
+        # Pool has exactly 10 shapes; 11 flagged tokens → exactly 10 entries.
+        assert len(r) == 10, (
+            f"expected 10 shape assignments (pool exhausted at 10); got "
+            f"{len(r)}: {r}"
+        )
+        # The first 10 sorted indices get the shapes; idx 10 (the 11th)
+        # falls into the overflow tail and is omitted per §4.8.
+        for idx in range(10):
+            assert idx in r, f"idx {idx} should be in result; got {sorted(r)}"
+        assert 10 not in r, (
+            f"11th idx (10) should be omitted on pool exhaustion; got {r}"
+        )
 
 
 # =============================================================================

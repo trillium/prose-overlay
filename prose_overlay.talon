@@ -66,6 +66,13 @@ overlay hints homo off: user.prose_overlay_set_homophone_hint(0)
 overlay shapes homo on: user.prose_overlay_set_homophone_shapes(1)
 overlay shapes homo off: user.prose_overlay_set_homophone_shapes(0)
 
+# Slice A of docs/PHONES_SPEC.md — homophone cycle by shape hat.
+# `phone <shape>` / `phones <shape>` both swap the token wearing <shape>
+# to its next CSV-row member (wrapping). Cycle by repeating the verb.
+# Singular and plural are aliased — same action, same one-undo-step swap.
+(phone | phones) {user.prose_hat_shape}:
+    user.prose_overlay_phone_shape(prose_hat_shape)
+
 # Toggle auto-show on all dictation phrases
 overlay auto: user.prose_overlay_toggle_auto_dictation()
 
@@ -74,6 +81,14 @@ overlay auto: user.prose_overlay_toggle_auto_dictation()
 
 # Undo the last prose overlay edit
 overlay undo: user.prose_overlay_undo()
+
+# Slice A of docs/PHONES_SPEC.md Scenario 12 — accept `prose undo` as a
+# second alias for the undo action, matching the launch-phrase prefix
+# (`prose overlay`, `prose history`). Same action; both rules live in this
+# file. `prose redo` is intentionally NOT bound for v1 — the existing
+# `overlay redo` covers the redo path; we add the second alias only on
+# the high-traffic undo verb per the spec.
+prose undo: user.prose_overlay_undo()
 
 # Redo the last undone prose overlay edit
 overlay redo: user.prose_overlay_redo()

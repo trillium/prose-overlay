@@ -99,6 +99,31 @@ mod.setting(
 )
 
 
+# Slice A of docs/PHONES_SPEC.md / HOMOPHONE_SHAPES_PLAN.md §4.6 —
+# decoupled hat-shape vocabulary. Declared in-repo so the prose-overlay
+# grammar doesn't depend on trillium/mouse-clock being loaded. The 10
+# spoken forms here are HAT_SHAPES from shim/shapes.py verbatim (the
+# Cursorless-style hat-shape vocabulary).
+mod.list("prose_hat_shape", desc=(
+    "Spoken-form hat-shape vocabulary for the prose overlay. Mirrors the "
+    "Cursorless decorated-mark hat shapes (bolt / curve / fox / frame / "
+    "play / wing / hole / ex / cross / eye). Decoupled from mouse-clock's "
+    "user.hat_shape list so the prose overlay grammar stays self-contained."
+))
+
+
+# Populate the list from shim.shapes.HAT_SHAPES so the source of truth is
+# the same tuple the renderer + allocator already read from. If a shape is
+# added/removed in shim/shapes.py, the voice vocabulary tracks automatically.
+# Each entry maps spoken_form -> spoken_form (no aliasing); HAT_SHAPES already
+# uses the Cursorless spoken-form vocabulary, so the values pass straight
+# through to the action.
+from .shim.shapes import HAT_SHAPES as _HAT_SHAPES  # noqa: E402
+
+_ctx_shape_list = Context()
+_ctx_shape_list.lists["user.prose_hat_shape"] = {s: s for s in _HAT_SHAPES}
+
+
 @mod.capture(rule="red | blue | green | pink | yellow | purple | plum | gold | black | white")
 def prose_hat_color(m) -> str:
     """Spoken color prefix for a hat, e.g. 'blue air', 'red bat'.

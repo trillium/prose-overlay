@@ -23,6 +23,8 @@
   - current `they're` → next `their` (wraps)
 - **Shape hat** — the colored Cursorless-style glyph painted on a flagged token by Slice 1's renderer, addressable by `shape_pool()` names (`bolt`, `wing`, `frame`, …). Each flagged token has at most one shape (10-shape pool; >10 simultaneous = underline-only spillover).
 - **Letter hat** — the gray-letter dot still painted on every token (including flagged ones) by the standard hat allocator. Separate addressing namespace from the shape hat.
+- **Expanded panel** — an in-canvas widget rendered alongside each shape-hatted token, listing every group member with a color-coded background per member. The colors are the familiar Cursorless palette (`red blue green pink yellow purple plum gold black white`, where `plum→purple` and `gold→yellow` are aliases). The panel doubles as the legend for color-addressed direct swap (Scenario 3).
+- **Color-addressed alt** — a group member identified by a Cursorless color name in the expanded panel, so the user can say `<color> <shape>` and land directly on that alt without cycling through siblings.
 
 ## Background
 
@@ -33,7 +35,17 @@ Then each flagged token has BOTH a letter hat AND a shape hat
 And the shape vocabulary identifies which homophones can be swapped
 ```
 
-The shape hat is one addressing key for the swap. The user-spoken word is another. The letter hat is unchanged from non-flagged tokens and remains addressable by all standard hat-targeted verbs (`chuck`, `take`, `change`, etc.).
+The shape hat is one addressing key for the swap. The spoken word is a second. The color displayed in the expanded panel is a third. The letter hat is unchanged from non-flagged tokens and remains addressable by all standard hat-targeted verbs (`chuck`, `take`, `change`, etc.).
+
+```
+Given the overlay is active
+And the buffer contains tokens flagged as homophones
+And each flagged token has a shape hat
+Then the canvas renders an expanded panel per homophone token,
+    anchored near the token
+And each panel lists the group members with color-coded backgrounds
+And each color-to-member mapping is stable so long as the group is stable
+```
 
 ## Scenario 1 — Basic swap (shape-addressed)
 
@@ -82,7 +94,53 @@ Then the token text returns to "their" through the same sequence in
 
 Cycling is the behavior — there is no separate "preview the next swap" step. Each utterance commits a swap. For 2-member groups (`your,you're`) cycling toggles. For 3-member groups it rotates.
 
-## Scenario 3 — Word-addressed swap (`phones <word>`)
+## Scenario 3 — Color-addressed direct swap (`<color> <shape>`)
+
+```
+Given a token reads "there" in the buffer
+And its shape hat is "play"
+And the group is "their,there,they're"
+And the expanded panel for this token shows:
+    - "their"    on a GOLD background
+    - "they're"  on a BLUE background
+    (current word "there" is the buffer text; rendered as the token itself)
+
+The full visual layout for that token area:
+    t[h]{e}re
+    [ their ] [ they're ]
+       gold      blue
+    where [h] is the letter hat (gray-h) and {e} is the shape hat (play)
+
+When the user says `gold play`
+
+Then the token text changes from "there" to "their" in one STRUCTURAL
+    undo step
+And the buffer reads "it was their car" (was "it was there car")
+And the expanded panel re-renders against the new current word:
+    - "there"    on GOLD
+    - "they're"  on BLUE
+    (current word now "their")
+And the color-to-alt assignment is recomputed for the new group state
+    (the gold slot now points at "there", which used to be the current
+    word and so wasn't in the panel)
+
+When the user says `blue play` from the new state
+Then the token text changes from "their" to "they're"
+And the panel re-renders with the new current word excluded
+```
+
+Color-addressed swap is the direct-address path — useful when the user can see the panel and wants a specific alt without cycling. The color-to-alt mapping is per-panel (each shape's panel has its own mapping) and computed from the panel's local group at draw time. See open question 2 for the assignment rule.
+
+### Concrete worked example from the spec author
+
+> buffer: it was t[h]{e}re car (normal hat h on idx 1, shaped play on idx 2)
+> gold play: their
+> "gold play"
+> buffer: it was t[h]{e}ir car
+
+The shape stays `play` per Slice 2 stability. The letter hat reallocates per the normal hat allocator (may become a different letter or color). The expanded panel re-renders with `there` now in the gold slot (was hidden as current) and `they're` still in blue.
+
+## Scenario 4 — Word-addressed swap (`phones <word>`)
 
 ```
 Given two tokens are flagged in the buffer:
@@ -105,7 +163,7 @@ And token A is unchanged
 
 **Conflict with the existing community modal HUD**: when the prose overlay is active, `phones <word>` does **not** open the existing modal HUD at `~/.talon/user/trillium_talon/core/homophones/homophones.talon`. The overlay's grammar (1 mode + 1 tag) wins context specificity, and the swap is performed directly. When the overlay is **not** active, the modal HUD still works as before.
 
-## Scenario 4 — Phone with no matching shape
+## Scenario 5 — Phone with no matching shape
 
 ```
 Given the overlay is active
@@ -120,7 +178,7 @@ And no undo step is recorded
 
 The action is a no-op when the spoken shape is unassigned. Defensive — does not surface user-facing error UI in v1 (TBD whether a brief flash/chrome on the canvas is worth adding).
 
-## Scenario 5 — Phone after surrounding edits
+## Scenario 6 — Phone after surrounding edits
 
 ```
 Given a token reads "there" at idx 5 in the buffer
@@ -139,7 +197,7 @@ And the swap targets the same logical token despite the index shift
 
 This is the Slice 2 keep-criterion in action — shape identity must be stable across edits so muscle memory works.
 
-## Scenario 6 — Pool overflow (no shape, no shape-addressed swap)
+## Scenario 7 — Pool overflow (no shape, no shape-addressed swap)
 
 ```
 Given 11 or more tokens in the buffer are flagged as homophones
@@ -159,7 +217,7 @@ Then the overflow token CAN still be cycled — word addressing does not
 
 Word addressing (`phones <word>`) is the recovery path for overflow tokens. Shape addressing is the muscle-memory path.
 
-## Scenario 7 — Letter hat coexistence
+## Scenario 8 — Letter hat coexistence
 
 ```
 Given a token "there" has letter hat "blue-h" and shape hat "wing"
@@ -180,7 +238,7 @@ Then the token is replaced with "there" verbatim (dictation insert at hat)
 
 The two namespaces compose freely; user picks the verb that matches intent. `phone` / `phones` is for known-homophone swaps; `change` is for general edits.
 
-## Scenario 8 — Voice grammar specificity
+## Scenario 9 — Voice grammar specificity
 
 ```
 Given the overlay is active (tag user.prose_overlay_active set)
@@ -206,7 +264,7 @@ And falls through to `<user.raw_prose>` → "phone" enters the buffer as
     a regular word (mostly harmless — user notices and undoes)
 ```
 
-## Scenario 9 — Undo restores prior word
+## Scenario 10 — Undo restores prior word
 
 ```
 Given a token was just swapped from "there" to "they're" via `phone wing`
@@ -225,7 +283,7 @@ Both `overlay undo` and `prose undo` are accepted aliases for the undo action �
 
 The bracket API from `docs/UNDO_REDO_PLAN.md` Phase 2 (ISC-23) is the substrate. The `phone` action MUST wrap its mutation in `commit_start("phone <shape>", STRUCTURAL) / commit_end()` to satisfy this scenario.
 
-## Scenario 10 — Empty buffer or no homophones present
+## Scenario 11 — Empty buffer or no homophones present
 
 ```
 Given the overlay is active
@@ -254,23 +312,28 @@ Then same — no-op (no token reads "there")
 - ✅ Slice 1 — shape renderer (`shim/shapes.py:draw_hat_shape`, `svg/`)
 - ✅ Slice 2 — deterministic allocator (`shim/shapes.py:compute_shape_assignments`)
 - ✅ Undo/redo bracket API (`internal/state.py:commit_start / commit_end`, ISC-23)
-- ⏳ Slice 3 — per-token panel showing alternates (optional prerequisite — panel helps the user SEE the next alt before saying `phone`, but cycling works without it)
+- ⏳ Slice 3 — per-token expanded panel showing alternates. **No longer optional**: Scenario 3 (color-addressed swap) requires the panel to render so the user knows which color points at which alt. Cycling-only (Scenarios 1-2) still works without it, but the full feature surface needs the panel.
 
 ## Required new surface (this slice — to build)
 
 - `internal/homophones.py` — new exported helper `group_for_word(token: str) -> tuple[str, ...] | None` returning the canonical group for a flagged word (or `None` if unflagged). Plus `next_in_group(current: str) -> str | None` returning the next CSV-row member (wrapping).
-- `shim/actions_homophones.py` (new module) — two actions:
-  - `prose_overlay_phone_shape(shape_name: str)` — Scenario 1, 2, 4, 5, 6, 7, 9; looks up `instance.shape_assignments` for the token at `shape_name`, calls `next_in_group(current_word)`, brackets the buffer mutation via `commit_start("phone <shape>", STRUCTURAL) / commit_end()`.
-  - `prose_overlay_phone_word(word: str)` — Scenario 3, 6; scans the buffer for a flagged token reading `word`, calls `next_in_group(current_word)`, brackets the mutation. If multiple tokens read the same word, swaps the first match (or all matches? — see open question 2).
+- `shim/actions_homophones.py` (new module) — three actions:
+  - `prose_overlay_phone_shape(shape_name: str)` — Scenarios 1, 2, 5, 6, 7, 8, 10; looks up `instance.shape_assignments` for the token with `shape_name`, calls `next_in_group(current_word)`, brackets the buffer mutation via `commit_start("phone <shape>", STRUCTURAL) / commit_end()`.
+  - `prose_overlay_phone_color_shape(prose_hat_color: str, shape_name: str)` — Scenario 3; looks up the token by `shape_name`, looks up its panel's color-to-alt mapping for `prose_hat_color`, swaps to that specific alt. Brackets the mutation.
+  - `prose_overlay_phone_word(word: str)` — Scenarios 4, 7; scans the buffer for a flagged token reading `word`, calls `next_in_group(current_word)`, brackets the mutation. If multiple tokens read the same word, swaps the first match (or all matches? — see open question 3).
+- `shim/shapes.py` (extend) or new `shim/homophone_panel.py` — compute `dict[int, dict[str, str]]` = `token_idx -> {color_name -> alt_word}` from each shape-hatted token's group, excluding the current word. Re-computed when `_recompute_hats` runs and stored on `instance.homophone_panel_alts` (parallel to `instance.shape_assignments`).
+- `ui/draw_panels.py` (new) — render the expanded panel per shape-hatted token. Reads `instance.homophone_panel_alts`. Anchors panel near the token (TBD: below, beside, or floating — see open question 5). Each alt rendered as a small chip with its color as the background, the word as foreground text.
 - `prose_overlay.talon` — new grammar rules (in the overlay-active context):
   ```
   (phone | phones) {user.hat_shape}:
       user.prose_overlay_phone_shape(hat_shape)
+  <user.prose_hat_color> {user.hat_shape}:
+      user.prose_overlay_phone_color_shape(prose_hat_color, hat_shape)
   phones <user.homophones_canonical>:
       user.prose_overlay_phone_word(homophones_canonical)
   prose undo: user.prose_overlay_undo()
   ```
-  The `(phone | phones) {hat_shape}` rule is one rule with alternation, so both verbs route to the same action.
+  The `(phone | phones) {hat_shape}` rule is one rule with alternation, so both verbs route to the same action. The `<user.prose_hat_color> {user.hat_shape}` rule reuses the existing `prose_hat_color` capture from `prose_overlay.py` (already normalizes `plum→purple`, `gold→yellow`).
 - `prose_overlay.py` — `mod.list("prose_hat_shape", ...)` with the 10 shape names (decouple from mouse-clock per HOMOPHONE_SHAPES_PLAN.md §4.6). NOTE: `{user.hat_shape}` in the grammar above expects mouse-clock's list; if we declare our own `{user.prose_hat_shape}`, the grammar rule must reference that instead.
 
 ## Headless test coverage
@@ -284,19 +347,29 @@ Each scenario above maps to a test in `scripts/headless-verify.py`:
 - L1.X — buffer-level swap pattern: `their → there → they're → their` via three commit_start/set_tokens_raw/commit_end cycles produces three undo records
 - L1.X — pool overflow leaves overflow tokens unaddressable by phone_shape (no-op when shape not in shape_assignments)
 - L1.X — word-addressed swap finds the right token among multiple flagged ones
+- L1.X — `compute_homophone_panel_alts(tokens, shape_assignments)` returns the expected `{token_idx → {color → alt_word}}` mapping for a 2-member group (one color, one alt) and a 3-member group (two colors, two alts)
+- L1.X — color-addressed swap: given a panel mapping `{gold: "their", blue: "they're"}` on the "play" shape, calling `phone_color_shape("gold", "play")` swaps the buffer text to "their"
+- L1.X — color-addressed swap with stale color (color not in current panel mapping) is a no-op
 - L3.X — `prose_overlay_phone_shape` dispatch routes correctly
+- L3.X — `prose_overlay_phone_color_shape` dispatch routes correctly with both args
 - L3.X — `prose_overlay_phone_word` dispatch routes correctly
 
-Live-only: the actual voice grammar match for `(phone | phones) {hat_shape}` and `phones <user.homophones_canonical>`.
+Live-only: the actual voice grammar match for `(phone | phones) {hat_shape}`, `<user.prose_hat_color> {user.hat_shape}`, and `phones <user.homophones_canonical>`; and the panel rendering on the Skia canvas.
 
 ## Open questions for the implementer
 
-1. **CSV order vs alphabetical** — the spec defaults to "next member in CSV row order, wrapping." This is deterministic and matches how the CSV is read today. Alphabetical would also work; pick one explicitly so cycling is predictable across machines.
+1. **CSV order vs alphabetical for cycling** — the spec defaults to "next member in CSV row order, wrapping." This is deterministic and matches how the CSV is read today. Alphabetical would also work; pick one explicitly so cycling is predictable across machines.
 
-2. **Word-addressed swap with multiple matches** — if two tokens in the buffer both read "there", which one does `phones there` cycle? Options: (a) first match by token index, (b) all matches simultaneously (bulk), (c) the most-recently-edited one (rev-tracked). v1 default proposal: first match by token index (simple, deterministic). Surface a TTS hint when there were multiple candidates.
+2. **Color-to-alt mapping rule** — Scenario 3 requires deterministic per-panel mapping. Default proposal: alts ordered by CSV row (excluding the current word), mapped in order to a fixed palette `[gold, blue, green, pink, red, purple, black, white, gray]`. For 2-member group with current excluded: 1 alt → gold. For 3-member with current excluded: 2 alts → gold, blue. Verify this matches the user's mental model (the worked example "gold play: their" implies `gold` is the first slot). Alternative: alphabetical order, or some other deterministic rule. Pick one explicitly and document on the panel.
 
-3. **What about a token whose group has only one member** (degenerate 1-word CSV row)? `next_in_group(current)` returns the same word back. `phone` is then a no-op or a no-op-with-hint. Test explicitly.
+3. **Word-addressed swap with multiple matches** — if two tokens in the buffer both read "there", which one does `phones there` cycle? Options: (a) first match by token index, (b) all matches simultaneously (bulk), (c) the most-recently-edited one (rev-tracked). v1 default proposal: first match by token index (simple, deterministic). Surface a TTS hint when there were multiple candidates.
 
-4. **Hat shape list source — mouse-clock vs in-repo** — HOMOPHONE_SHAPES_PLAN.md §4.6 recommends declaring our own list in `prose_overlay.py` for decoupling. Confirm this still holds when wiring the grammar; the talon rule above shows `{user.hat_shape}` (mouse-clock's list) but we can swap to `{user.prose_hat_shape}` (ours) without changing the action signature.
+4. **What about a token whose group has only one member** (degenerate 1-word CSV row)? `next_in_group(current)` returns the same word back; the panel renders empty (no alts other than current); both `phone <shape>` and `<color> <shape>` are no-ops. Test explicitly.
 
-5. **`prose undo` collision** — verify no existing rule binds `prose undo` (especially in trillium_talon or community). If clean, add it alongside `overlay undo` as documented in Scenario 9.
+5. **Panel anchor and layout** — Scenario 3's worked example shows the panel below the token. Alternatives: beside (right of token), floating (overlay-level chip), inline (interspersed with tokens). Pick one and verify it doesn't break the flow layout on small buffers. The first viable shape can iterate.
+
+6. **Hat shape list source — mouse-clock vs in-repo** — HOMOPHONE_SHAPES_PLAN.md §4.6 recommends declaring our own list in `prose_overlay.py` for decoupling. Confirm this still holds when wiring the grammar; the talon rules above show `{user.hat_shape}` (mouse-clock's list) but we can swap to `{user.prose_hat_shape}` (ours) without changing the action signature.
+
+7. **Color grammar collision** — `<user.prose_hat_color> {user.hat_shape}` reuses the existing `prose_hat_color` capture which is also used as a hat prefix elsewhere (e.g. `chuck blue h`). Verify the new rule doesn't shadow or conflict with `chuck`-class rules in the overlay-active context. Talon's rule specificity (literal + literal vs capture + capture) should resolve cleanly, but worth a regression sweep.
+
+8. **`prose undo` collision** — verify no existing rule binds `prose undo` (especially in trillium_talon or community). If clean, add it alongside `overlay undo` as documented in Scenario 10.

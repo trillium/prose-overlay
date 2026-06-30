@@ -23,7 +23,8 @@
   - current `they're` → next `their` (wraps)
 - **Shape hat** — the colored Cursorless-style glyph painted on a flagged token by Slice 1's renderer, addressable by `shape_pool()` names (`bolt`, `wing`, `frame`, …). Each flagged token has at most one shape (10-shape pool; >10 simultaneous = underline-only spillover).
 - **Letter hat** — the gray-letter dot still painted on every token (including flagged ones) by the standard hat allocator. Separate addressing namespace from the shape hat.
-- **Expanded panel** — an in-canvas widget rendered alongside each shape-hatted token, listing every group member with a color-coded background per member. The colors are the familiar Cursorless palette (`red blue green pink yellow purple plum gold black white`, where `plum→purple` and `gold→yellow` are aliases). The panel doubles as the legend for color-addressed direct swap (Scenario 3).
+- **Segmented underline** — the amber underline below each flagged token, segmented into N parts (one per group member) with a brief gap between segments. The segment whose position corresponds to the **current word's index in the group's CSV row order** is rendered with a slight highlight (thicker / brighter / different alpha). Updates on every swap to reflect the new active position. Compact, always-on indicator of cycle position.
+- **Expanded panel** — a larger in-canvas widget rendered alongside each shape-hatted token, listing every group member with a color-coded background per member. The colors are the familiar Cursorless palette (`red blue green pink yellow purple plum gold black white`, where `plum→purple` and `gold→yellow` are aliases). The panel doubles as the legend for color-addressed direct swap (Scenario 4). Complementary to the segmented underline — underline shows POSITION, panel shows ALTERNATES with color address keys.
 - **Color-addressed alt** — a group member identified by a Cursorless color name in the expanded panel, so the user can say `<color> <shape>` and land directly on that alt without cycling through siblings.
 
 ## Background
@@ -38,9 +39,9 @@ And the shape vocabulary identifies which homophones can be swapped
 A flagged token can be addressed for swap by any of four keys:
 
 1. **Shape hat** — `phone <shape>` / `phones <shape>` (Scenarios 1, 2)
-2. **Color + shape** — `<color> <shape>` (Scenario 3)
-3. **Current word** — `phones <word>` (Scenario 4)
-4. **Letter hat** — `phones <letter>` / `phones <color> <letter>` (Scenario 5)
+2. **Color + shape** — `<color> <shape>` (Scenario 4)
+3. **Current word** — `phones <word>` (Scenario 5)
+4. **Letter hat** — `phones <letter>` / `phones <color> <letter>` (Scenario 6)
 
 The letter hat is unchanged from non-flagged tokens and remains addressable by all standard hat-targeted verbs (`chuck`, `take`, `change`, etc.). The new addressing path adds `phones <letter>` to that same hat without breaking existing verbs.
 
@@ -101,7 +102,89 @@ Then the token text returns to "their" through the same sequence in
 
 Cycling is the behavior — there is no separate "preview the next swap" step. Each utterance commits a swap. For 2-member groups (`your,you're`) cycling toggles. For 3-member groups it rotates.
 
-## Scenario 3 — Color-addressed direct swap (`<color> <shape>`)
+## Scenario 3 — Segmented amber underline shows cycle position
+
+```
+Given a token reads "there" in the buffer
+And the group is "their,there,they're"
+
+Then the amber underline beneath the token is rendered as THREE
+    segments, one per group member, ordered left-to-right by CSV row:
+        their       there      they're
+        _____   ____[____]____  _____
+                     ^^^^^^
+                     active segment highlighted
+And the highlighted segment is the SECOND one (position 2 of 3 — "there")
+And the segments are separated by brief gaps (2 px gap between bars)
+And each segment is the existing HOMOPHONE_UNDERLINE_HEIGHT (1.5 px tall)
+And the active segment is THICKER (e.g. 2.5 px) or BRIGHTER (e.g. alpha
+    ramps from cc to ff)
+
+When the user says `phones air` OR `phone wing` OR `phones there`
+    (any addressing path triggering a cycle)
+
+Then the buffer text cycles to "they're" (next CSV member after "there")
+And the underline re-renders with the THIRD segment highlighted instead
+    of the second
+And the segment count stays 3 (group is unchanged)
+And the user can SEE the position update on the same draw cycle as the
+    swap
+```
+
+### Example layouts
+
+```
+2-member group ("your,you're"), current "your":
+    your    you're
+    [____]   ____
+     ^^^
+     position 1
+
+After "phones <X>" → current "you're":
+    your    you're
+    _____  [____]
+            ^^^
+            position 2
+
+3-member group ("their,there,they're"), current "their":
+    their      there      they're
+    [____]      ____       ____
+     ^^^^
+     position 1
+
+After "phones <X>" → current "there":
+    their      there      they're
+    _____     [____]       ____
+                ^^^^
+                position 2
+
+After "phones <X>" again → current "they're":
+    their      there      they're
+    _____      ____      [____]
+                          ^^^^
+                          position 3
+
+After "phones <X>" again → wraps to "their":
+    their      there      they're
+    [____]      ____       ____
+     ^^^^
+     position 1 (wrapped)
+```
+
+The segmented underline is the compact always-on indicator of where in the cycle the user is. It complements the expanded panel (Scenario 4) — the panel shows the full alternate words with color addressing; the underline shows position with minimal pixel cost.
+
+### Token-width budgeting
+
+Segments split the token's underline rect equally with a fixed gap:
+```
+segment_width = (tw - gap_count * GAP_W) / member_count
+gap_count     = member_count - 1
+GAP_W         = 2 px (constant)
+```
+
+For short tokens with many group members (e.g. "I" with a 4-member group), individual segments may compress to sub-pixel. **Open question 11**: minimum segment width? If `segment_width < 1.5 px`, options are (a) suppress the underline and fall back to solid amber, (b) skip the gaps and render as a single bar with a highlight marker, (c) extend the underline width slightly past the token. v1 proposal: (a) fall back to solid for unreadably narrow segments, log a hint.
+
+## Scenario 4 — Color-addressed direct swap (`<color> <shape>`)
 
 ```
 Given a token reads "there" in the buffer
@@ -147,7 +230,7 @@ Color-addressed swap is the direct-address path — useful when the user can see
 
 The shape stays `play` per Slice 2 stability. The letter hat reallocates per the normal hat allocator (may become a different letter or color). The expanded panel re-renders with `there` now in the gold slot (was hidden as current) and `they're` still in blue.
 
-## Scenario 4 — Word-addressed swap (`phones <word>`)
+## Scenario 5 — Word-addressed swap (`phones <word>`)
 
 ```
 Given two tokens are flagged in the buffer:
@@ -170,7 +253,7 @@ And token A is unchanged
 
 **Conflict with the existing community modal HUD**: when the prose overlay is active, `phones <word>` does **not** open the existing modal HUD at `~/.talon/user/trillium_talon/core/homophones/homophones.talon`. The overlay's grammar (1 mode + 1 tag) wins context specificity, and the swap is performed directly. When the overlay is **not** active, the modal HUD still works as before.
 
-## Scenario 5 — Letter-hat-addressed swap (`phones <letter>`)
+## Scenario 6 — Letter-hat-addressed swap (`phones <letter>`)
 
 ```
 Given a token reads "there" in the buffer
@@ -226,7 +309,7 @@ Then it may swap a DIFFERENT token now wearing the gray-a hat
 
 This is a known footgun of letter-hat addressing — the hat is character-derived and reshuffles on text change. **Recommendation: use shape-hat addressing (`phones wing`) for repeated cycling of the same logical token, since shape stability is the whole point of Slice 2.** `phones <letter>` is best for one-shot swaps where the next utterance is not another swap of the same token.
 
-## Scenario 6 — Phone with no matching shape
+## Scenario 7 — Phone with no matching shape
 
 ```
 Given the overlay is active
@@ -241,7 +324,7 @@ And no undo step is recorded
 
 The action is a no-op when the spoken shape is unassigned. Defensive — does not surface user-facing error UI in v1 (TBD whether a brief flash/chrome on the canvas is worth adding).
 
-## Scenario 7 — Phone after surrounding edits
+## Scenario 8 — Phone after surrounding edits
 
 ```
 Given a token reads "there" at idx 5 in the buffer
@@ -260,7 +343,7 @@ And the swap targets the same logical token despite the index shift
 
 This is the Slice 2 keep-criterion in action — shape identity must be stable across edits so muscle memory works.
 
-## Scenario 8 — Pool overflow (no shape, no shape-addressed swap)
+## Scenario 9 — Pool overflow (no shape, no shape-addressed swap)
 
 ```
 Given 11 or more tokens in the buffer are flagged as homophones
@@ -280,7 +363,7 @@ Then the overflow token CAN still be cycled — word addressing does not
 
 Word addressing (`phones <word>`) is the recovery path for overflow tokens. Shape addressing is the muscle-memory path.
 
-## Scenario 9 — Letter hat coexistence
+## Scenario 10 — Letter hat coexistence
 
 ```
 Given a token "there" has letter hat "blue-h" and shape hat "wing"
@@ -301,7 +384,7 @@ Then the token is replaced with "there" verbatim (dictation insert at hat)
 
 The two namespaces compose freely; user picks the verb that matches intent. `phone` / `phones` is for known-homophone swaps; `change` is for general edits.
 
-## Scenario 10 — Voice grammar specificity
+## Scenario 11 — Voice grammar specificity
 
 ```
 Given the overlay is active (tag user.prose_overlay_active set)
@@ -327,7 +410,7 @@ And falls through to `<user.raw_prose>` → "phone" enters the buffer as
     a regular word (mostly harmless — user notices and undoes)
 ```
 
-## Scenario 11 — Undo restores prior word
+## Scenario 12 — Undo restores prior word
 
 ```
 Given a token was just swapped from "there" to "they're" via `phone wing`
@@ -346,7 +429,7 @@ Both `overlay undo` and `prose undo` are accepted aliases for the undo action �
 
 The bracket API from `docs/UNDO_REDO_PLAN.md` Phase 2 (ISC-23) is the substrate. The `phone` action MUST wrap its mutation in `commit_start("phone <shape>", STRUCTURAL) / commit_end()` to satisfy this scenario.
 
-## Scenario 12 — Empty buffer or no homophones present
+## Scenario 13 — Empty buffer or no homophones present
 
 ```
 Given the overlay is active
@@ -381,11 +464,17 @@ Then same — no-op (no token reads "there")
 
 - `internal/homophones.py` — new exported helper `group_for_word(token: str) -> tuple[str, ...] | None` returning the canonical group for a flagged word (or `None` if unflagged). Plus `next_in_group(current: str) -> str | None` returning the next CSV-row member (wrapping).
 - `shim/actions_homophones.py` (new module) — three actions:
-  - `prose_overlay_phone_shape(shape_name: str)` — Scenarios 1, 2, 5, 6, 7, 8, 10; looks up `instance.shape_assignments` for the token with `shape_name`, calls `next_in_group(current_word)`, brackets the buffer mutation via `commit_start("phone <shape>", STRUCTURAL) / commit_end()`.
-  - `prose_overlay_phone_color_shape(prose_hat_color: str, shape_name: str)` — Scenario 3; looks up the token by `shape_name`, looks up its panel's color-to-alt mapping for `prose_hat_color`, swaps to that specific alt. Brackets the mutation.
-  - `prose_overlay_phone_word(word: str)` — Scenarios 4, 8; scans the buffer for a flagged token reading `word`, calls `next_in_group(current_word)`, brackets the mutation. If multiple tokens read the same word, swaps the first match (or all matches? — see open question 3).
-  - `prose_overlay_phone_letter(letter: str, color: str = "gray")` — Scenario 5; looks up the token at letter hat `(color, letter)` via the existing `_hat_to_index` helper, checks if it's flagged (homophone), calls `next_in_group(current_word)`, brackets the mutation. No-op if the token is not flagged.
+  - `prose_overlay_phone_shape(shape_name: str)` — Scenarios 1, 2, 6, 7, 8, 9, 11; looks up `instance.shape_assignments` for the token with `shape_name`, calls `next_in_group(current_word)`, brackets the buffer mutation via `commit_start("phone <shape>", STRUCTURAL) / commit_end()`.
+  - `prose_overlay_phone_color_shape(prose_hat_color: str, shape_name: str)` — Scenario 4; looks up the token by `shape_name`, looks up its panel's color-to-alt mapping for `prose_hat_color`, swaps to that specific alt. Brackets the mutation.
+  - `prose_overlay_phone_word(word: str)` — Scenarios 5, 9; scans the buffer for a flagged token reading `word`, calls `next_in_group(current_word)`, brackets the mutation. If multiple tokens read the same word, swaps the first match (or all matches? — see open question 3).
+  - `prose_overlay_phone_letter(letter: str, color: str = "gray")` — Scenario 6; looks up the token at letter hat `(color, letter)` via the existing `_hat_to_index` helper, checks if it's flagged (homophone), calls `next_in_group(current_word)`, brackets the mutation. No-op if the token is not flagged.
 - `shim/shapes.py` (extend) or new `shim/homophone_panel.py` — compute `dict[int, dict[str, str]]` = `token_idx -> {color_name -> alt_word}` from each shape-hatted token's group, excluding the current word. Re-computed when `_recompute_hats` runs and stored on `instance.homophone_panel_alts` (parallel to `instance.shape_assignments`).
+- `internal/homophones.py` (extend) — new helper `current_position_in_group(current_word: str) -> tuple[int, int] | None` returning `(active_idx, group_size)` for a flagged token's current word in its group's CSV row order. Returns `None` for unflagged tokens. Required by the segmented underline render to know which segment to highlight.
+- `ui/draw_tokens.py` (extend the existing homophone underline draw block, lines ~177-184) — when `flagged_indices` contains `idx`, look up `group_size` from `current_position_in_group(token)`:
+  - If `group_size == 1` or `group_size is None`, paint the existing solid amber underline (back-compat for degenerate or unflagged).
+  - Otherwise paint N segments via the budget formula (`segment_width = (tw - (N-1) * GAP_W) / N` with `GAP_W = 2`), and render the segment at `active_idx` with a thicker / brighter style (e.g. height `2.5` px instead of `1.5`, or alpha `ff` instead of `cc`).
+  - If a segment would compute to a width less than `MIN_SEGMENT_W` (e.g. 1.5 px), fall back to the solid underline + log hint (open question 11).
+- `internal/draw_constants.py` — add `HOMOPHONE_UNDERLINE_GAP_W = 2`, `HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT = 2.5`, `HOMOPHONE_UNDERLINE_MIN_SEGMENT_W = 1.5` (configurable thresholds for the segmented render).
 - `ui/draw_panels.py` (new) — render the expanded panel per shape-hatted token. Reads `instance.homophone_panel_alts`. Anchors panel near the token (TBD: below, beside, or floating — see open question 5). Each alt rendered as a small chip with its color as the background, the word as foreground text.
 - `prose_overlay.talon` — new grammar rules (in the overlay-active context):
   ```
@@ -424,8 +513,14 @@ Each scenario above maps to a test in `scripts/headless-verify.py`:
 - L1.X — `phone_letter("a", "gray")` swaps the token at gray-a if it's flagged; no-op if not flagged
 - L1.X — `phone_letter("h", "blue")` swaps the token at blue-h if it's flagged
 - L3.X — `prose_overlay_phone_letter` dispatch routes correctly with and without color arg
+- L1.X — `current_position_in_group("there")` returns `(1, 3)` for CSV row "their,there,they're" (0-indexed) — active is idx 1, total members 3
+- L1.X — `current_position_in_group("they're")` returns `(2, 3)`
+- L1.X — `current_position_in_group("your")` returns `(0, 2)` for "your,you're"
+- L1.X — `current_position_in_group("not-a-homophone")` returns None
+- L1.X — segment width budget: `segment_width(tw=40, gap=2, members=3)` returns `12` ((40 - 4) / 3)
+- L1.X — segment width below MIN_SEGMENT_W returns the fall-back signal (e.g., 0 or sentinel) so the renderer can downgrade to solid
 
-Live-only: the actual voice grammar match for `(phone | phones) {hat_shape}`, `<user.prose_hat_color> {user.hat_shape}`, `phones <user.homophones_canonical>`, `phones <user.letter>`, `phones <user.prose_hat_color> <user.letter>`; and the panel rendering on the Skia canvas.
+Live-only: the actual voice grammar match for `(phone | phones) {hat_shape}`, `<user.prose_hat_color> {user.hat_shape}`, `phones <user.homophones_canonical>`, `phones <user.letter>`, `phones <user.prose_hat_color> <user.letter>`; and the Skia canvas paint for both the expanded panel AND the segmented amber underline (segment count, active highlight, gap rendering).
 
 ## Open questions for the implementer
 
@@ -447,4 +542,8 @@ Live-only: the actual voice grammar match for `(phone | phones) {hat_shape}`, `<
 
 9. **`phones <word>` vs `phones <letter>` capture disambiguation** — both rules sit in the overlay-active context. When the user says `phones air`, Talon's matcher must pick between `<user.homophones_canonical>` (does "air" appear in the homophone CSV? probably not, but verify) and `<user.letter>` (yes, "air" is the NATO 'a'). For words that ARE both homophones AND NATO letter names (unlikely but possible — e.g. "you" if the alphabet includes it), the matcher's tie-break behavior determines what happens. Document the resolution rule; recommend preferring the letter capture for ambiguous cases (more specific list).
 
-10. **`phones <letter>` on non-flagged tokens** — Scenario 5 says the action is a no-op for non-flagged letter hats. But should it instead fall through to something useful (e.g. open the modal HUD)? v1 default proposal: no-op with log hint. Iterate if real usage shows surprise.
+10. **`phones <letter>` on non-flagged tokens** — Scenario 6 says the action is a no-op for non-flagged letter hats. But should it instead fall through to something useful (e.g. open the modal HUD)? v1 default proposal: no-op with log hint. Iterate if real usage shows surprise.
+
+11. **Minimum segmented-underline segment width** — Scenario 3 covers tokens where group_size is small enough that segments stay readable. For short tokens with large groups, individual segments may compute below readable thresholds. v1 proposal: fall back to solid amber underline (existing behavior) when any segment would be < 1.5 px. Alternatives: extend the underline past the token's text width, or render the highlight as a marker dot rather than a thicker bar. Pick one and document.
+
+12. **Segmented-underline active-segment style** — "slightly highlighted" can mean: (a) taller (2.5 px vs 1.5 px), (b) brighter alpha (ff vs cc), (c) different shade (a more saturated amber), (d) outlined with a dot above. v1 proposal: taller AND brighter (both axes for clear contrast). Verify by eye that the active segment is unmistakable on the dark BG without being garish.

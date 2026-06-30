@@ -12645,7 +12645,7 @@
     ).join("|")})$`,
     "u"
   );
-  var GRAPHEME_SPLIT_SOURCE = String.raw`\p{L}\p{M}*`;
+  var GRAPHEME_SPLIT_SOURCE = String.raw`\p{L}\p{M}*|[\p{N}\p{P}\p{S}]`;
   var GRAPHEME_SPLIT_FLAGS = "gu";
   var StandaloneGraphemeSplitter = class {
     getTokenGraphemes(tokenText) {

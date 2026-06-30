@@ -93,6 +93,13 @@ change <user.prose_hat_color> <user.letter>:
 # {user.symbol_key} includes all spoken forms — both command-and-dictation and command-only.
 {user.symbol_key}: user.prose_overlay_add_text(symbol_key)
 
+# NATO letter forms: "trap trap trap" → "ttt", "air bat cap" → "abc".
+# Without this, single-letter NATO forms fire key(letter) in the background
+# window (per core/keys/keys.talon:1) or get eaten as the literal word "trap"
+# by community dictation. <user.letters> joins with no space, so a run of
+# letter names becomes one token in the buffer.
+<user.letters>: user.prose_overlay_add_text(letters)
+
 # Viewport alignment — Helix/Emacs-style
 overlay show top: user.prose_overlay_align_top()
 overlay show bottom: user.prose_overlay_align_bottom()

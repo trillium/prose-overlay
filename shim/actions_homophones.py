@@ -223,3 +223,52 @@ class Actions:
         if not _swap_token(idx, new_word, f"phone {color}-{letter}"):
             return
         _refresh_after_swap()
+
+    def prose_overlay_phone_color_shape(prose_hat_color: str, shape_name: str):
+        """Swap the homophone token wearing the given shape hat DIRECTLY to
+        the alt currently shown on the given color chip.
+
+        Slice C of docs/PHONES_SPEC.md — Scenario 4. The user reads the
+        panel chip ('gold play') and says the matching utterance; the
+        action looks up the token by shape, looks up the panel mapping
+        for that color, and swaps. Routes through the same _swap_token
+        bracket so it's one undo step.
+
+        `prose_hat_color` is the normalised form from prose_hat_color
+        capture (gold→yellow, plum→purple). The panel mapping in
+        instance.homophone_panel_alts is keyed on the same normalised
+        form, so the lookup is direct.
+
+        No-ops with log hint when:
+          - no token has the spoken shape (Scenario 7),
+          - the shape-hatted token has no panel entry (group ≤ 1 or
+            shapes off),
+          - the color is not in the current panel mapping (stale call —
+            user spoke a color that's not currently a slot),
+          - the swap would be a no-op (new == old; shouldn't happen
+            because the current word is excluded from the panel).
+        """
+        idx = _shape_to_index(shape_name)
+        if idx < 0:
+            print(
+                f"prose_overlay: {prose_hat_color} {shape_name} — no token has that shape"
+            )
+            return
+        panel_entry = instance.homophone_panel_alts.get(idx)
+        if not panel_entry:
+            print(
+                f"prose_overlay: {prose_hat_color} {shape_name} (idx {idx}) — "
+                "no panel entry (group is degenerate or shapes off)"
+            )
+            return
+        new_word = panel_entry.get(prose_hat_color)
+        if new_word is None:
+            print(
+                f"prose_overlay: {prose_hat_color} {shape_name} (idx {idx}) — "
+                f"color {prose_hat_color!r} not in current panel "
+                f"({sorted(panel_entry.keys())})"
+            )
+            return
+        if not _swap_token(idx, new_word, f"phone {prose_hat_color} {shape_name}"):
+            return
+        _refresh_after_swap()

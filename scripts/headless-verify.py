@@ -623,6 +623,36 @@ def run_layer_1() -> None:
         assert len(cmap) == 1, f"expected 1 alt; got {cmap}"
         assert "yellow" in cmap, f"expected yellow slot; got {cmap}"
 
+    with test("L1", "L1.50", "color-addressed swap: valid color → expected alt word"):
+        # Mirror the action's lookup at the buffer + panel-map level:
+        # given a synthetic panel mapping {gold/yellow: 'their', blue:
+        # 'they're'} on the 'play' shape, requesting `gold play` swaps
+        # the token text to 'their'. The action would route through
+        # _swap_token, but for the L1 contract we just check the lookup
+        # produces the right target word.
+        panel_alts = {0: {"yellow": "their", "blue": "they're"}}
+        shape_assignments = {0: "play"}
+        # Resolve shape → idx.
+        idx = next(
+            (i for i, s in shape_assignments.items() if s == "play"), -1,
+        )
+        assert idx == 0
+        new_word = panel_alts.get(idx, {}).get("yellow")
+        assert new_word == "their", f"expected 'their'; got {new_word!r}"
+
+    with test("L1", "L1.51", "color-addressed swap: invalid color is no-op"):
+        # When the spoken color is not currently a panel slot (e.g.
+        # 'green play' on a 2-member group whose only chip is yellow),
+        # the lookup returns None and the action returns without
+        # mutating.
+        panel_alts = {0: {"yellow": "their"}}
+        shape_assignments = {0: "play"}
+        idx = next(
+            (i for i, s in shape_assignments.items() if s == "play"), -1,
+        )
+        new_word = panel_alts.get(idx, {}).get("green")
+        assert new_word is None
+
     with test("L1", "L1.49", "compute_panel_alts: unflagged or no-shape tokens are skipped"):
         # An unflagged token (not in `flagged`) MUST NOT appear in the
         # output even if shape_assignments has an entry for it.
@@ -948,6 +978,18 @@ def run_layer_3() -> None:
         td._dispatch({"cmd": "phone_letter", "letter": "h", "color": "blue"})
         assert actions_log == [
             ("prose_overlay_phone_letter", ("h", "blue"), {}),
+        ], actions_log
+
+    # Slice C of docs/PHONES_SPEC.md — phone_color_shape dispatch
+    with test(
+        "L3",
+        "L3.5j",
+        "_dispatch phone_color_shape → prose_overlay_phone_color_shape(color, shape)",
+    ):
+        actions_log.clear()
+        td._dispatch({"cmd": "phone_color_shape", "color": "gold", "shape": "play"})
+        assert actions_log == [
+            ("prose_overlay_phone_color_shape", ("gold", "play"), {}),
         ], actions_log
 
     with test("L3", "L3.6", "_dispatch bogus cmd does not raise"):

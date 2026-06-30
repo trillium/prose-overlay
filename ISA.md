@@ -3,7 +3,7 @@ task: Voice-first prose editor for Talon — Cursorless verbs on a floating buff
 slug: prose-overlay-v2
 effort: E4
 phase: build
-progress: 22/30
+progress: 24/30
 mode: build
 started: 2026-05-21T00:00:00Z
 updated: 2026-06-30T18:00:00Z
@@ -77,10 +77,10 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - [x] ISC-14a: Homophone shapes slice 1 — round-robin hat-shape paint above flagged tokens, default OFF, runtime toggle via `overlay shapes homo on/off` (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3)
 - [x] ISC-14b: Homophone shapes slice 2 — `instance.shape_assignments` per-token stability across edits (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3 Slice 2)
 - [ ] ISC-14c: Homophone shapes slice 3 — same-group-same-shape allocation (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3 Slice 3)
-- [ ] ISC-14d: Homophone shapes slice 4 — `phone <shape>` swap grammar (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3 Slice 4 / `docs/PHONES_SPEC.md`)
+- [x] ISC-14d: Homophone shapes slice 4 — `phone <shape>` swap grammar (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3 Slice 4 / `docs/PHONES_SPEC.md`)
   - [x] ISC-14d-A: Slice A — basic cycle by shape + segmented amber underline (Scenarios 1, 2, 3, 12 of PHONES_SPEC.md)
   - [x] ISC-14d-B: Slice B — word + letter-hat addressing (Scenarios 5, 6)
-  - [ ] ISC-14d-C: Slice C — expanded panel + color-addressed swap (Scenario 4)
+  - [x] ISC-14d-C: Slice C — expanded panel + color-addressed swap (Scenario 4)
 - [x] ISC-15: Scope-preview flash before execution — when user speaks a scope verb, the resolved range flashes before the destructive action (satisfied by inheritance — `_flash_tokens(indices, color, _execute)` schedules `_execute` after a 150ms `cron.after`, so every dispatcher that resolves a target through `_resolve_target_to_token_range` — including scope verbs via `_apply_containing_scope` / `_scope_word` / `_scope_regex` / `_scope_surrounding_pair` — flashes the resolved range before mutating; this turn added `flash` + `flash_color` to the debug snapshot so the Test-Strategy probe has greppable fields)
 
 ### Phase 4 — Observability + headless driving
@@ -145,6 +145,17 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 
 ## Decisions
 
+- **2026-06-30 — PHONES_SPEC Slice C shipped (ISC-14d-C). Parent ISC-14d flipped green.** Seven commits via Forge in the same worktree run as A + B:
+  (C1) `compute_panel_alts(tokens, flagged, shape_assignments)` in `shim/shapes.py` — returns `token_idx -> {color_name -> alt_word}` for shape-hatted tokens whose group has > 1 member. Current word excluded from alts; remaining members get colors from `PANEL_COLOR_PALETTE = [yellow, blue, green, pink, red, purple, black, white]` in CSV-row order. OQ2 default applied: yellow leads because the spoken form `gold` normalises to `yellow` via `prose_hat_color`, matching the spec's worked example "gold play: their". `gray` excluded — the `prose_hat_color` capture doesn't include it, so a `gray <shape>` utterance would be unreachable. 9+ member groups (none in practice — largest is ~5) would lose the last alt. Helper fns (`group_for_word`, `normalize_token`) dependency-injected for headless-test friendliness (the test runner loads `shim/shapes.py` via `spec_from_file_location`, breaking relative imports).
+  (C2) `shim/actions_core._recompute_hats` populates `instance.homophone_panel_alts` from `compute_panel_alts` after the shape allocator runs. Gated on `shapes_on AND shape_assignments` — empty when shapes are off or no token has a shape.
+  (C3) `ui/draw_panels.py` (NEW UI module) — `draw_homophone_panels(c, rows, x_origin, y_start)` walks the same rows list `_draw_token_rows` consumed and paints a row of color-coded chips beneath each shape-hatted token. Each chip is sized to fit its alt word; background uses `HAT_COLOR_HEX[color]` (consistent with the existing letter-hat palette); text is black on light bgs (yellow/white) or white otherwise. OQ5 default applied: panel renders BELOW the token (matches the spec's worked example). Constants (CHIP_PAD_X, CHIP_RADIUS, PANEL_GAP_Y, CHIP_FONT_SIZE=10) kept LOCAL to the module — internal layout details, not shared.
+  (C4) `ui/draw.py:draw_overlay` calls `draw_homophone_panels` after `_draw_token_rows`. Gated on `shape_enabled` so the panel paint only fires when shapes are on. The renderer itself is also a no-op when `instance.homophone_panel_alts` is empty.
+  (C5) `prose_overlay_phone_color_shape(prose_hat_color, shape_name)` action in `shim/actions_homophones.py` — resolves the token by shape, looks up the panel mapping for the color, brackets the swap. Routes through the same `_swap_token` path as the other phone-* actions. No-ops with log hint when the shape is unassigned, the panel entry is empty, or the color isn't in the current panel mapping.
+  (C6) `<user.prose_hat_color> {user.prose_hat_shape}: user.prose_overlay_phone_color_shape(prose_hat_color, prose_hat_shape)` grammar rule in `prose_overlay.talon` (overlay-active context). OQ7 verified: no conflict with chuck/take/change CAPTURE + CAPTURE rules because those lead with literal verbs — empty intersection on the spoken surface, no shadow.
+  (C7) This ISA update + Changelog entry.
+  Open questions resolved: OQ2 (palette order yellow→blue→…, gray excluded), OQ5 (panel below the token), OQ7 (no chuck-class collision). All 12 PHONES_SPEC OQs now resolved with the spec's documented defaults. 73/73 → 79/79 headless green (6 new at L1.47-L1.51 + L3.5j). Layer audit unchanged (0 fail, 2 pre-existing UI-bypasses-SHIM warns).
+  **Live-verify gap**: the new draw path (segmented underline + expanded panels) requires the Talon Skia process. Headless covers the math + dict shape; user-side smoke is required once Talon picks up the new grammar — see Final report → "Live-verification steps for the user".
+
 - **2026-06-30 — PHONES_SPEC Slice B shipped (ISC-14d-B).** Four commits via Forge in the same worktree run as Slice A:
   (B1) `prose_overlay_phone_word(word)` added to `shim/actions_homophones.py` — scans the buffer in token-index order for a flagged token matching the spoken word, swaps the FIRST match (OQ3 default — simple, deterministic). Routes through the same `_swap_token` bracket so the swap is one undo step. Exposes `internal.homophones.normalize_token` (public name for the lookup-key helper) so the SHIM doesn't reach into private `_normalize`.
   (B2) `prose_overlay_phone_letter(letter, color='gray')` added — looks up the token at `(letter, color)` via `shim/actions_core._hat_to_index`, gates on `is_flagged`, then bracket-swaps. OQ10 default applied: action is a no-op with log hint when the addressed token is unflagged (no fall-through to the modal HUD). Scenario 6 caveat documented in the docstring: the letter-hat allocator may reassign the slot after the swap because the new word may not have a `letter` char, so repeated `phones <letter>` calls may target different tokens session over session — `phone <shape>` is the muscle-memory path.
@@ -186,6 +197,8 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - **2026-06-30 — Loop turn 3 audit gap: Cato returned empty result.** E4 mandates Cato cross-vendor audit. The background agent spawned, ran for ~40s, then returned a transcript that ended mid-analysis ("Now I have enough context. Let me also check…") with no structured verdict. Proceeded without the Cato output rather than blocking the turn — smoke tests pass, implementation matches the plan §3 spec verbatim, the atomicity argument (tmp+os.replace + POSIX rename) is well-established. Audit re-spawn deferred to a later turn; if Cato keeps misfiring under E4 backgrounded calls, investigate the agent invocation pattern.
 
 ## Changelog
+
+- **2026-06-30** — PHONES_SPEC Slice C shipped via Forge worktree (7 commits C1-C7). ISC-14d-C flipped green; parent ISC-14d also flipped green because all three nested slices A/B/C are now done. Progress 22/30 → 24/30. 73/73 → 79/79 headless tests pass (6 new: L1.47/48/49 panel-alt mapping, L1.50/51 color-addressed swap lookup, L3.5j dispatch). New SHIM helper `compute_panel_alts` + instance field `homophone_panel_alts` + UI module `ui/draw_panels.py` + action `prose_overlay_phone_color_shape` + grammar rule `<color> <shape>`. All 12 PHONES_SPEC OQs resolved with the spec's documented defaults (OQ1-12). Layer audit unchanged (0 fail, 2 warn).
 
 - **2026-06-30** — PHONES_SPEC Slice B shipped via Forge worktree (4 commits B1-B4). ISC-14d-B flipped green. Progress 21/30 → 22/30. 68/68 → 73/73 headless tests pass (5 new: L1.45/L1.46 buffer-level word-match + non-flagged no-op, L3.5g/h/i dispatch). Two new actions in `shim/actions_homophones.py` (`prose_overlay_phone_word`, `prose_overlay_phone_letter`); three new grammar rules in `prose_overlay.talon`. OQ3/9/10 resolved with the spec's defaults. Layer audit unchanged (0 fail, 2 warn).
 

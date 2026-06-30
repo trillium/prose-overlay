@@ -30,7 +30,7 @@ from talon import Module
 
 from ..internal.instance import instance
 from ..internal.state import EditKind
-from ..internal.homophones import next_in_group
+from ..internal.homophones import is_flagged, next_in_group, normalize_token
 
 
 mod = Module()
@@ -117,5 +117,52 @@ class Actions:
             )
             return
         if not _swap_token(idx, new_word, f"phone {shape_name}"):
+            return
+        _refresh_after_swap()
+
+    def prose_overlay_phone_word(word: str):
+        """Cycle the FIRST flagged token currently reading `word` to its
+        next CSV-row member.
+
+        Slice B of docs/PHONES_SPEC.md — Scenario 5. OQ3 resolved:
+        FIRST match by token index (simple, deterministic). If multiple
+        tokens read the same word, the lower-index one swaps; the others
+        are unchanged. Useful when the user doesn't remember the shape
+        name OR wants to address an overflow token (Scenario 9).
+
+        No-op with log hint when:
+          - the buffer is missing,
+          - no token in the buffer matches the spoken word, OR
+          - the matching token is unflagged (the word isn't a homophone
+            in our CSV; defensive — the grammar uses
+            <user.homophones_canonical> so the word IS flagged, but the
+            action defends anyway).
+        """
+        buf = instance.buffer
+        if buf is None:
+            return
+        target_key = normalize_token(word)
+        tokens = buf.get_tokens()
+        target_idx = -1
+        for i, tok in enumerate(tokens):
+            if normalize_token(tok) == target_key and is_flagged(tok):
+                target_idx = i
+                break
+        if target_idx < 0:
+            print(
+                f"prose_overlay: phone word {word!r} — "
+                "no flagged token in the buffer reads that word"
+            )
+            return
+        new_word = next_in_group(tokens[target_idx])
+        if new_word is None or new_word == tokens[target_idx]:
+            # next_in_group None should be unreachable given is_flagged
+            # check above; equality means a degenerate 1-member row (OQ4).
+            print(
+                f"prose_overlay: phone word {word!r} (idx {target_idx}) — "
+                "degenerate 1-member group; no swap"
+            )
+            return
+        if not _swap_token(target_idx, new_word, f"phone {word}"):
             return
         _refresh_after_swap()

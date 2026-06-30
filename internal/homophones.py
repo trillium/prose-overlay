@@ -23,9 +23,19 @@ _CSV_PATH = (
 _STRIP = ".?!,;:)\"'`([{"
 
 
-def _normalize(token: str) -> str:
-    """Lowercase + strip surrounding punct/quotes — the lookup key form."""
+def normalize_token(token: str) -> str:
+    """Lowercase + strip surrounding punct/quotes — the lookup key form.
+
+    Public so SHIM callers (shim.actions_homophones) can match buffer
+    tokens against group members without reaching into the private
+    `_normalize` name. Mirrors what is_flagged does internally.
+    """
     return token.strip(_STRIP).lower()
+
+
+# Internal alias kept for backwards compatibility within this module —
+# the public name is normalize_token.
+_normalize = normalize_token
 
 
 def _load() -> tuple[frozenset[str], tuple[tuple[str, ...], ...], dict[str, int]]:

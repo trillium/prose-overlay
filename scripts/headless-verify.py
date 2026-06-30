@@ -552,6 +552,26 @@ def run_layer_1() -> None:
             f"({dc.HOMOPHONE_UNDERLINE_MIN_SEGMENT_W})"
         )
 
+    with test("L1", "L1.45", "word-addressed swap finds FIRST match among multiple flagged"):
+        # Slice B of docs/PHONES_SPEC.md Scenario 5 + OQ3 default:
+        # when two tokens read the same word, the lower-index one swaps.
+        # We simulate the action's lookup loop at the buffer level.
+        b = ProseBuffer()
+        b.add_text("there is there")
+        tokens = b.get_tokens()
+        # Both indices 0 and 2 read "there"; the action takes the first.
+        target = -1
+        for i, t in enumerate(tokens):
+            if homophones.normalize_token(t) == "there" and homophones.is_flagged(t):
+                target = i
+                break
+        assert target == 0, f"expected first match at idx 0; got {target}"
+        new = homophones.next_in_group(tokens[target])
+        assert new == "they're"
+        new_tokens = list(tokens)
+        new_tokens[target] = new
+        assert new_tokens == ["they're", "is", "there"], new_tokens
+
     with test("L1", "L1.42", "buffer-level cycle: their→there→they're→their = 3 undo records"):
         # Mirrors what shim.actions_homophones._swap_token does at the
         # buffer level (commit_start → set_tokens_raw → commit_end). Each
@@ -786,6 +806,14 @@ def run_layer_3() -> None:
         td._dispatch({"cmd": "phone_shape", "shape": "wing"})
         assert actions_log == [
             ("prose_overlay_phone_shape", ("wing",), {}),
+        ], actions_log
+
+    # Slice B of docs/PHONES_SPEC.md — phone_word dispatch
+    with test("L3", "L3.5g", "_dispatch phone_word → prose_overlay_phone_word(word)"):
+        actions_log.clear()
+        td._dispatch({"cmd": "phone_word", "word": "there"})
+        assert actions_log == [
+            ("prose_overlay_phone_word", ("there",), {}),
         ], actions_log
 
     with test("L3", "L3.6", "_dispatch bogus cmd does not raise"):

@@ -18,7 +18,7 @@ When a row has a commit SHA or ISC reference, that's the durable record.
 
 ## 0. Test coverage cross-walk (audit, 2026-06-30)
 
-> Run `python3 scripts/headless-verify.py` to re-run the suite — current state 45/45.
+> Run `python3 scripts/headless-verify.py` to re-run the suite — current state 62/62 (Layer 5 added 2026-06-30 with the F9 default flip; 16 new resolver-parity rows).
 
 ### 0a. Headless coverage — what each test proves
 
@@ -55,6 +55,10 @@ When a row has a commit SHA or ISC reference, that's the durable record.
 | `L2.4` | bun | `proseAllocateHats(["!"])` returns hat | §2 punct get hats (JS path) |
 | `L2.5` | bun | end-to-end `["testing","testing","123"]` all hatted (JS path) | §2 digit hats (full repro, JS path) |
 | `L3.1`–`L3.10` | stubbed-talon | test-driver dispatch routes commands to actions correctly | §8 test driver (all cmds: add, show, hide, dump, delete_hat, add_letters, add_chars, insert_format_code, reset, clear_buffer, bogus, malformed JSON, _pos advance, set on/off) |
+| `L4.1` | meta-audit | INTERNAL + CURSORLESS Python layers carry zero talon imports (top-level or lazy) | §3 cursorless portability (substrate ports to non-Talon environments) |
+| `L5.1`–`L5.10` | parity | `MANUAL_VERIFICATION.md` rows 1–10 Python ↔ JS resolver agree on token range output for primitive / colored-mark / extendThroughStartOf / extendThroughEndOf / bring-source / move-source target shapes | §3a, §3b, §3e, §3f (F9 default-on parity contract for actions, ranges, lists, bring/move) |
+| `L5.11`–`L5.13` | parity | `MANUAL_VERIFICATION.md` rows 13–15 — containingScope document/line whole-buffer resolution | §3c (document/line scopes), §3f |
+| `L5.14`–`L5.16` | parity | `MANUAL_VERIFICATION.md` rows 18–20 — range target, list target, range driving applyFormatter | §3b, §3e, §3f |
 
 **Headless coverage by surface:**
 - ✅ Buffer state machinery — comprehensive (L1.1–L1.6, L1.11–L1.14)
@@ -64,6 +68,8 @@ When a row has a commit SHA or ISC reference, that's the durable record.
 - ✅ Shape module vocab + assets + parser — strong (L1.20–L1.23)
 - ✅ Test-driver command dispatch — comprehensive (L3.*)
 - ✅ Formatter output buffer contract — adequate (L1.17–L1.19)
+- ✅ Codebase layer portability — comprehensive (L4.1)
+- ✅ Python ↔ JS resolver parity — strong for 16 of 20 MANUAL_VERIFICATION rows (L5.*); remaining 4 are live-only (cursor placement is action-level, surrounding-pair delimiter names need bundle bridging)
 
 ### 0b. Shipped features with NO headless test (live-verify-only)
 
@@ -78,7 +84,8 @@ These are `[x]` in the tables below but the runner does NOT exercise them. Verif
 | §1 auto-show on dictation toggle | end-to-end mode + tag + canvas hand-off |
 | §1 window-name prefix retarget | Talon capture + window switching |
 | §1 history recall | action surface; voice rule routing |
-| §3a–§3f every Cursorless verb | resolver outputs require Talon-side target dicts (no headless fixtures yet) |
+| §3a–§3f Cursorless verb end-to-end (action → buffer mutation) | action layer requires Talon's grammar to construct the target dict; resolver parity IS now headless-tested via Layer 5 for 16 of 20 MANUAL_VERIFICATION rows |
+| §3d surrounding-pair via JS resolver | bundle expects internal delimiter names; prose grammar emits prose-side names — bridge slice pending |
 | §4 token / range selection | depends on cursorless resolver end-to-end |
 | §4 selection highlight render | live Skia paint |
 | §5 hats on digits/punct rendered visually | live Skia paint (allocator IS tested) |
@@ -96,24 +103,24 @@ These are `[x]` in the tables below but the runner does NOT exercise them. Verif
 
 ### 0c. Coverage stats
 
-- **Total shipped features (`[x]`):** ~66
-- **With headless regression tests:** ~18 (counting unique feature rows; some tests cover multiple rows)
-- **Live-only verification:** ~48
-- **Headless coverage ratio:** ~27%
+- **Total shipped features (`[x]`):** ~67 (added: §3f JS resolver default-on)
+- **With headless regression tests:** ~25 (added Layer 4 + Layer 5; some tests cover multiple rows)
+- **Live-only verification:** ~42
+- **Headless coverage ratio:** ~37%
 
-This is intentional. The headless layer covers the parts that CAN be tested without Talon: pure-Python state, JS bundle output via bun, command-dispatch routing under stubs. Everything that depends on Talon's grammar matcher, Skia render pipeline, or real action chain stays in live-verify until we build harness layers for those (a stubbed action-chain layer would lift this to ~45%; a Talon-grammar simulator would lift it further but is expensive).
+The Layer 5 resolver-parity harness was the highest-leverage gap-2 fill from §0d below — running every headless-expressible MANUAL_VERIFICATION row through BOTH Python AND JS resolvers and asserting agreement closed the §3a–§3f gap by ~16 rows. Remaining live-only coverage in §3 is cursor placement (action-level) and surrounding-pair (bundle delimiter-name bridge). Everything that depends on Talon's grammar matcher, Skia render pipeline, or end-to-end action chain still stays in live-verify until we build harness layers for those (a stubbed action-chain layer would lift this further; a Talon-grammar simulator would lift it further but is expensive).
 
 ### 0d. Highest-leverage gaps to consider adding
 
 If we want to push the ratio up cheaply:
 
 1. **Buffer-side trailing punct test** — `ProseBuffer().add_text("hello.") → ["hello", "."]`. Easy add to L1.
-2. **Resolver-side scope tests** — feed synthetic target dicts into `_resolve_target_to_token_range` and assert token ranges. Cursorless's actual targets are JSON shapes; we can construct fixtures without Talon. Big lift in §3 coverage.
-3. **Action chain stubbed** — Layer 4. Stub Talon enough to import `ui/actions_*.py` and `shim/actions_*.py` and exercise the action methods. Catches integration bugs the dispatch-routing tests miss.
+2. ~~**Resolver-side scope tests** — feed synthetic target dicts into `_resolve_target_to_token_range` and assert token ranges.~~ **Done 2026-06-30 — Layer 5 parity harness; 16 of 20 MANUAL_VERIFICATION rows headless-tested.**
+3. **Action chain stubbed** — stub Talon enough to import `prose_overlay_actions_*` and exercise the action methods. Catches integration bugs the dispatch-routing + resolver-parity tests miss (cursor placement, flash timing, bring/move destination logic).
 4. **Underline-default-on assertion at the SETTING level** — currently L1.15 tests the runtime flag; we don't test the `mod.setting(default=True)`. Mostly a doc-vs-code consistency guard.
 5. **Coalescing threshold logic** — `_GROUP_DELAY_S` boundary test without actual timing (inject timestamps).
 
-Items 2 + 3 are the meaningful coverage leaps. The other three are quick wins.
+Items 2 ✅ + 3 are the meaningful coverage leaps. Items 1, 4, 5 are quick wins.
 
 ---
 
@@ -209,7 +216,8 @@ Items 2 + 3 are the meaningful coverage leaps. The other three are quick wins.
 
 | Status | Feature | Example | Notes |
 |---|---|---|---|
-| `[~]` | JS resolver behind setting | `user.prose_overlay_use_js_resolver = True` | scaffolded; awaiting MANUAL_VERIFICATION.md walkthrough |
+| `[x]` | JS resolver is the default (F9 migration) | `user.prose_overlay_use_js_resolver = True` (default since 2026-06-30) | flipped default ON 2026-06-30; native cursorless `processTargets` pipeline now drives all target resolution. Headless parity covered by `scripts/headless-verify.py` Layer 5 (16 of 20 MANUAL_VERIFICATION.md rows; remaining 4 are live-only — see ISA-8 partial-green note). |
+| `[x]` | Python resolver retained as safety net | `user.prose_overlay_use_js_resolver = False` falls back to `prose_overlay_cursorless_resolve.py` | gated by setting; kept until ISC-9 retires it after 3 clean live sessions. |
 | `[ ]` | Python resolver removed once JS holds 3 sessions | grep for imports = 0 | ISC-9 |
 
 ## 4. Selection

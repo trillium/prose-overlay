@@ -97,7 +97,68 @@ queue-dispatch and runtime-toggle behavior.
 | L3.9 | `prose_overlay_test_set(1)` creates the flag file (runtime toggle, e979025) | enable path |
 | L3.10 | `prose_overlay_test_set(0)` removes the flag file (runtime toggle, e979025) | disable path |
 
-### Layer 4 — Out of scope for this plan
+### Layer 4 — Meta (codebase portability audit)
+
+Defers to `scripts/layer-audit.py` — asserts INTERNAL + CURSORLESS Python
+modules stay talon-free so the substrate ports to non-Talon environments
+(VS Code, Vim, web, …) given a different SHIM + UI. See `docs/LAYER_AUDIT.md`.
+
+| ID | Test | Notes |
+|---|---|---|
+| L4.1 | `layer-audit.py` returns 0 (no FAIL findings) | structural invariants hold |
+
+### Layer 5 — Resolver parity (F9 migration: Python ↔ JS)
+
+The ISC-8 contract: for each row in `MANUAL_VERIFICATION.md` whose target
+dict + buffer + expected token range can be expressed without invoking
+Talon's grammar engine, we construct a fixture, run BOTH resolvers, and
+assert:
+
+```
+python_output == js_output == expected
+```
+
+A failure here means one of three things:
+
+1. Python and JS resolvers diverge → the F9 migration is unsafe; stop.
+2. Both resolvers disagree with `expected` → MANUAL_VERIFICATION.md is wrong.
+3. JS bundle throws on a target shape the prose grammar would construct →
+   bundle gap; file a follow-up.
+
+| ID | Test | MANUAL_VERIFICATION row |
+|---|---|---|
+| L5.1 | `take air` — primitive decoratedSymbol → token 1 | 1 |
+| L5.2 | `chuck ball` — primitive decoratedSymbol → token 2 | 2 |
+| L5.3 | `chuck blue air` — colored mark, blue-a wins over gray-a | 3 |
+| L5.4 | `chuck head ball` — extendThroughStartOf → tokens 0..2 | 4 |
+| L5.5 | `chuck tail drum` — extendThroughEndOf → tokens 3..4 | 5 |
+| L5.6 | `change head ball` — resolver shape (action-level cursor parking is live-only) | 6 |
+| L5.7 | `change tail drum` — resolver shape (action-level cursor parking is live-only) | 7 |
+| L5.8 | `bring air to drum` — source target = primitive 'a' | 8 |
+| L5.9 | `move air to drum` — source target = primitive 'a' | 9 |
+| L5.10 | `bring blue air to drum` — colored source mark | 10 |
+| L5.11 | `chuck file` — containingScope document → whole buffer | 13 |
+| L5.12 | `chuck line` — containingScope line (single-line ⇒ whole buffer) | 14 |
+| L5.13 | `take file` — same resolver shape as row 13 | 15 |
+| L5.14 | `chuck air past drum` — range target → tokens 1..3 | 18 |
+| L5.15 | `take air and drum` — list target → two token ranges | 19 |
+| L5.16 | `format snake air past drum` — range target (formatter is action-level) | 20 |
+
+**Live-only rows (parity NOT machine-tested):**
+
+| MANUAL_VERIFICATION row | Why live-only |
+|---|---|
+| 11 — `pre start` | Cursor-positioning is action-level; the resolver returns a token range and the action then places the cursor relative to it. Verify in Talon. |
+| 12 — `post end` | Same — action-level cursor placement after resolver returns. |
+| 16 — `take quotes air` | The cursorless JS bundle expects internal delimiter names (`quotationMark`, `parentheses`, …) where the prose grammar emits prose-side names (`quad`, `round`). Bundle errors on prose names today; bridging is a separate slice. The Python re-impl in `prose_overlay_surrounding_pair` handles these locally — when the JS default is on, this row is the live-evidence test for the bundle gap. |
+| 17 — `chuck round air` | Same surrounding-pair gap as row 16. |
+
+ISC-8 stays partial-green (`[~]`) on the back of Layer 5 — the 16 rows we
+parity-test pass, but ISC-8's criterion text says "every row" so the
+gap is documented in the ISA Decisions entry and gets retired once a
+clean live walkthrough confirms rows 11, 12, 16, 17 behave.
+
+### Out of scope for this plan
 
 These require the live Talon process. Document the gap; do not run.
 
@@ -115,10 +176,12 @@ These require the live Talon process. Document the gap; do not run.
 
 ## 3. How the runner works
 
-`scripts/headless-verify.py` is one Python file with three sections:
+`scripts/headless-verify.py` is one Python file with five sections:
 - **Layer 1**: imports `internal/state.py` via `importlib.util.spec_from_file_location` and exercises ProseBuffer + compute_hat_assignments.
 - **Layer 2**: spawns `bun` with an inline JS that loads the bundle and calls `proseAllocateHats`. Compares JSON output to expected shape.
 - **Layer 3**: installs stub modules into `sys.modules` for `talon`, `talon.lib.js`, then imports `ui/test_driver.py`. Captures stub `actions.user.*` calls to verify routing.
+- **Layer 4**: shells out to `scripts/layer-audit.py` which asserts INTERNAL + CURSORLESS layers have zero talon imports (top-level or lazy).
+- **Layer 5**: parity harness. For each headless-testable row in MANUAL_VERIFICATION.md, builds a fixture, runs Python resolver (via the synthetic-package import trick — see the `_load_python_resolver` docstring) AND the JS bundle (via `bun`), asserts both equal each other AND the expected output.
 
 Each layer's tests are functions that raise `AssertionError` on failure. The
 runner catches per-test, marks `[x]` on success and `[ ] FAIL: <reason>` on
@@ -144,7 +207,14 @@ Expected output shape:
   [x] L3.1: module imports under stubs
   ...
 
-Summary: 25/25 passed
+=== Layer 4 — Meta (codebase portability) ===
+  [x] L4.1: INTERNAL + CURSORLESS layers are talon-free
+
+=== Layer 5 — Resolver parity (Python ↔ JS, F9 migration) ===
+  [x] L5.1: MANUAL_VERIFICATION row 1 — `take air`
+  ...
+
+Summary: 62/62 passed
 ```
 
 ## 4. Maintenance rule

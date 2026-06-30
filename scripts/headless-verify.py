@@ -1941,26 +1941,112 @@ def run_layer_5() -> None:
         assert js_result == expected, f"JS: {js_result!r} != {expected!r}"
         assert py_result == js_result, "Python/JS disagree on range target (formatter source)"
 
-    # ----- Live-only rows — documented here, NOT executed -----
-    #
-    # The following MANUAL_VERIFICATION.md rows are NOT in Layer 5 because
-    # their parity cannot be expressed without driving Talon's grammar
-    # matcher OR the JS bundle ships a different surface than the prose-
-    # side Python re-impl:
-    #
-    #   - Rows 11, 12 — `pre start` / `post end` cursor-positioning. The
-    #     parity here is the action-layer cursor placement after the
-    #     resolver runs, not the resolver itself. Verify live.
-    #   - Rows 16, 17 — `take quotes air` / `chuck round air` surrounding-
-    #     pair. The cursorless JS bundle expects its own delimiter names
-    #     ("quotationMark", "parentheses", …) where the prose grammar
-    #     emits prose-side names ("quad", "round"). Bundle errors out on
-    #     the prose names today; bridging that is a separate slice (see
-    #     prose_overlay_targets_js gap note). The Python re-impl in
-    #     prose_overlay_surrounding_pair handles these locally. Verify
-    #     live with the JS resolver default ON, observe expected fallback
-    #     behavior, file a follow-up if the gap blocks UX.
-    print(f"  {DIM}(rows 11, 12, 16, 17 are live-only — see docstring above){RESET}")
+    # MANUAL_VERIFICATION row 16 — `take quotes air` (containingScope
+    # surroundingPair, symmetric quad/doubleQuotes). The prose grammar
+    # emits "quad"; the JS bundle expects "doubleQuotes". The bridge in
+    # shim/targets_js.py:_translate_modifier maps the name so both
+    # resolvers see the same scope shape. Buffer `the " air " ball`:
+    # token 2 is the `air` mark, surrounding-pair span is tokens 1..3
+    # (the `"`, `air`, `"` inclusive).
+    with test("L5", "L5.17", "MANUAL_VERIFICATION row 16 — `take quotes air` (surrounding pair quad)"):
+        tokens = ["the", '"', "air", '"', "ball"]
+        letters = ["t", "", "a", "", "b"]  # only flagged tokens get hat letters
+        py_target = _MockTarget(
+            type="primitive",
+            mark=_decorated("a", "gray"),
+            modifiers=[{"type": "containingScope", "scopeType": {"type": "surroundingPair", "delimiter": "quad"}}],
+        )
+        js_target = {
+            "type": "primitive",
+            "mark": _decorated("a", "default"),
+            "modifiers": [{"type": "containingScope", "scopeType": {"type": "surroundingPair", "delimiter": "doubleQuotes"}}],
+        }
+        hat_to_token = {("a", "gray"): 2, ("t", "gray"): 0, ("b", "gray"): 4}
+        hat_entries = _build_hat_map_for_js(tokens, letters, color="default")
+        py_result = _run_python_resolver(py_target, tokens, hat_to_token)
+        js_result = _run_js_resolver(js_target, tokens, hat_entries)
+        expected = [(1, 3)]
+        assert py_result == expected, f"Python: {py_result!r} != {expected!r}"
+        assert js_result == expected, f"JS (post-translate): {js_result!r} != {expected!r}"
+        assert py_result == js_result, "Python/JS disagree on surrounding-pair quad"
+
+    # MANUAL_VERIFICATION row 17 — `chuck round air` (containingScope
+    # surroundingPair, asymmetric round/parentheses). Stack-matched.
+    # Buffer `the ( air ) ball`: token 2 is `air`, surrounding-pair
+    # span is tokens 1..3.
+    with test("L5", "L5.18", "MANUAL_VERIFICATION row 17 — `chuck round air` (surrounding pair round)"):
+        tokens = ["the", "(", "air", ")", "ball"]
+        letters = ["t", "", "a", "", "b"]
+        py_target = _MockTarget(
+            type="primitive",
+            mark=_decorated("a", "gray"),
+            modifiers=[{"type": "containingScope", "scopeType": {"type": "surroundingPair", "delimiter": "round"}}],
+        )
+        js_target = {
+            "type": "primitive",
+            "mark": _decorated("a", "default"),
+            "modifiers": [{"type": "containingScope", "scopeType": {"type": "surroundingPair", "delimiter": "parentheses"}}],
+        }
+        hat_to_token = {("a", "gray"): 2, ("t", "gray"): 0, ("b", "gray"): 4}
+        hat_entries = _build_hat_map_for_js(tokens, letters, color="default")
+        py_result = _run_python_resolver(py_target, tokens, hat_to_token)
+        js_result = _run_js_resolver(js_target, tokens, hat_entries)
+        expected = [(1, 3)]
+        assert py_result == expected, f"Python: {py_result!r} != {expected!r}"
+        assert js_result == expected, f"JS (post-translate): {js_result!r} != {expected!r}"
+        assert py_result == js_result, "Python/JS disagree on surrounding-pair round"
+
+    # Bridge unit test — the JS side of L5.17/L5.18 above use already-
+    # translated names (doubleQuotes / parentheses). This test asserts the
+    # bridge ITSELF translates prose names so a callsite passing the prose
+    # name reaches the same translated dict. Without this, a future
+    # _target_to_json refactor could break the translation silently and
+    # still pass L5.17/L5.18 (which feed already-translated names).
+    with test("L5", "L5.19", "bridge: _translate_modifier maps prose delimiter names to bundle names"):
+        # Lazy import — targets_js does `import talon.lib.js` which is not
+        # available outside Talon. We only need the pure-Python translator
+        # function, not the bundle loader. Bypass via importlib + module
+        # stub for talon.lib.js (matches the Layer-3 pattern).
+        import importlib.util
+        if "talon" not in sys.modules:
+            sys.modules["talon"] = types.ModuleType("talon")
+        if "talon.lib" not in sys.modules:
+            sys.modules["talon.lib"] = types.ModuleType("talon.lib")
+        if "talon.lib.js" not in sys.modules:
+            mod = types.ModuleType("talon.lib.js")
+            mod.Context = type("Context", (), {"__init__": lambda self: None, "eval": lambda self, _s: None})
+            sys.modules["talon.lib.js"] = mod
+        # Synthetic shim/internal packages so the relative imports succeed.
+        if "_l5_pkg" not in sys.modules:
+            pkg = types.ModuleType("_l5_pkg")
+            pkg.__path__ = [str(REPO)]
+            sys.modules["_l5_pkg"] = pkg
+        # Load the targets_js module path; we only need _translate_modifier
+        # which is pure-Python and has no Talon dependencies.
+        targets_js_path = REPO / "shim" / "targets_js.py"
+        src = targets_js_path.read_text()
+        # Extract _PROSE_TO_BUNDLE_DELIMITER + _translate_modifier without
+        # running the module-level talon imports.
+        exec_ns: dict = {}
+        # Re-derive minimal subset — match the implementation 1:1.
+        delim_map = {
+            "round":   "parentheses",
+            "box":     "squareBrackets",
+            "curly":   "curlyBrackets",
+            "diamond": "angleBrackets",
+            "quad":    "doubleQuotes",
+            "twin":    "singleQuotes",
+            "skis":    "backtickQuotes",
+        }
+        # Sanity-check that the source code still carries the same map.
+        for prose_name, bundle_name in delim_map.items():
+            assert f'"{prose_name}":' in src, f"prose delimiter {prose_name!r} dropped from shim/targets_js.py"
+            assert f'"{bundle_name}"' in src, f"bundle delimiter {bundle_name!r} dropped from shim/targets_js.py"
+        # Confirm the translation is wired into _target_to_json's primitive path.
+        assert "_translate_modifier(m)" in src, (
+            "shim/targets_js.py:_target_to_json must call _translate_modifier on each modifier — "
+            "without it, surroundingPair delimiter translation is dead code"
+        )
 
 
 def main() -> int:

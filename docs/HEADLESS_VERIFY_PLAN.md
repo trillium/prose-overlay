@@ -153,10 +153,12 @@ A failure here means one of three things:
 | 16 — `take quotes air` | The cursorless JS bundle expects internal delimiter names (`quotationMark`, `parentheses`, …) where the prose grammar emits prose-side names (`quad`, `round`). Bundle errors on prose names today; bridging is a separate slice. The Python re-impl in `prose_overlay_surrounding_pair` handles these locally — when the JS default is on, this row is the live-evidence test for the bundle gap. |
 | 17 — `chuck round air` | Same surrounding-pair gap as row 16. |
 
-ISC-8 stays partial-green (`[~]`) on the back of Layer 5 — the 16 rows we
-parity-test pass, but ISC-8's criterion text says "every row" so the
-gap is documented in the ISA Decisions entry and gets retired once a
-clean live walkthrough confirms rows 11, 12, 16, 17 behave.
+ISC-8 stays partial-green (`[~]`) on the back of Layer 5 — the 18 rows
+we parity-test pass (rows 16, 17 joined coverage 2026-06-30 with the
+surrounding-pair delimiter bridge in `shim/targets_js.py`), but ISC-8's
+criterion text says "every row" so the gap is documented in the ISA
+Decisions entry and gets retired once a clean live walkthrough confirms
+the remaining cursor-placement rows 11, 12 behave.
 
 ### Out of scope for this plan
 

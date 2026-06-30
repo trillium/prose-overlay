@@ -64,6 +64,56 @@ def _to_cursorless_color(prose_color: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Surrounding-pair delimiter normalization
+# ---------------------------------------------------------------------------
+#
+# The prose-side grammar emits short prose-friendly delimiter names — the
+# same vocabulary that ships in `cursorless/surrounding_pair.py` DELIMITER_PAIRS
+# (`round`, `box`, `curly`, `diamond`, `quad`, `twin`, `skis`). The cursorless
+# JS bundle (`js/prose_resolve_targets.js`) expects cursorless-canonical
+# names (`parentheses`, `squareBrackets`, …). Without translation, the bundle
+# either errors (`undefined is not an object (evaluating delimiterToText[...])`)
+# or returns an empty range — confirmed during the F9 migration. Translating
+# at the bridge keeps the prose grammar prose-friendly while the bundle gets
+# the names it knows. `any` and `pair` pass through unchanged (cursorless
+# handles those natively); anything not in the map passes through (so a
+# prose-side change like adding a new delimiter doesn't silently corrupt —
+# the bundle will surface the unknown name in its own error path).
+_PROSE_TO_BUNDLE_DELIMITER = {
+    "round":   "parentheses",
+    "box":     "squareBrackets",
+    "curly":   "curlyBrackets",
+    "diamond": "angleBrackets",
+    "quad":    "doubleQuotes",
+    "twin":    "singleQuotes",
+    "skis":    "backtickQuotes",
+}
+
+
+def _translate_delimiter(prose_name: str) -> str:
+    return _PROSE_TO_BUNDLE_DELIMITER.get(prose_name, prose_name)
+
+
+def _translate_modifier(mod: dict) -> dict:
+    """Translate prose-side names inside a modifier dict to bundle-side names.
+
+    Surrounding-pair modifiers are the only translation needed today:
+    `{"type": "containingScope", "scopeType": {"type": "surroundingPair",
+    "delimiter": "round"}}` → `{... "delimiter": "parentheses"}`.
+
+    Returns a fresh dict — does not mutate the input.
+    """
+    m = dict(mod)
+    scope = m.get("scopeType")
+    if isinstance(scope, dict) and scope.get("type") == "surroundingPair":
+        scope = dict(scope)
+        if "delimiter" in scope:
+            scope["delimiter"] = _translate_delimiter(scope["delimiter"])
+        m["scopeType"] = scope
+    return m
+
+
+# ---------------------------------------------------------------------------
 # Talon capture → JSON
 # ---------------------------------------------------------------------------
 
@@ -104,7 +154,7 @@ def _target_to_json(target) -> dict:
         return {
             "type": "primitive",
             "mark": normalized,
-            "modifiers": [dict(m) for m in (target.modifiers or [])],
+            "modifiers": [_translate_modifier(m) for m in (target.modifiers or [])],
         }
 
     if t_type == "range":

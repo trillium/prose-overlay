@@ -437,6 +437,13 @@ def run_layer_3() -> None:
         td._dispatch({"cmd": "reset"})
         assert actions_log == [("prose_overlay_reset", (), {})], actions_log
 
+    with test("L3", "L3.5d", "_dispatch insert_format_code → prose_overlay_insert_format_code"):
+        actions_log.clear()
+        td._dispatch({"cmd": "insert_format_code", "strings": ["the_quick_brown_fox"]})
+        assert actions_log == [
+            ("prose_overlay_insert_format_code", (["the_quick_brown_fox"],), {}),
+        ], actions_log
+
     with test("L3", "L3.6", "_dispatch bogus cmd does not raise"):
         actions_log.clear()
         td._dispatch({"cmd": "definitely-not-a-real-cmd"})

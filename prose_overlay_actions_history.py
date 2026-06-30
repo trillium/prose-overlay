@@ -61,6 +61,19 @@ class Actions:
             _auto_scroll_to_cursor()
             instance.canvas.refresh()
 
+    def prose_overlay_insert_format_code(strings: list):
+        """Route a community <user.format_code>+ result list into the overlay buffer.
+
+        Mirrors insert_many's loop (formatters.py:493) but writes through
+        prose_overlay_add_text instead of actions.insert. Each pre-formatted
+        string ('the_quick_brown_fox', 'helloWorld', etc.) is added as a
+        single add_text call — whitespace inside the string still splits to
+        multiple tokens (e.g. title case 'The Quick Brown Fox' yields four
+        tokens), but snake/camel/dotted output stays as one token per chunk.
+        """
+        for s in strings:
+            actions.user.prose_overlay_add_text(s)
+
     def prose_overlay_add_letters(letters: str):
         """Add a NATO letter sequence to the buffer.
 

@@ -3,7 +3,7 @@ task: Voice-first prose editor for Talon — Cursorless verbs on a floating buff
 slug: prose-overlay-v2
 effort: E4
 phase: build
-progress: 21/30
+progress: 22/30
 mode: build
 started: 2026-05-21T00:00:00Z
 updated: 2026-06-30T18:00:00Z
@@ -79,7 +79,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - [ ] ISC-14c: Homophone shapes slice 3 — same-group-same-shape allocation (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3 Slice 3)
 - [ ] ISC-14d: Homophone shapes slice 4 — `phone <shape>` swap grammar (per `docs/HOMOPHONE_SHAPES_PLAN.md` §3 Slice 4 / `docs/PHONES_SPEC.md`)
   - [x] ISC-14d-A: Slice A — basic cycle by shape + segmented amber underline (Scenarios 1, 2, 3, 12 of PHONES_SPEC.md)
-  - [ ] ISC-14d-B: Slice B — word + letter-hat addressing (Scenarios 5, 6)
+  - [x] ISC-14d-B: Slice B — word + letter-hat addressing (Scenarios 5, 6)
   - [ ] ISC-14d-C: Slice C — expanded panel + color-addressed swap (Scenario 4)
 - [x] ISC-15: Scope-preview flash before execution — when user speaks a scope verb, the resolved range flashes before the destructive action (satisfied by inheritance — `_flash_tokens(indices, color, _execute)` schedules `_execute` after a 150ms `cron.after`, so every dispatcher that resolves a target through `_resolve_target_to_token_range` — including scope verbs via `_apply_containing_scope` / `_scope_word` / `_scope_regex` / `_scope_surrounding_pair` — flashes the resolved range before mutating; this turn added `flash` + `flash_color` to the debug snapshot so the Test-Strategy probe has greppable fields)
 
@@ -145,6 +145,13 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 
 ## Decisions
 
+- **2026-06-30 — PHONES_SPEC Slice B shipped (ISC-14d-B).** Four commits via Forge in the same worktree run as Slice A:
+  (B1) `prose_overlay_phone_word(word)` added to `shim/actions_homophones.py` — scans the buffer in token-index order for a flagged token matching the spoken word, swaps the FIRST match (OQ3 default — simple, deterministic). Routes through the same `_swap_token` bracket so the swap is one undo step. Exposes `internal.homophones.normalize_token` (public name for the lookup-key helper) so the SHIM doesn't reach into private `_normalize`.
+  (B2) `prose_overlay_phone_letter(letter, color='gray')` added — looks up the token at `(letter, color)` via `shim/actions_core._hat_to_index`, gates on `is_flagged`, then bracket-swaps. OQ10 default applied: action is a no-op with log hint when the addressed token is unflagged (no fall-through to the modal HUD). Scenario 6 caveat documented in the docstring: the letter-hat allocator may reassign the slot after the swap because the new word may not have a `letter` char, so repeated `phones <letter>` calls may target different tokens session over session — `phone <shape>` is the muscle-memory path.
+  (B3) Three new grammar rules in `prose_overlay.talon` (overlay-active context): `phones <user.homophones_canonical>` (Scenario 5; reuses trillium_talon's existing capture; wins specificity over the modal HUD when the overlay is active), `phones <user.letter>` + `phones <user.prose_hat_color> <user.letter>` (Scenario 6). OQ9 documented inline: when a spoken word matches both `homophones_canonical` and the letter NATO form, Talon resolves by rule order/length, not semantics — iterate if surprise reports come in.
+  (B4) This ISA update + Changelog entry.
+  Open questions resolved: OQ3 (first-match wins), OQ9 (documented; no algorithmic disambiguation), OQ10 (no-op + log hint on non-flagged tokens). 68/68 → 73/73 headless green (5 new at L1.45, L1.46, L3.5g, L3.5h, L3.5i). Layer audit unchanged (0 fail, 2 pre-existing UI-bypasses-SHIM warns).
+
 - **2026-06-30 — PHONES_SPEC Slice A shipped (ISC-14d-A).** Seven commits via Forge in a worktree:
   (A1) `next_in_group` + `current_position_in_group` + `group_for_word` helpers in `internal/homophones.py`, plus the CSV loader now retains row structure (tuple-of-tuples) and a word→group-index reverse map; `is_flagged` continues to use the flat flagged set for O(1) membership.
   (A2) `instance.next_alt_assignments: dict[int, str]` + `instance.position_assignments: dict[int, tuple[int, int]]` fields, both cleared in `reset()` — parallel to `shape_assignments`, never co-mingled.
@@ -179,6 +186,8 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - **2026-06-30 — Loop turn 3 audit gap: Cato returned empty result.** E4 mandates Cato cross-vendor audit. The background agent spawned, ran for ~40s, then returned a transcript that ended mid-analysis ("Now I have enough context. Let me also check…") with no structured verdict. Proceeded without the Cato output rather than blocking the turn — smoke tests pass, implementation matches the plan §3 spec verbatim, the atomicity argument (tmp+os.replace + POSIX rename) is well-established. Audit re-spawn deferred to a later turn; if Cato keeps misfiring under E4 backgrounded calls, investigate the agent invocation pattern.
 
 ## Changelog
+
+- **2026-06-30** — PHONES_SPEC Slice B shipped via Forge worktree (4 commits B1-B4). ISC-14d-B flipped green. Progress 21/30 → 22/30. 68/68 → 73/73 headless tests pass (5 new: L1.45/L1.46 buffer-level word-match + non-flagged no-op, L3.5g/h/i dispatch). Two new actions in `shim/actions_homophones.py` (`prose_overlay_phone_word`, `prose_overlay_phone_letter`); three new grammar rules in `prose_overlay.talon`. OQ3/9/10 resolved with the spec's defaults. Layer audit unchanged (0 fail, 2 warn).
 
 - **2026-06-30** — PHONES_SPEC Slice A shipped via Forge worktree (7 commits A1-A7). ISC-14d-A flipped green; ISC-14d expanded into three nested ISCs (A/B/C tracking the spec's three slices). Progress 20/27 → 21/27. 54/54 → 68/68 headless tests pass (14 new: L1.32-L1.44 helpers + buffer-cycle + segment-width math, L3.5f phone_shape dispatch). New SHIM module `shim/actions_homophones.py` houses the four phone-* actions (only `phone_shape` shipped in Slice A; B/C placeholders to follow). Segmented amber underline (Scenario 3) replaces the solid bar for multi-member groups when `instance.position_assignments` is populated; falls back to solid when group_size ≤ 1 or segment_width < 1.5 px. `prose undo` added as a second undo alias (Scenario 12). Open questions resolved with PHONES_SPEC defaults: OQ1, OQ4, OQ6, OQ8, OQ11, OQ12. Layer audit unchanged (0 fail, 2 warn).
 

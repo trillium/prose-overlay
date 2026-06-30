@@ -86,10 +86,15 @@ BUBBLE_CHIP_FONT_SIZE = 11
 BUBBLE_CHIP_PAD_X = 4
 BUBBLE_CHIP_PAD_Y = 2
 BUBBLE_CHIP_RADIUS = 3
-BUBBLE_INNER_GAP = 4           # gap between chip and shape, and shape and chip
-BUBBLE_OUTER_GAP = 8           # gap between adjacent tokens' bubbles
+# User verdict 2026-06-30: chip parts inside a bubble should touch (no inner
+# gap) so the bubble reads as one contiguous unit; shape doubled (100%
+# bigger) so it's identifiable inside the bubble at glance distance. Was
+# BUBBLE_INNER_GAP=4, BUBBLE_SHAPE_SCALE=0.55. Bubble band height bumped
+# proportionally so the larger shape glyph + its black backdrop don't clip.
+BUBBLE_INNER_GAP = 0           # chip↔shape↔chip touch — bubble is one contiguous unit
+BUBBLE_OUTER_GAP = 8           # gap BETWEEN adjacent tokens' bubbles (unchanged)
 BUBBLE_TOP_GAP = 6             # gap between panel edge and bubble band
-BUBBLE_SHAPE_SCALE = 0.55      # smaller than the normal hat shape (0.75)
+BUBBLE_SHAPE_SCALE = 1.1       # 2× prior (0.55 → 1.1); shape is now the visual anchor
 
 # v2 redesign (2026-06-30, PHONES_SPEC commit d535611) — bubble band sits
 # OUTSIDE the panel rect (above for bottom-anchor, below for top-anchor),
@@ -98,9 +103,11 @@ BUBBLE_SHAPE_SCALE = 0.55      # smaller than the normal hat shape (0.75)
 # chip's saturated color.
 #
 # BUBBLE_ROW_H is the fixed vertical footprint reserved for the bubble
-# band. Tuned so chip height (FONT_SIZE + 2*PAD_Y = 11 + 4 = 15) fits
-# with a hair of breathing room above and below.
-BUBBLE_ROW_H = 18
+# band. Bumped 2026-06-30 with BUBBLE_SHAPE_SCALE = 1.1 — the shape's
+# backdrop now spans ~16*1.1*1.15 ≈ 20 px, so 18 would clip. Chip
+# height (FONT_SIZE + 2*PAD_Y = 11 + 4 = 15) still fits; the shape
+# is the taller element now.
+BUBBLE_ROW_H = 24
 
 # Backdrop circle behind the homophone shape glyph inside the bubble. The
 # chip backgrounds are bright Cursorless palette colors; the amber shape

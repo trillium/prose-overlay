@@ -147,3 +147,16 @@ class Actions:
             instance.viewport.set_scroll_offset(0)
             _recompute_hats()
             instance.canvas.refresh()
+
+    def prose_overlay_redo():
+        """Redo the last undone prose overlay edit."""
+        if instance.buffer.redo():
+            instance.viewport.set_scroll_offset(0)
+            _recompute_hats()
+            instance.canvas.refresh()
+
+    def prose_overlay_undo_group_set(enabled: int):
+        """Toggle CM6-style dictation coalescing. 1 = group within 400ms, 0 = off."""
+        from . import prose_overlay_state as _state
+        _state._GROUP_DELAY_S = 0.400 if enabled else 0.0
+        print(f"prose_overlay: undo grouping {'ON (400ms)' if enabled else 'OFF'}")

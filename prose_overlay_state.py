@@ -195,6 +195,13 @@ class ProseBuffer:
         """Restore previous state. Returns True if undo was available."""
         if not self._done:
             return False
+        # If a group is currently open, seal it first so commit_start work that
+        # never reached commit_end is still undoable as a unit.
+        if self._open_group is not None:
+            self._open_group.sealed = True
+            self._open_group.selection_after = self._selection
+            self._done.append(self._open_group)
+            self._open_group = None
         record = self._done.pop()
         # Capture current tokens to build the redo-record before mutating.
         current = list(self._tokens)
@@ -213,7 +220,6 @@ class ProseBuffer:
         redo_deltas: list[TokenDelta] = []
         for delta in record.deltas:
             if delta.new_tokens is None:
-                # Snapshot-style: redo restores the captured current state.
                 redo_deltas.append(TokenDelta(
                     start=0,
                     old_tokens=list(delta.old_tokens),
@@ -238,6 +244,91 @@ class ProseBuffer:
         self._selection = None
         self.rev += 1
         return True
+
+    def redo(self) -> bool:
+        """Re-apply the most recently undone record. Returns True if redo available."""
+        if not self._undone:
+            return False
+        record = self._undone.pop()
+        # Apply forward deltas in original order.
+        for delta in record.deltas:
+            if delta.new_tokens is None:
+                # Defensive: redo records should always have concrete new_tokens.
+                continue
+            end = delta.start + len(delta.old_tokens)
+            self._tokens[delta.start:end] = list(delta.new_tokens)
+        # Build the inverse record for the next undo. Mirror old/new.
+        undo_deltas: list[TokenDelta] = []
+        for delta in record.deltas:
+            if delta.new_tokens is None:
+                continue
+            undo_deltas.append(TokenDelta(
+                start=delta.start,
+                old_tokens=list(delta.old_tokens),
+                new_tokens=list(delta.new_tokens),
+            ))
+        undo_record = UndoRecord(
+            deltas=undo_deltas,
+            kind=record.kind,
+            label=record.label,
+            timestamp=record.timestamp,
+            selection_before=record.selection_before,
+            selection_after=record.selection_after,
+            sealed=True,
+        )
+        self._done.append(undo_record)
+        self._selection = None
+        self.rev += 1
+        return True
+
+    def can_undo(self) -> bool:
+        """Whether there is at least one record available to undo."""
+        return bool(self._done) or self._open_group is not None
+
+    def can_redo(self) -> bool:
+        """Whether there is at least one record available to redo."""
+        return bool(self._undone)
+
+    # ---------------------------------------------------------------------------
+    # Explicit boundary API -- multi-delta group as one undo step
+    # ---------------------------------------------------------------------------
+
+    def commit_start(self, label: str, kind: EditKind = EditKind.STRUCTURAL) -> None:
+        """Open a multi-delta group. Mutations between start/end land in one record.
+
+        Nested-safe: calling commit_start while a group is already open is a no-op
+        (the outer bracket wins).
+        """
+        if self._open_group is not None:
+            return
+        self._open_group = UndoRecord(
+            deltas=[],
+            kind=kind,
+            label=label,
+            timestamp=time.monotonic(),
+            selection_before=self._selection,
+            selection_after=None,
+            sealed=False,
+        )
+
+    def commit_end(self) -> None:
+        """Seal the open group, push to done, clear undone, bump rev.
+
+        If no group is open, this is a no-op. If the open group received zero
+        deltas (the bracketed code did not mutate the buffer), the empty record
+        is dropped rather than pushed -- nothing to undo.
+        """
+        if self._open_group is None:
+            return
+        group = self._open_group
+        self._open_group = None
+        group.selection_after = self._selection
+        group.sealed = True
+        if not group.deltas:
+            return
+        self._done.append(group)
+        # _record already bumped rev + cleared _undone for each delta inside
+        # the group, so commit_end itself is purely structural.
 
     # ---------------------------------------------------------------------------
     # Selection tracking
@@ -426,12 +517,25 @@ class ProseBuffer:
         return " ".join(self._tokens)
 
     def set_tokens_raw(self, tokens: list[str]):
-        """Overwrite token list directly without snapshotting or clearing history.
+        """Overwrite token list directly.
 
-        Used by _apply_edit_plan after a manual snapshot() / commit_start().
+        Behavior depends on context:
+          - Inside a commit_start/commit_end bracket: records a full-buffer
+            TokenDelta into the open group so the change is undoable.
+          - Outside any bracket: bypasses history entirely. Callers that need
+            undo support should call snapshot() first (legacy) or wrap in
+            commit_start/commit_end (preferred).
         """
+        new_tokens = list(tokens)
+        if self._open_group is not None:
+            pre = list(self._tokens)
+            self._tokens = new_tokens
+            self._selection = None
+            delta = TokenDelta(start=0, old_tokens=pre, new_tokens=list(new_tokens))
+            self._record(delta, self._open_group.kind, self._open_group.label)
+            return
         self.rev += 1
-        self._tokens = list(tokens)
+        self._tokens = new_tokens
         self._selection = None
 
     def clear(self):

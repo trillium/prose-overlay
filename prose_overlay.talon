@@ -52,6 +52,13 @@ overlay auto: user.prose_overlay_toggle_auto_dictation()
 # Undo the last prose overlay edit
 overlay undo: user.prose_overlay_undo()
 
+# Redo the last undone prose overlay edit
+overlay redo: user.prose_overlay_redo()
+
+# Toggle CM6-style dictation coalescing (off by default)
+overlay undo group on: user.prose_overlay_undo_group_set(1)
+overlay undo group off: user.prose_overlay_undo_group_set(0)
+
 # Help text size
 help bigger: user.prose_overlay_help_bigger()
 help smaller: user.prose_overlay_help_smaller()

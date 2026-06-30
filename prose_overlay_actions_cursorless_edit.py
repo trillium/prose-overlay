@@ -8,6 +8,7 @@ from typing import Any
 from talon import actions
 
 from .prose_overlay_instance import instance
+from .prose_overlay_state import EditKind
 from .prose_overlay_actions_cursor import (
     _prose_overlay_set_cursor,
     _prose_overlay_clear_cursor,
@@ -124,17 +125,17 @@ def _apply_edit_plan(plan: dict) -> None:
     edits = plan.get("edits", [])
     new_selections = plan.get("newSelections", [])
 
-    # Snapshot before any mutation so the edit is undoable.
-    instance.buffer.snapshot()
-
-    text = instance.buffer.get_text()
-    for edit in sorted(edits, key=_edit_start, reverse=True):
-        text = _apply_one_edit(text, edit)
-
-    # Rebuild buffer from the modified flat string. set_tokens_raw avoids a
-    # second snapshot and preserves _history.
-    new_tokens = text.strip().split() if text.strip() else []
-    instance.buffer.set_tokens_raw(new_tokens)
+    # Bracket the whole edit-plan application as one undo step. set_tokens_raw
+    # records the full-buffer delta into the open group automatically.
+    instance.buffer.commit_start("cursorless_edit", EditKind.STRUCTURAL)
+    try:
+        text = instance.buffer.get_text()
+        for edit in sorted(edits, key=_edit_start, reverse=True):
+            text = _apply_one_edit(text, edit)
+        new_tokens = text.strip().split() if text.strip() else []
+        instance.buffer.set_tokens_raw(new_tokens)
+    finally:
+        instance.buffer.commit_end()
 
     if new_selections:
         active_char = new_selections[0].get("active", {}).get("character", None)

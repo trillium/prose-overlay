@@ -11,6 +11,7 @@ from typing import Any
 from talon import Module, actions
 
 from .prose_overlay_instance import instance
+from .prose_overlay_state import EditKind
 from .prose_overlay_actions_core import _recompute_hats
 from .prose_overlay_actions_flash import _flash_tokens, _action_color
 from .prose_overlay_cursorless_resolve import (
@@ -141,18 +142,22 @@ class Actions:
             all_indices.extend(range(first_idx, last_idx + 1))
 
         def _execute():
-            for first_idx, last_idx in sorted(token_ranges, reverse=True):
-                tokens = instance.buffer.get_tokens()
-                source_text = " ".join(tokens[first_idx : last_idx + 1])
-                # reformat_text handles split (de-camel, de-snake) and rejoin.
-                formatted = actions.user.reformat_text(source_text, formatters)
-                instance.buffer.snapshot()
-                # Formatted may be one joined token (snake/camel) or several
-                # space-separated words (title case).
-                new_tokens = formatted.split() if formatted else []
-                current_tokens = list(instance.buffer.get_tokens())
-                current_tokens[first_idx : last_idx + 1] = new_tokens
-                instance.buffer.set_tokens_raw(current_tokens)
+            # Bracket the multi-range formatter run as one undo step.
+            instance.buffer.commit_start("apply_formatter", EditKind.STRUCTURAL)
+            try:
+                for first_idx, last_idx in sorted(token_ranges, reverse=True):
+                    tokens = instance.buffer.get_tokens()
+                    source_text = " ".join(tokens[first_idx : last_idx + 1])
+                    # reformat_text handles split (de-camel, de-snake) and rejoin.
+                    formatted = actions.user.reformat_text(source_text, formatters)
+                    # Formatted may be one joined token (snake/camel) or several
+                    # space-separated words (title case).
+                    new_tokens = formatted.split() if formatted else []
+                    current_tokens = list(instance.buffer.get_tokens())
+                    current_tokens[first_idx : last_idx + 1] = new_tokens
+                    instance.buffer.set_tokens_raw(current_tokens)
+            finally:
+                instance.buffer.commit_end()
             _recompute_hats()
             instance.canvas.refresh()
 

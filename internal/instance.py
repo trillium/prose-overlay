@@ -18,6 +18,20 @@ class ProseOverlayState:
         # shim.actions_core._recompute_hats whenever shapes are enabled.
         # Parallel to (not co-mingled with) hat_assignments per §4.1.
         self.shape_assignments: dict[int, str] = {}
+        # Slice A of docs/PHONES_SPEC.md — per-flagged-token group state used
+        # by the cycling swap (Scenarios 1+2) and the segmented underline
+        # (Scenario 3). Computed by shim.actions_core._recompute_hats from
+        # internal.homophones.next_in_group / current_position_in_group.
+        # Both maps key on the same token_idx as shape_assignments and live
+        # in parallel to it (not co-mingled) per the same layering rule used
+        # for hat_assignments vs shape_assignments.
+        #
+        # next_alt_assignments[idx]    = next-cycle word for the token at idx
+        # position_assignments[idx]    = (active_idx, group_size) in the
+        #                                 token's homophone group
+        # Tokens not flagged as homophones never appear in either dict.
+        self.next_alt_assignments: dict[int, str] = {}
+        self.position_assignments: dict[int, tuple[int, int]] = {}
         self.canvas = None                  # OverlayCanvas
         self.ctx = None                     # Context (overlay showing)
         self.ctx_auto = None                # Context (auto-dictation)
@@ -62,6 +76,8 @@ class ProseOverlayState:
         self.hat_assignments = {}
         self.hat_to_token = {}
         self.shape_assignments = {}
+        self.next_alt_assignments = {}
+        self.position_assignments = {}
         self.target_window_title = ""
         self.target_recall_name = None
         self.help_visible = False

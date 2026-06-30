@@ -200,6 +200,11 @@ def run_layer_1() -> None:
         inst.hat_assignments = {0: (0, "c", "gray")}
         inst.hat_to_token = {("c", "gray"): 0}
         inst.shape_assignments = {0: "wing"}  # Slice 2 — must also wipe.
+        # Slice A of docs/PHONES_SPEC.md adds two parallel maps that reset()
+        # must also clear, otherwise stale cycle state survives an "overlay
+        # reset" and the next swap acts on the previous buffer's words.
+        inst.next_alt_assignments = {0: "they're"}
+        inst.position_assignments = {0: (1, 3)}
         inst.flash_state = {"indices": [1], "color": "ff0000"}
         inst.history = ["old", "stuff"]
         inst.history_page = 3
@@ -218,6 +223,14 @@ def run_layer_1() -> None:
         assert inst.hat_to_token == {}
         assert inst.shape_assignments == {}, (
             f"shape_assignments not cleared by reset(): {inst.shape_assignments!r}"
+        )
+        assert inst.next_alt_assignments == {}, (
+            f"next_alt_assignments not cleared by reset(): "
+            f"{inst.next_alt_assignments!r}"
+        )
+        assert inst.position_assignments == {}, (
+            f"position_assignments not cleared by reset(): "
+            f"{inst.position_assignments!r}"
         )
         assert inst.flash_state == {}
         assert inst.history == []

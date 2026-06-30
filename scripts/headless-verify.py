@@ -1367,20 +1367,22 @@ class _MockTarget:
 
 
 def _load_python_resolver():
-    """Import prose_overlay_cursorless_resolve with a stubbed talon.
+    """Import cursorless/resolve.py with a stubbed talon.
 
-    The module does `from .prose_overlay_surrounding_pair import …` (relative)
-    and `from talon import settings` (lazy, inside _resolve_target_to_token_range
-    where it checks the JS-resolver flag). For the parity harness we want the
+    Post-strict-layer-restructure (2026-06-30) the file lives at
+    `cursorless/resolve.py` and does `from .surrounding_pair import …`
+    (relative within the `cursorless` package) plus `from talon import
+    settings` (lazy, inside _resolve_target_to_token_range where it
+    checks the JS-resolver flag). For the parity harness we want the
     Python path forced ON, so we stub settings.get to return False.
     """
-    # Stub talon — the resolver does a lazy `from talon import settings` and
-    # checks settings.get("user.prose_overlay_use_js_resolver", False). We
-    # need that to return False so the Python branch runs.
+    # Stub talon — the resolver does a lazy `from talon import settings`
+    # and checks settings.get("user.prose_overlay_use_js_resolver",
+    # False). We need that to return False so the Python branch runs.
     #
-    # Layer 3 may have already installed a talon stub for the test-driver,
-    # but without `settings`. Always (re)attach a settings stub so the
-    # lazy import inside _resolve_target_to_token_range succeeds.
+    # Layer 3 may have already installed a talon stub for the test-
+    # driver, but without `settings`. Always (re)attach a settings stub
+    # so the lazy import inside _resolve_target_to_token_range succeeds.
     if "talon" not in sys.modules:
         sys.modules["talon"] = types.ModuleType("talon")
 
@@ -1392,30 +1394,32 @@ def _load_python_resolver():
     # the talon module — Layer 3's stub doesn't carry .settings.
     sys.modules["talon"].settings = _StubSettings()
 
-    # The resolver does `from .prose_overlay_surrounding_pair import …` — we
-    # stand up a synthetic package, register the surrounding-pair module
-    # inside it, then load the resolver with the package-qualified name so
-    # the relative import resolves.
-    pkg_name = "_parity_harness_pkg"
+    # The resolver does `from .surrounding_pair import …` — we stand up
+    # the `cursorless` package with __path__ pointing at the actual
+    # directory, register the surrounding-pair module inside it under
+    # the package-qualified name, then load the resolver. Using the
+    # REAL package name (rather than a synthetic one) keeps relative
+    # imports working with no rewrites.
+    pkg_name = "cursorless"
     if pkg_name not in sys.modules:
         pkg = types.ModuleType(pkg_name)
-        pkg.__path__ = [str(REPO)]
+        pkg.__path__ = [str(REPO / "cursorless")]
         sys.modules[pkg_name] = pkg
 
         sp_spec = importlib.util.spec_from_file_location(
-            f"{pkg_name}.prose_overlay_surrounding_pair",
-            REPO / "prose_overlay_surrounding_pair.py",
+            f"{pkg_name}.surrounding_pair",
+            REPO / "cursorless" / "surrounding_pair.py",
         )
         sp_mod = importlib.util.module_from_spec(sp_spec)
         sp_spec.loader.exec_module(sp_mod)
-        sys.modules[f"{pkg_name}.prose_overlay_surrounding_pair"] = sp_mod
+        sys.modules[f"{pkg_name}.surrounding_pair"] = sp_mod
 
-    resolver_name = f"{pkg_name}.prose_overlay_cursorless_resolve"
+    resolver_name = f"{pkg_name}.resolve"
     if resolver_name in sys.modules:
         return sys.modules[resolver_name]
     r_spec = importlib.util.spec_from_file_location(
         resolver_name,
-        REPO / "prose_overlay_cursorless_resolve.py",
+        REPO / "cursorless" / "resolve.py",
     )
     r_mod = importlib.util.module_from_spec(r_spec)
     r_spec.loader.exec_module(r_mod)

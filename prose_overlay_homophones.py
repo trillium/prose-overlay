@@ -36,6 +36,21 @@ def _load() -> frozenset[str]:
 
 _FLAGGED: frozenset[str] = _load()
 
+# Live override toggleable by voice via prose_overlay_set_homophone_hint.
+# Read by the draw module instead of (or in addition to) the static
+# user.prose_overlay_homophone_hint setting — Talon doesn't have a public
+# live-setter for module settings, so we keep the toggle here.
+_hint_enabled: bool = False
+
+
+def set_hint_enabled(v: bool) -> None:
+    global _hint_enabled
+    _hint_enabled = bool(v)
+
+
+def hint_enabled() -> bool:
+    return _hint_enabled
+
 
 def is_flagged(token: str) -> bool:
     return token.strip(_STRIP).lower() in _FLAGGED

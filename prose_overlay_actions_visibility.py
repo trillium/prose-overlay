@@ -138,3 +138,30 @@ class Actions:
         """Enable (1) or disable (0) JSONL state-change debug logging."""
         from .prose_overlay_debug import set_debug_mode
         set_debug_mode(bool(enabled))
+
+    def prose_overlay_dump_state():
+        """Print a snapshot of buffer + hat state to the Talon log.
+
+        Use when you need to know what's in the buffer right now without
+        wiring up the full debug-mode JSONL stream. Output: tokens, hats,
+        cursor, change mode, canvas-showing, JS-fallback flag.
+        """
+        tokens = instance.buffer.get_tokens()
+        hats = dict(instance.hat_assignments) if instance.hat_assignments else {}
+        unhatted = [i for i in range(len(tokens)) if i not in hats]
+        print(f"prose_overlay: dump — {len(tokens)} tokens")
+        for i, t in enumerate(tokens):
+            h = hats.get(i)
+            mark = f"{h[2]}-{h[1]}" if h else "NO HAT"
+            print(f"  [{i}] {t!r:30} → {mark}")
+        print(f"  showing={instance.canvas.is_showing} cursor={instance.cursor} "
+              f"change_mode={getattr(instance, 'change_mode', False)} "
+              f"hat_js_fallback={instance.hat_js_fallback} unhatted={unhatted}")
+
+    def prose_overlay_set_homophone_hint(enabled: int):
+        """Enable (1) or disable (0) the homophone-underline indicator (slice A)."""
+        from . import prose_overlay_homophones as _h
+        _h.set_hint_enabled(bool(enabled))
+        if instance.canvas.is_showing:
+            instance.canvas.refresh()
+        print(f"prose_overlay: homophone hint {'ON' if enabled else 'OFF'}")

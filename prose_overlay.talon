@@ -36,6 +36,13 @@ overlay dismiss: user.prose_overlay_hide()
 overlay debug on: user.prose_overlay_debug(1)
 overlay debug off: user.prose_overlay_debug(0)
 
+# Dump current buffer + hat state to the Talon log (one-shot, no flag needed)
+overlay dump: user.prose_overlay_dump_state()
+
+# Homophone underline indicator (slice A — docs/HOMOPHONE_UI_PLAN.md)
+overlay hints homo on: user.prose_overlay_set_homophone_hint(1)
+overlay hints homo off: user.prose_overlay_set_homophone_hint(0)
+
 # Toggle auto-show on all dictation phrases
 overlay auto: user.prose_overlay_toggle_auto_dictation()
 

@@ -158,7 +158,7 @@ def draw_overlay(
     else:
         flagged = (
             _homophones.flagged_indices(tokens)
-            if settings.get("user.prose_overlay_homophone_hint")
+            if settings.get("user.prose_overlay_homophone_hint") or _homophones.hint_enabled()
             else frozenset()
         )
         _draw_token_rows(

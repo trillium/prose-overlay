@@ -35,7 +35,14 @@ Then each flagged token has BOTH a letter hat AND a shape hat
 And the shape vocabulary identifies which homophones can be swapped
 ```
 
-The shape hat is one addressing key for the swap. The spoken word is a second. The color displayed in the expanded panel is a third. The letter hat is unchanged from non-flagged tokens and remains addressable by all standard hat-targeted verbs (`chuck`, `take`, `change`, etc.).
+A flagged token can be addressed for swap by any of four keys:
+
+1. **Shape hat** — `phone <shape>` / `phones <shape>` (Scenarios 1, 2)
+2. **Color + shape** — `<color> <shape>` (Scenario 3)
+3. **Current word** — `phones <word>` (Scenario 4)
+4. **Letter hat** — `phones <letter>` / `phones <color> <letter>` (Scenario 5)
+
+The letter hat is unchanged from non-flagged tokens and remains addressable by all standard hat-targeted verbs (`chuck`, `take`, `change`, etc.). The new addressing path adds `phones <letter>` to that same hat without breaking existing verbs.
 
 ```
 Given the overlay is active
@@ -163,7 +170,63 @@ And token A is unchanged
 
 **Conflict with the existing community modal HUD**: when the prose overlay is active, `phones <word>` does **not** open the existing modal HUD at `~/.talon/user/trillium_talon/core/homophones/homophones.talon`. The overlay's grammar (1 mode + 1 tag) wins context specificity, and the swap is performed directly. When the overlay is **not** active, the modal HUD still works as before.
 
-## Scenario 5 — Phone with no matching shape
+## Scenario 5 — Letter-hat-addressed swap (`phones <letter>`)
+
+```
+Given a token reads "there" in the buffer
+And its letter hat is "gray-a" (spoken as "air")
+And its shape hat is "wing"
+And the group is "their,there,they're"
+
+When the user says `phones air`
+
+Then the token text cycles to its next group member ("they're")
+And this is ONE STRUCTURAL undo step
+And the letter hat may reallocate per the normal hat allocator
+And the shape hat stays "wing" per Slice 2 stability
+
+When the user says `phones air` again
+Then the token text cycles to "their" (or whatever the new letter hat
+    addresses — see caveat below)
+```
+
+`phones <letter>` is the fourth addressing path. Useful when the shape isn't memorable, the panel isn't visible, AND the user already knows the letter hat (because they've been using `chuck`/`take`/`change` on it).
+
+### Color-prefixed letter
+
+```
+Given a token "there" has letter hat "blue-h" (spoken "blue hospitality"
+    or "blue hotel" depending on alphabet)
+And its shape hat is "wing"
+
+When the user says `phones blue h`
+
+Then the same swap happens as `phones air` would for a gray-a hat —
+    cycles to the next group member
+```
+
+`phones <color> <letter>` addresses tokens whose letter hats have a color prefix (because the gray slot was already taken).
+
+### Caveat: letter-hat reallocation across swaps
+
+```
+Given a token "there" has letter hat "gray-a"
+
+When the user says `phones air`
+Then the token swaps to "they're"
+And the letter-hat allocator may reassign the gray-a slot to a different
+    token (since "they're" has no 'a' character to host the hat)
+And the swapped token may now wear a different letter hat (e.g. gray-t)
+
+When the user says `phones air` immediately afterward expecting it to
+    re-cycle the same homophone
+Then it may swap a DIFFERENT token now wearing the gray-a hat
+
+```
+
+This is a known footgun of letter-hat addressing — the hat is character-derived and reshuffles on text change. **Recommendation: use shape-hat addressing (`phones wing`) for repeated cycling of the same logical token, since shape stability is the whole point of Slice 2.** `phones <letter>` is best for one-shot swaps where the next utterance is not another swap of the same token.
+
+## Scenario 6 — Phone with no matching shape
 
 ```
 Given the overlay is active
@@ -178,7 +241,7 @@ And no undo step is recorded
 
 The action is a no-op when the spoken shape is unassigned. Defensive — does not surface user-facing error UI in v1 (TBD whether a brief flash/chrome on the canvas is worth adding).
 
-## Scenario 6 — Phone after surrounding edits
+## Scenario 7 — Phone after surrounding edits
 
 ```
 Given a token reads "there" at idx 5 in the buffer
@@ -197,7 +260,7 @@ And the swap targets the same logical token despite the index shift
 
 This is the Slice 2 keep-criterion in action — shape identity must be stable across edits so muscle memory works.
 
-## Scenario 7 — Pool overflow (no shape, no shape-addressed swap)
+## Scenario 8 — Pool overflow (no shape, no shape-addressed swap)
 
 ```
 Given 11 or more tokens in the buffer are flagged as homophones
@@ -217,7 +280,7 @@ Then the overflow token CAN still be cycled — word addressing does not
 
 Word addressing (`phones <word>`) is the recovery path for overflow tokens. Shape addressing is the muscle-memory path.
 
-## Scenario 8 — Letter hat coexistence
+## Scenario 9 — Letter hat coexistence
 
 ```
 Given a token "there" has letter hat "blue-h" and shape hat "wing"
@@ -238,7 +301,7 @@ Then the token is replaced with "there" verbatim (dictation insert at hat)
 
 The two namespaces compose freely; user picks the verb that matches intent. `phone` / `phones` is for known-homophone swaps; `change` is for general edits.
 
-## Scenario 9 — Voice grammar specificity
+## Scenario 10 — Voice grammar specificity
 
 ```
 Given the overlay is active (tag user.prose_overlay_active set)
@@ -264,7 +327,7 @@ And falls through to `<user.raw_prose>` → "phone" enters the buffer as
     a regular word (mostly harmless — user notices and undoes)
 ```
 
-## Scenario 10 — Undo restores prior word
+## Scenario 11 — Undo restores prior word
 
 ```
 Given a token was just swapped from "there" to "they're" via `phone wing`
@@ -283,7 +346,7 @@ Both `overlay undo` and `prose undo` are accepted aliases for the undo action �
 
 The bracket API from `docs/UNDO_REDO_PLAN.md` Phase 2 (ISC-23) is the substrate. The `phone` action MUST wrap its mutation in `commit_start("phone <shape>", STRUCTURAL) / commit_end()` to satisfy this scenario.
 
-## Scenario 11 — Empty buffer or no homophones present
+## Scenario 12 — Empty buffer or no homophones present
 
 ```
 Given the overlay is active
@@ -320,7 +383,8 @@ Then same — no-op (no token reads "there")
 - `shim/actions_homophones.py` (new module) — three actions:
   - `prose_overlay_phone_shape(shape_name: str)` — Scenarios 1, 2, 5, 6, 7, 8, 10; looks up `instance.shape_assignments` for the token with `shape_name`, calls `next_in_group(current_word)`, brackets the buffer mutation via `commit_start("phone <shape>", STRUCTURAL) / commit_end()`.
   - `prose_overlay_phone_color_shape(prose_hat_color: str, shape_name: str)` — Scenario 3; looks up the token by `shape_name`, looks up its panel's color-to-alt mapping for `prose_hat_color`, swaps to that specific alt. Brackets the mutation.
-  - `prose_overlay_phone_word(word: str)` — Scenarios 4, 7; scans the buffer for a flagged token reading `word`, calls `next_in_group(current_word)`, brackets the mutation. If multiple tokens read the same word, swaps the first match (or all matches? — see open question 3).
+  - `prose_overlay_phone_word(word: str)` — Scenarios 4, 8; scans the buffer for a flagged token reading `word`, calls `next_in_group(current_word)`, brackets the mutation. If multiple tokens read the same word, swaps the first match (or all matches? — see open question 3).
+  - `prose_overlay_phone_letter(letter: str, color: str = "gray")` — Scenario 5; looks up the token at letter hat `(color, letter)` via the existing `_hat_to_index` helper, checks if it's flagged (homophone), calls `next_in_group(current_word)`, brackets the mutation. No-op if the token is not flagged.
 - `shim/shapes.py` (extend) or new `shim/homophone_panel.py` — compute `dict[int, dict[str, str]]` = `token_idx -> {color_name -> alt_word}` from each shape-hatted token's group, excluding the current word. Re-computed when `_recompute_hats` runs and stored on `instance.homophone_panel_alts` (parallel to `instance.shape_assignments`).
 - `ui/draw_panels.py` (new) — render the expanded panel per shape-hatted token. Reads `instance.homophone_panel_alts`. Anchors panel near the token (TBD: below, beside, or floating — see open question 5). Each alt rendered as a small chip with its color as the background, the word as foreground text.
 - `prose_overlay.talon` — new grammar rules (in the overlay-active context):
@@ -331,6 +395,10 @@ Then same — no-op (no token reads "there")
       user.prose_overlay_phone_color_shape(prose_hat_color, hat_shape)
   phones <user.homophones_canonical>:
       user.prose_overlay_phone_word(homophones_canonical)
+  phones <user.letter>:
+      user.prose_overlay_phone_letter(letter)
+  phones <user.prose_hat_color> <user.letter>:
+      user.prose_overlay_phone_letter(letter, prose_hat_color)
   prose undo: user.prose_overlay_undo()
   ```
   The `(phone | phones) {hat_shape}` rule is one rule with alternation, so both verbs route to the same action. The `<user.prose_hat_color> {user.hat_shape}` rule reuses the existing `prose_hat_color` capture from `prose_overlay.py` (already normalizes `plum→purple`, `gold→yellow`).
@@ -353,8 +421,11 @@ Each scenario above maps to a test in `scripts/headless-verify.py`:
 - L3.X — `prose_overlay_phone_shape` dispatch routes correctly
 - L3.X — `prose_overlay_phone_color_shape` dispatch routes correctly with both args
 - L3.X — `prose_overlay_phone_word` dispatch routes correctly
+- L1.X — `phone_letter("a", "gray")` swaps the token at gray-a if it's flagged; no-op if not flagged
+- L1.X — `phone_letter("h", "blue")` swaps the token at blue-h if it's flagged
+- L3.X — `prose_overlay_phone_letter` dispatch routes correctly with and without color arg
 
-Live-only: the actual voice grammar match for `(phone | phones) {hat_shape}`, `<user.prose_hat_color> {user.hat_shape}`, and `phones <user.homophones_canonical>`; and the panel rendering on the Skia canvas.
+Live-only: the actual voice grammar match for `(phone | phones) {hat_shape}`, `<user.prose_hat_color> {user.hat_shape}`, `phones <user.homophones_canonical>`, `phones <user.letter>`, `phones <user.prose_hat_color> <user.letter>`; and the panel rendering on the Skia canvas.
 
 ## Open questions for the implementer
 
@@ -372,4 +443,8 @@ Live-only: the actual voice grammar match for `(phone | phones) {hat_shape}`, `<
 
 7. **Color grammar collision** — `<user.prose_hat_color> {user.hat_shape}` reuses the existing `prose_hat_color` capture which is also used as a hat prefix elsewhere (e.g. `chuck blue h`). Verify the new rule doesn't shadow or conflict with `chuck`-class rules in the overlay-active context. Talon's rule specificity (literal + literal vs capture + capture) should resolve cleanly, but worth a regression sweep.
 
-8. **`prose undo` collision** — verify no existing rule binds `prose undo` (especially in trillium_talon or community). If clean, add it alongside `overlay undo` as documented in Scenario 10.
+8. **`prose undo` collision** — verify no existing rule binds `prose undo` (especially in trillium_talon or community). If clean, add it alongside `overlay undo` as documented in Scenario 11.
+
+9. **`phones <word>` vs `phones <letter>` capture disambiguation** — both rules sit in the overlay-active context. When the user says `phones air`, Talon's matcher must pick between `<user.homophones_canonical>` (does "air" appear in the homophone CSV? probably not, but verify) and `<user.letter>` (yes, "air" is the NATO 'a'). For words that ARE both homophones AND NATO letter names (unlikely but possible — e.g. "you" if the alphabet includes it), the matcher's tie-break behavior determines what happens. Document the resolution rule; recommend preferring the letter capture for ambiguous cases (more specific list).
+
+10. **`phones <letter>` on non-flagged tokens** — Scenario 5 says the action is a no-op for non-flagged letter hats. But should it instead fall through to something useful (e.g. open the modal HUD)? v1 default proposal: no-op with log hint. Iterate if real usage shows surprise.

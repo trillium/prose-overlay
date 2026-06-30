@@ -20,6 +20,7 @@ Commands (one JSON object per line):
 
   {"cmd": "show"}
   {"cmd": "add", "text": "hello world there"}
+  {"cmd": "add_letters", "letters": "abc"}   # extends last token if prior was also letters
   {"cmd": "hide"}
   {"cmd": "dump"}
   {"cmd": "delete_hat", "letter": "a"}
@@ -112,6 +113,8 @@ def _dispatch(cmd: dict) -> None:
             actions.user.prose_overlay_show()
         elif name == "add":
             actions.user.prose_overlay_add_text(cmd.get("text", ""))
+        elif name == "add_letters":
+            actions.user.prose_overlay_add_letters(cmd.get("letters", ""))
         elif name == "hide":
             actions.user.prose_overlay_hide()
         elif name == "dump":

@@ -34,6 +34,12 @@ class ProseOverlayState:
         self.draw_mod = None                # prose_overlay_draw module
         self.viewport = None                # prose_overlay_viewport.Viewport
         self.hat_js_fallback: bool = False  # True when JS allocator failed; triggers orange color scheme
+        # Tracks the source of the most recent input. "letters" when a
+        # <user.letters> NATO utterance landed; "text" for any other input
+        # (dictation, formatter, symbol_key). Used by prose_overlay_add_letters
+        # to decide whether to EXTEND the last token (consecutive letter
+        # utterances) or APPEND a new one (letters after dictation).
+        self._last_input_source: str = "init"
 
 
 instance = ProseOverlayState()

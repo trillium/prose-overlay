@@ -103,9 +103,10 @@ change <user.prose_hat_color> <user.letter>:
 # NATO letter forms: "trap trap trap" → "ttt", "air bat cap" → "abc".
 # Without this, single-letter NATO forms fire key(letter) in the background
 # window (per core/keys/keys.talon:1) or get eaten as the literal word "trap"
-# by community dictation. <user.letters> joins with no space, so a run of
-# letter names becomes one token in the buffer.
-<user.letters>: user.prose_overlay_add_text(letters)
+# by community dictation. Routes through prose_overlay_add_letters so
+# consecutive letter utterances ("air" then "bat cap") EXTEND the last
+# token into one ("abc") rather than producing two tokens ("a","bc").
+<user.letters>: user.prose_overlay_add_letters(letters)
 
 # Viewport alignment — Helix/Emacs-style
 overlay show top: user.prose_overlay_align_top()

@@ -130,6 +130,31 @@ def run_layer_1() -> None:
         # After fix: 123 should have a hat.
         assert r[2][1] in {"1"}, f"expected '1' hat letter for '123', got {r[2]!r}"
 
+    with test("L1", "L1.11", "letter-extend pattern: 'air' then 'bat cap' → one token 'abc'"):
+        # Mirrors what prose_overlay_add_letters does at the buffer level:
+        # first utterance appends "a"; second utterance (with prior also
+        # letters + no cursor + non-empty buffer) extends last token via
+        # commit_start/set_tokens_raw/commit_end.
+        b = ProseBuffer()
+        b.add_text("a")                                # first letter utterance
+        # Simulate the extend path
+        tokens = b.get_tokens()
+        new_tokens = tokens[:-1] + [tokens[-1] + "bc"]
+        b.commit_start("extend_letters", EditKind.STRUCTURAL)
+        b.set_tokens_raw(new_tokens)
+        b.commit_end()
+        assert b.get_tokens() == ["abc"], f"expected ['abc'], got {b.get_tokens()!r}"
+
+    with test("L1", "L1.12", "letter-extend then undo restores prior single-letter token"):
+        b = ProseBuffer()
+        b.add_text("a")
+        b.commit_start("extend_letters", EditKind.STRUCTURAL)
+        b.set_tokens_raw(["abc"])
+        b.commit_end()
+        assert b.get_tokens() == ["abc"]
+        assert b.undo() is True
+        assert b.get_tokens() == ["a"], f"undo should restore single-letter token; got {b.get_tokens()!r}"
+
 
 # =============================================================================
 # Layer 2 — JS bundle via bun
@@ -294,6 +319,11 @@ def run_layer_3() -> None:
         actions_log.clear()
         td._dispatch({"cmd": "delete_hat", "letter": "a", "color": "blue"})
         assert actions_log == [("prose_overlay_delete_hat", ("a", "blue"), {})], actions_log
+
+    with test("L3", "L3.5b", "_dispatch add_letters → prose_overlay_add_letters"):
+        actions_log.clear()
+        td._dispatch({"cmd": "add_letters", "letters": "abc"})
+        assert actions_log == [("prose_overlay_add_letters", ("abc",), {})], actions_log
 
     with test("L3", "L3.6", "_dispatch bogus cmd does not raise"):
         actions_log.clear()

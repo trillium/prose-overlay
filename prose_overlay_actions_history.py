@@ -47,6 +47,7 @@ class Actions:
         advances the cursor past the inserted tokens. Otherwise appends.
         """
         from .prose_overlay_actions_cursor import _set_cursor, _auto_scroll_to_cursor
+        instance._last_input_source = "text"
         if instance.cursor is not None:
             words = text.strip().split()
             instance.buffer.insert_at(instance.cursor, text)
@@ -59,6 +60,39 @@ class Actions:
             _recompute_hats()
             _auto_scroll_to_cursor()
             instance.canvas.refresh()
+
+    def prose_overlay_add_letters(letters: str):
+        """Add a NATO letter sequence to the buffer.
+
+        Consecutive letter utterances EXTEND the last token instead of
+        producing a new one — so "air" then "bat cap" yields one token
+        "abc" rather than two tokens "a", "bc". Any non-letter input
+        (dictation, formatter, symbol_key) resets the chain, so the next
+        letter utterance starts fresh.
+        """
+        if not letters:
+            return
+        from .prose_overlay_actions_cursor import _auto_scroll_to_cursor
+        from .prose_overlay_state import EditKind
+        extending = (
+            instance._last_input_source == "letters"
+            and instance.cursor is None
+            and bool(instance.buffer.get_tokens())
+        )
+        if extending:
+            tokens = instance.buffer.get_tokens()
+            new_tokens = tokens[:-1] + [tokens[-1] + letters]
+            instance.buffer.commit_start("extend_letters", EditKind.STRUCTURAL)
+            instance.buffer.set_tokens_raw(new_tokens)
+            instance.buffer.commit_end()
+            _recompute_hats()
+            _auto_scroll_to_cursor()
+            instance.canvas.refresh()
+        else:
+            # First letter utterance after non-letter input OR cursor-targeted —
+            # use the normal add path so insertion happens at cursor if active.
+            actions.user.prose_overlay_add_text(letters)
+        instance._last_input_source = "letters"
 
     def prose_overlay_speak():
         """Speak the current buffer contents via the speak TTS tool."""

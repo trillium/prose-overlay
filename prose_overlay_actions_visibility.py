@@ -13,7 +13,7 @@ import os
 from talon import Module, actions, settings
 
 from .internal.instance import instance
-from .prose_overlay_actions_core import _recompute_hats, _sync_tags
+from .shim.actions_core import _recompute_hats, _sync_tags
 
 mod = Module()
 
@@ -175,7 +175,7 @@ class Actions:
         user.prose_overlay_homophone_shapes setting so either path turns
         shapes on.
         """
-        from . import prose_overlay_shapes as _s
+        from .shim import shapes as _s
         _s.set_shapes_enabled(bool(enabled))
         if instance.canvas.is_showing:
             instance.canvas.refresh()
@@ -202,7 +202,7 @@ class Actions:
         instance.viewport.set_scroll_offset(0)
         instance.change_mode = False
         instance._last_input_source = "init"
-        from .prose_overlay_actions_core import _recompute_hats
+        from .shim.actions_core import _recompute_hats
         _recompute_hats()
         if instance.canvas is not None:
             instance.canvas.refresh()

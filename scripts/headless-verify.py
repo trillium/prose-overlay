@@ -245,7 +245,7 @@ def run_layer_1() -> None:
 
     shapes_spec = importlib.util.spec_from_file_location(
         "prose_overlay_shapes",
-        REPO / "prose_overlay_shapes.py",
+        REPO / "shim" / "shapes.py",
     )
     try:
         shapes_mod = importlib.util.module_from_spec(shapes_spec)
@@ -305,7 +305,7 @@ def run_layer_1() -> None:
     # -----------------------------------------------------------------------
     shapes_spec = importlib.util.spec_from_file_location(
         "prose_overlay_shapes",
-        REPO / "prose_overlay_shapes.py",
+        REPO / "shim" / "shapes.py",
     )
     shapes_mod = importlib.util.module_from_spec(shapes_spec)
     shapes_spec.loader.exec_module(shapes_mod)

@@ -18,7 +18,7 @@ from .cursorless.resolve import (
     _state as _resolve_state,
 )
 from .internal.instance import instance
-from .prose_overlay_actions_core import _recompute_hats, _sync_tags, _hat_to_index
+from .shim.actions_core import _recompute_hats, _sync_tags, _hat_to_index
 from .internal import trail  # noqa: F401
 from . import prose_overlay_test_driver  # noqa: F401
 
@@ -224,4 +224,4 @@ from . import prose_overlay_actions_layout      # noqa: F401, E402
 from . import prose_overlay_actions_history     # noqa: F401, E402
 from . import prose_overlay_actions_help        # noqa: F401, E402
 from . import prose_overlay_actions_visibility  # noqa: F401, E402
-from . import prose_overlay_actions_cursorless  # noqa: F401, E402
+from .shim import actions_cursorless  # noqa: F401, E402

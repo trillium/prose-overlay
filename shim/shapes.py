@@ -94,7 +94,7 @@ HAT_SHAPES: tuple[str, ...] = (
 # SVG paths — load from vendored svg/
 # ---------------------------------------------------------------------------
 
-_SVG_DIR = os.path.join(os.path.dirname(__file__), "svg")
+_SVG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "svg")
 
 # Parsed once at module import; rebuilt by _get_shape_path_cache() into Skia
 # Path objects on first paint.

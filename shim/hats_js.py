@@ -14,14 +14,14 @@ import json
 import os
 import talon.lib.js as js
 
-from .internal.state import compute_hat_assignments as _py_compute_hat_assignments
-from .internal import trail as _trail
+from ..internal.state import compute_hat_assignments as _py_compute_hat_assignments
+from ..internal import trail as _trail
 
 # ---------------------------------------------------------------------------
 # Module-level JS context — created once, reused across calls
 # ---------------------------------------------------------------------------
 
-_JS_BUNDLE = os.path.join(os.path.dirname(__file__), "js", "prose_allocate_hats.js")
+_JS_BUNDLE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "js", "prose_allocate_hats.js")
 
 _ctx: js.Context | None = None
 _fn = None  # js.Object — the proseAllocateHats function

@@ -11,7 +11,7 @@ Contains:
 
 from talon import Module, actions
 
-from .internal.instance import instance
+from ..internal.instance import instance
 
 mod = Module()
 

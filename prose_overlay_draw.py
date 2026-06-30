@@ -23,7 +23,7 @@ from .internal.draw_constants import (
 )
 from .prose_overlay_draw_tokens import _fit_text, _flow_layout, draw_cursor, _draw_token_rows
 from .internal import homophones as _homophones
-from . import prose_overlay_shapes as _shapes_runtime
+from .shim import shapes as _shapes_runtime
 from .prose_overlay_help import draw_help_panel, rotate_help_ring_buffer, HELP_COMMAND_POOL
 from .prose_overlay_history_panel import draw_history_panel, HISTORY_PAGE_SIZE
 from .internal.instance import instance

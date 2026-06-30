@@ -9,10 +9,10 @@ Contains:
   _hat_to_index     — convert (letter, color) hat reference to token index
 """
 
-from .internal.instance import instance
-from .prose_overlay_hats_js import compute_hat_assignments
-from . import prose_overlay_hats_js as _hats_js_mod
-from .cursorless.resolve import (
+from ..internal.instance import instance
+from .hats_js import compute_hat_assignments
+from . import hats_js as _hats_js_mod
+from ..cursorless.resolve import (
     _state as _resolve_state,
 )
 
@@ -39,7 +39,7 @@ def _recompute_hats():
     _resolve_state.hat_to_token = instance.hat_to_token
     _resolve_state.buffer = instance.buffer
     instance.canvas.set_hat_assignments(instance.hat_assignments)
-    from .internal.debug import emit_if_changed
+    from ..internal.debug import emit_if_changed
     emit_if_changed("recompute_hats")
 
 

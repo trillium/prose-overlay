@@ -21,7 +21,7 @@ from .internal.draw_constants import (
     HOMOPHONE_UNDERLINE_COLOR, HOMOPHONE_UNDERLINE_HEIGHT,
     HOMOPHONE_SHAPE_SCALE, HOMOPHONE_SHAPE_DEFAULT_COLOR,
 )
-from . import prose_overlay_shapes as _shapes
+from .shim import shapes as _shapes
 
 
 # ---------------------------------------------------------------------------

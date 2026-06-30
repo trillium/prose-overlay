@@ -12,6 +12,12 @@ class ProseOverlayState:
         self.buffer = None                  # ProseBuffer
         self.hat_assignments: dict = {}
         self.hat_to_token: dict = {}
+        # Slice 2 of HOMOPHONE_SHAPES_PLAN.md §3 — token_idx -> shape_name
+        # for currently flagged homophone tokens. Computed by
+        # shim.shapes.compute_shape_assignments, called from
+        # shim.actions_core._recompute_hats whenever shapes are enabled.
+        # Parallel to (not co-mingled with) hat_assignments per §4.1.
+        self.shape_assignments: dict[int, str] = {}
         self.canvas = None                  # OverlayCanvas
         self.ctx = None                     # Context (overlay showing)
         self.ctx_auto = None                # Context (auto-dictation)
@@ -55,6 +61,7 @@ class ProseOverlayState:
             self.buffer.clear()
         self.hat_assignments = {}
         self.hat_to_token = {}
+        self.shape_assignments = {}
         self.target_window_title = ""
         self.target_recall_name = None
         self.help_visible = False

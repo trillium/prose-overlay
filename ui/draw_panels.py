@@ -1,44 +1,53 @@
 """Expanded homophone panel renderer — Slice C of docs/PHONES_SPEC.md.
 
 For every shape-hatted token whose homophone group has > 1 member, paint
-a **bubble** BELOW the token containing:
+a **bubble** OUTSIDE the panel rect (above or below depending on the
+panel's anchor position) containing:
 
   [color-chip-1][homophone-shape-glyph][color-chip-2]
 
 with the homophone shape glyph re-rendered INSIDE the bubble (at reduced
 scale) as a visual anchor — so the user can identify which token the
-bubble belongs to even when adjacent bubbles wrap to a second row.
+bubble belongs to.
 
-This replaces the original flat chip row that packed under each token.
-The original layout had two bugs the user reported in the first-paint
-verdict (PHONES_SPEC.md commit 566143c):
+v2 redesign (2026-06-30, PHONES_SPEC commit d535611):
 
-  1. Truncation — chips were sized to fit under the token's width, not
-     the chip's text content, so "they're" rendered as "t".
-  2. No bubble boundary — adjacent tokens' chips visually ran together;
-     the user could not tell which alt belonged to which token.
+  1. Bubbles sit OUTSIDE the panel rect — never on top of token content.
+     Anchor-aware:
+       anchor_position == "top"     → band below the panel
+       anchor_position == "bottom"  → band above the panel
+     The band y is a single value shared by every bubble in the draw.
+     No per-row derivation from token geometry — that's what put bubbles
+     INSIDE the panel in v1.
+
+  2. SINGLE HORIZONTAL ROW — bubbles never wrap to a second band on
+     collision. Adjacent bubbles shift RIGHT to clear; the rightmost
+     bubble may extend past the panel's right edge and clip at the
+     screen boundary. Horizontal clarity is the user's stated priority.
+
+  3. Black circle backdrop behind the in-bubble shape glyph. The chips
+     are bright Cursorless-palette colors; the amber shape glyph
+     between them was hard to spot. A near-black disc behind the glyph
+     gives it a consistent contrast surface against any chip color.
+
+This replaces the v1 flat chip row (truncation + no-bubble-boundary
+bugs, see PHONES_SPEC commit 566143c) and the v1.5 in-panel bubble band
+(stacked-vertical + overlap-panel bugs, see d535611).
 
 Layout (per token):
 
-    ·^                       ← letter-hat dot + homophone-shape hat (above)
-    there                    ← token text
-    ─────                    ← segmented amber underline (Slice A)
-    [their][shape][they're]  ← BUBBLE: chip + small shape glyph + chip
+    ┌─────────────────────────┐
+    │ ·^                      │ ← letter-hat dot + homophone-shape hat
+    │ there                   │ ← token text inside panel
+    │ ─────                   │ ← segmented amber underline (Slice A)
+    └─────────────────────────┘
+    [their][⬤shape][they're]   ← BUBBLE band OUTSIDE panel (single row)
 
 For 2-member groups (e.g. `your,you're`): one chip only —
-`[chip][shape]`.
+`[chip][⬤shape]`.
 
 For 4+ member groups: only the first two alts get chips inside the
-bubble. Extras are reachable via cycling (`phone <shape>`) per the spec
-Non-goal "first two alts; extras via cycling."
-
-Bubble x = `token_x + (token_w - bubble_w) / 2` — centered on the token.
-Bubble y = `underline_y + BUBBLE_TOP_GAP`.
-
-When two adjacent bubbles' ideal positions would overlap (closer than
-`BUBBLE_OUTER_GAP`), the right-hand bubble shifts DOWN one row instead
-of being squeezed horizontally — preserves chip sizing and stays
-visually identifiable.
+bubble. Extras are reachable via cycling (`phone <shape>`).
 
 Reads from `instance.homophone_panel_alts` (already populated by
 `shim.actions_core._recompute_hats` via `shim.shapes.compute_panel_alts`)
@@ -46,8 +55,10 @@ and `instance.shape_assignments` (the per-token shape name). When the
 former is empty, this routine returns without painting.
 
 Geometry strategy: walks the same `rows` list that `_draw_token_rows`
-consumed, reconstructing each token's x position. The two paint passes
-share the layout INPUT (the rows list) — no live state coupling.
+consumed, reconstructing each token's x position; flattens all rows'
+bubbles into a single left-to-right list because the bubble band is a
+single horizontal strip OUTSIDE the panel, irrespective of which
+token-row a given flagged token sits on.
 """
 
 from talon.skia.canvas import Canvas as SkiaCanvas
@@ -55,12 +66,13 @@ from talon.ui import Rect
 
 from ....utils.overlay_kit import draw_rounded_rect
 from ..internal.draw_constants import (
-    DOT_RADIUS, DOT_GAP_Y, TOKEN_FONT_SIZE, TOKEN_GAP_X, LINE_HEIGHT,
+    TOKEN_GAP_X, LINE_HEIGHT,
     HAT_COLOR_HEX,
     HOMOPHONE_SHAPE_COLOR_HEX,
     BUBBLE_CHIP_FONT_SIZE, BUBBLE_CHIP_PAD_X, BUBBLE_CHIP_PAD_Y,
     BUBBLE_CHIP_RADIUS, BUBBLE_INNER_GAP, BUBBLE_OUTER_GAP,
-    BUBBLE_TOP_GAP, BUBBLE_SHAPE_SCALE,
+    BUBBLE_TOP_GAP, BUBBLE_SHAPE_SCALE, BUBBLE_ROW_H,
+    BUBBLE_SHAPE_BACKDROP_COLOR, BUBBLE_SHAPE_BACKDROP_FACTOR,
 )
 from ..internal.instance import instance as _instance
 from ..internal.panel_layout import place_bubbles as _place_bubbles
@@ -70,13 +82,6 @@ from ..shim import shapes as _shapes
 # ---------------------------------------------------------------------------
 # Geometry constants — derived
 # ---------------------------------------------------------------------------
-
-# Reserve a few pixels for the segmented underline + active-segment height.
-# Mirrors the calculation in ui/draw_tokens.py where the underline lives at
-# `y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE + 2`. We add a
-# fixed UNDERLINE_RESERVE on top of that to clear the active segment's
-# extra height (HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT can extend down to ~3px).
-UNDERLINE_RESERVE = 4
 
 # Native SVG viewBox is 12 wide × 9 tall (mouse-clock conventions, mirrored
 # in shim/shapes.py:_SVG_W / _SVG_H). When the painter draws a hat shape at
@@ -163,49 +168,65 @@ def draw_homophone_panels(
     rows: list[list[tuple[int, str, float]]],
     x_origin: float,
     y_start: float,
+    panel_rect: Rect,
+    anchor_position: str,
 ) -> None:
-    """Paint the bubble panel beneath each shape-hatted token.
+    """Paint the bubble band OUTSIDE the panel rect.
 
     Reads `_instance.homophone_panel_alts` (token_idx -> {color -> alt})
     and `_instance.shape_assignments` (token_idx -> shape_name). When
     `panel_alts` is empty the function returns without drawing.
 
     Walks the same `rows` structure that `_draw_token_rows` consumed so
-    the per-token x positions match exactly. For each row, runs a
-    measurement pass (build _Bubble specs) followed by a placement pass
-    (assign bands so collisions wrap downward) and a draw pass.
+    the per-token x positions match exactly. All bubbles are collected
+    into a single left-to-right list and rendered at one shared y
+    (`bubble_band_y`) sitting OUTSIDE the panel rect:
+
+        anchor_position == "top"    → band sits just BELOW the panel
+        anchor_position == "bottom" → band sits just ABOVE the panel
+
+    The placement pass shifts colliding bubbles RIGHT (never wraps
+    vertically and never drops a band). The rightmost bubble may extend
+    past `panel_rect.right` and clip at the screen edge — the user's
+    stated intent for v2 is that horizontal clarity trumps off-screen
+    alts. See the "single horizontal row" note in the module docstring.
     """
     panel_alts = _instance.homophone_panel_alts
     if not panel_alts:
         return
     shape_assignments = _instance.shape_assignments or {}
 
+    # Flatten all rows' bubbles into one left-to-right list. Token order
+    # is preserved row-by-row; rows themselves are already in screen
+    # order because _flow_layout walks tokens left-to-right top-to-bottom.
+    all_bubbles: list[_Bubble] = []
     y_base = y_start
     for row in rows:
-        bubbles = _build_row_bubbles(
-            c, row, panel_alts, shape_assignments, x_origin
+        all_bubbles.extend(
+            _build_row_bubbles(c, row, panel_alts, shape_assignments, x_origin)
         )
-        # Delegate the band-assignment math to the talon-free helper in
-        # internal/panel_layout.py so the placement contract has a single
-        # source of truth and the L1 headless tests can exercise it
-        # without importing Skia. _place_bubbles mutates each bubble in
-        # place, writing `x` and `band`.
-        _place_bubbles(bubbles, x_origin, BUBBLE_OUTER_GAP)
-        # Underline_y_base mirrors ui/draw_tokens.py's underline math: the
-        # underline sits at `y_base + (DOT_RADIUS * 2) + DOT_GAP_Y +
-        # TOKEN_FONT_SIZE + 2`. We then add UNDERLINE_RESERVE (to clear
-        # the active segment's extra height) and BUBBLE_TOP_GAP for the
-        # visual breathing room called for in the spec.
-        underline_y_base = (
-            y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE + 2
-        )
-        bubble_top_band_0 = (
-            underline_y_base + UNDERLINE_RESERVE + BUBBLE_TOP_GAP
-        )
-        for b in bubbles:
-            band_y = bubble_top_band_0 + b.band * (b.bubble_h + BUBBLE_TOP_GAP)
-            _draw_one_bubble(c, b, band_y)
-        y_base += LINE_HEIGHT
+        y_base += LINE_HEIGHT  # kept for symmetry / future per-row math
+
+    if not all_bubbles:
+        return
+
+    # Bubble band y — single value for the whole draw, anchored OUTSIDE
+    # the panel rect. The top-of-panel layout puts the band BELOW the
+    # panel; the bottom-of-panel layout puts it ABOVE so it doesn't run
+    # off screen.
+    if anchor_position == "bottom":
+        bubble_band_y = panel_rect.y - BUBBLE_ROW_H - BUBBLE_TOP_GAP
+    else:
+        # Default "top" (anchor at the top of the screen): band below.
+        bubble_band_y = panel_rect.y + panel_rect.height + BUBBLE_TOP_GAP
+
+    # Place bubbles horizontally. The talon-free helper in
+    # internal/panel_layout.py mutates each bubble's `x` in place to
+    # honor the OUTER_GAP separation by shifting right on collision.
+    _place_bubbles(all_bubbles, x_origin, BUBBLE_OUTER_GAP)
+
+    for b in all_bubbles:
+        _draw_one_bubble(c, b, bubble_band_y)
 
 
 # ---------------------------------------------------------------------------

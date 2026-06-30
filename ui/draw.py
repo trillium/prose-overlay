@@ -187,18 +187,19 @@ def draw_overlay(
             shape_enabled=shape_enabled,
         )
 
-        # Slice C of docs/PHONES_SPEC.md Scenario 4 — expanded panels
-        # rendered AFTER the token rows so panel chips can paint over
-        # the row's underline reserve without being clipped. No-op when
-        # instance.homophone_panel_alts is empty (shapes off, no flagged
-        # tokens with > 1 group member, or shapes_enabled gate flipped
-        # in _recompute_hats).
+        # Slice C of docs/PHONES_SPEC.md Scenario 4 — bubble band sits
+        # OUTSIDE the panel rect. The renderer needs the panel rect AND
+        # the anchor position so it can place the band ABOVE (for
+        # anchor=bottom) or BELOW (for anchor=top) the panel without
+        # overlapping content. v2 redesign per commit d535611.
         if shape_enabled:
             draw_homophone_panels(
                 c,
                 rows,
                 x_origin=panel_x + PANEL_PAD,
                 y_start=panel_y + PANEL_PAD,
+                panel_rect=panel_rect,
+                anchor_position=anchor_position,
             )
 
     # Target window label — bottom-left of content zone (hidden during overflow)

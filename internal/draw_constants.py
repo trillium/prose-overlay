@@ -88,8 +88,31 @@ BUBBLE_CHIP_PAD_Y = 2
 BUBBLE_CHIP_RADIUS = 3
 BUBBLE_INNER_GAP = 4           # gap between chip and shape, and shape and chip
 BUBBLE_OUTER_GAP = 8           # gap between adjacent tokens' bubbles
-BUBBLE_TOP_GAP = 6             # gap between segmented underline and bubble top
+BUBBLE_TOP_GAP = 6             # gap between panel edge and bubble band
 BUBBLE_SHAPE_SCALE = 0.55      # smaller than the normal hat shape (0.75)
+
+# v2 redesign (2026-06-30, PHONES_SPEC commit d535611) — bubble band sits
+# OUTSIDE the panel rect (above for bottom-anchor, below for top-anchor),
+# stays on a SINGLE horizontal row (no vertical band-shift wrap), and the
+# shape glyph paints over a black backdrop circle so it reads against the
+# chip's saturated color.
+#
+# BUBBLE_ROW_H is the fixed vertical footprint reserved for the bubble
+# band. Tuned so chip height (FONT_SIZE + 2*PAD_Y = 11 + 4 = 15) fits
+# with a hair of breathing room above and below.
+BUBBLE_ROW_H = 18
+
+# Backdrop circle behind the homophone shape glyph inside the bubble. The
+# chip backgrounds are bright Cursorless palette colors; the amber shape
+# glyph between them was hard to spot. A near-black filled circle
+# (slightly transparent so it doesn't punch a visual hole on every
+# background) gives the glyph a consistent contrast surface.
+#
+# BACKDROP_FACTOR scales the circle radius relative to the shape's own
+# native radius (_SVG_W * BUBBLE_SHAPE_SCALE / 2). 1.15 gives a thin halo
+# without crowding the chips next to it. Tune by eye after first paint.
+BUBBLE_SHAPE_BACKDROP_COLOR = "000000cc"
+BUBBLE_SHAPE_BACKDROP_FACTOR = 1.15
 
 # Hat dot colors — matches Cursorless palette
 HAT_COLOR_HEX: dict[str, str] = {

@@ -16,7 +16,11 @@ from .shapes import compute_shape_assignments, shapes_enabled
 from ..cursorless.resolve import (
     _state as _resolve_state,
 )
-from ..internal.homophones import flagged_indices
+from ..internal.homophones import (
+    flagged_indices,
+    next_in_group,
+    current_position_in_group,
+)
 
 
 def _recompute_hats():
@@ -73,6 +77,38 @@ def _recompute_hats():
         )
     else:
         instance.shape_assignments = {}
+
+    # Slice A of docs/PHONES_SPEC.md — per-flagged-token cycle state.
+    # next_alt_assignments + position_assignments are recomputed on every
+    # _recompute_hats call so the segmented underline and the cycling swap
+    # always see consistent state. Both are cheap (one dict lookup per
+    # flagged token); skipping the memoization that shape_assignments uses
+    # because these maps are O(flagged_count) per call and the action only
+    # reads from them at swap time, not on every paint.
+    #
+    # We compute these unconditionally (not gated on shapes_on) because
+    # word-addressed cycling (`phones <word>`, Scenario 5) and letter-hat
+    # cycling (`phones <letter>`, Scenario 6) work without shapes painted.
+    # The shape paint and the cycle data are orthogonal addressing axes.
+    flagged_for_cycle = (
+        flagged
+        if shapes_on
+        else frozenset(flagged_indices(tokens))
+    )
+    new_next_alt: dict[int, str] = {}
+    new_positions: dict[int, tuple[int, int]] = {}
+    for idx in flagged_for_cycle:
+        if idx < 0 or idx >= len(tokens):
+            continue
+        word = tokens[idx]
+        nxt = next_in_group(word)
+        if nxt is not None:
+            new_next_alt[idx] = nxt
+        pos = current_position_in_group(word)
+        if pos is not None:
+            new_positions[idx] = pos
+    instance.next_alt_assignments = new_next_alt
+    instance.position_assignments = new_positions
 
     from ..internal.debug import emit_if_changed
     emit_if_changed("recompute_hats")

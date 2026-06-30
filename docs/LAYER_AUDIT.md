@@ -1,12 +1,13 @@
 # Layer Audit — Portability Substrate
 
 > Companion runner: `scripts/layer-audit.py`. Integrated as Layer 4 of
-> `scripts/headless-verify.py`. Status: **RED** (3 known overfits; see §3).
+> `scripts/headless-verify.py`. Status: **GREEN** — INTERNAL + CURSORLESS
+> layers are portable as of 2026-06-30 (commits `28f1aa3`, `bb939a2`).
 >
 > The audit is the meta-test that proves prose-overlay's substrate is
-> portable. If it goes green, the INTERNAL + CURSORLESS layers can be
+> portable. Now that it's green, the INTERNAL + CURSORLESS layers can be
 > dropped into VS Code / Vim / web / any other environment by writing a
-> different SHIM and UI. If it goes red, that claim is currently false —
+> different SHIM and UI. If it goes red, that claim becomes false —
 > the failures name exactly where talon/canvas code has leaked into what
 > should be environment-agnostic.
 
@@ -73,17 +74,17 @@ Files (7):
 | I4 | FAIL | Every prose_overlay_*.py must be assigned to exactly one layer |
 | I5 | FAIL | INTERNAL files must not have lazy (function-local) talon imports either |
 
-## 3. Current findings (as of 2026-06-30 — RED)
+## 3. Current findings (as of 2026-06-30 — GREEN)
 
-### FAIL — INTERNAL/CURSORLESS leaking talon
+### Resolved — INTERNAL/CURSORLESS no longer leak talon
 
-| File:Line | Violation | Refactor plan (NOT executed yet) |
-|---|---|---|
-| `prose_overlay_viewport.py:14` | `from talon import ui` | Drop — `ui` is not actually used at runtime (the `Rect` is). |
-| `prose_overlay_viewport.py:15` | `from talon.ui import Rect` | Replace with a pure-Python `Rect` dataclass (4-field: `x`, `y`, `width`, `height`). The Talon `Rect` is the only talon thing this module uses; the math is otherwise pure. Estimated ~10 LOC change in viewport.py + matching dataclass def. |
-| `prose_overlay_cursorless_resolve.py:7` | `from talon import actions, settings  # noqa: F401` | Delete the line. The `noqa: F401` proves it's unused. ~1 LOC change. |
+| File:Line (pre-fix) | Violation | Resolution | Commit |
+|---|---|---|---|
+| `prose_overlay_viewport.py:14` | `from talon import ui` | `ui.main_screen()` removed from the module; `get_max_visible_rows() / align() / recenter()` now take `screen_height: float` from the caller. The UI layer (`prose_overlay_actions_cursor.py`) exposes a tiny `_screen_height()` adapter. | `bb939a2` |
+| `prose_overlay_viewport.py:15` | `from talon.ui import Rect` | Replaced with a pure-Python `@dataclass(frozen=True) class Rect` at the top of `prose_overlay_viewport.py` (x/y/width/height + left/right/top/bottom properties). `set_anchor_rect` is duck-typed: accepts anything exposing `.x/.y/.width/.height` and stores it as the pure-Python `Rect`. | `bb939a2` |
+| `prose_overlay_cursorless_resolve.py:7` | `from talon import actions, settings  # noqa: F401` | `actions` was genuinely unused; `settings` is used at the JS-resolver flag check (line 225). Top-level import deleted; `from talon import settings` is now a function-local lazy import inside `_resolve_target_to_token_range`. The `noqa: F401` was a misread of the file at the time the audit was written. | `28f1aa3` |
 
-These three fails are the meta-test's value: they're the ONLY places blocking the portability claim. Two real refactor moments + one stale line.
+These three fails were the meta-test's value: they were the ONLY places blocking the portability claim. Two real refactor moments + one stale-line cleanup, all landed. The audit now exits 0 with zero FAIL findings.
 
 ### WARN — UI bypasses SHIM (advisory)
 
@@ -98,25 +99,19 @@ The WARNs are categorization questions, not real overfit. Two possible resolutio
 
 Current call: re-categorize. Cleaner with the existing module shape.
 
-## 4. Refactor plan (deferred — user has explicitly said NOT to implement yet)
+## 4. Refactor plan — LANDED 2026-06-30
 
-Three FAIL items, ordered by effort:
+Three FAIL items shipped across three commits:
 
-### Step 1 — `cursorless_resolve.py:7` stale import (1 LOC, 30 seconds)
+### Step 1 — `cursorless_resolve.py:7` stale import (commit `28f1aa3`)
 
-```diff
--from talon import actions, settings  # noqa: F401
-```
+Deleted the misleading top-level `from talon import actions, settings  # noqa: F401` and replaced it with a function-local `from talon import settings` inside `_resolve_target_to_token_range` — the only call site (line 225 of the pre-fix file). `actions` was genuinely unused; the `noqa: F401` was wrong about `settings`. The lazy import passes invariant I2 (CURSORLESS files must not have *top-level* talon imports).
 
-Single line deletion. The `noqa: F401` already documents it's unused. Pure refactor; zero behavior change.
+### Step 2 — `viewport.py` Rect dataclass (commit `bb939a2`)
 
-### Step 2 — `viewport.py` Rect dataclass (~15 LOC)
-
-Add a pure-Python Rect:
+Added a pure-Python `@dataclass(frozen=True) class Rect` at the top of `prose_overlay_viewport.py`:
 
 ```python
-from dataclasses import dataclass
-
 @dataclass(frozen=True)
 class Rect:
     x: float
@@ -124,26 +119,22 @@ class Rect:
     width: float
     height: float
     @property
-    def left(self) -> float: return self.x
+    def left(self) -> float:   return self.x
     @property
-    def right(self) -> float: return self.x + self.width
+    def right(self) -> float:  return self.x + self.width
     @property
-    def top(self) -> float: return self.y
+    def top(self) -> float:    return self.y
     @property
     def bottom(self) -> float: return self.y + self.height
 ```
 
-Replace `from talon.ui import Rect` with import of this new class. Adapt any callers (most likely just `set_anchor_rect`). Talon's `Rect` and this dataclass have the same field names — the swap is mechanical.
+`set_anchor_rect` is duck-typed — it accepts anything exposing `.x/.y/.width/.height` (including `talon.ui.Rect` from existing callers) and stores it as our pure-Python `Rect`. Callers in `prose_overlay_actions_layout.py` are unchanged. The UI layer's `prose_overlay_draw.py` still constructs `talon.ui.Rect` for Skia paint (which is correct — UI is freely Talon-bound).
 
-Optionally, the SHIM layer can keep a `talon_rect_adapter()` that converts to/from Talon's Rect when handing off to Skia paint.
+### Step 3 — `viewport.py:14` `from talon import ui` (commit `bb939a2`, same commit as step 2)
 
-### Step 3 — `viewport.py:14` `from talon import ui` (1 LOC)
+`ui.main_screen()` was the only use of `ui` (inside `get_max_visible_rows()`). The fix moves the "what's the screen size?" question to the caller: `get_max_visible_rows()`, `align()`, and `recenter()` now take `screen_height: float`. The UI layer's `prose_overlay_actions_cursor.py` exposes a tiny `_screen_height()` adapter calling `ui.main_screen().rect.height` and passes it in at the 5 call sites.
 
-`ui` is imported but used only at line 25 (`ui.main_screen()`) in current code. Move that one call site into a SHIM module, or accept that viewport's "what's the screen size" needs a port adapter. Pure-Python fallback: pass screen dims in from the caller (which IS the SHIM/UI).
-
-Estimated total: ~20 LOC across two files, no behavior change. Could land in a single commit titled `refactor(internal): viewport and cursorless_resolve are now talon-free`.
-
-After landing, Layer 4 goes green. The portability claim becomes honest.
+Total: ~30 LOC across `prose_overlay_viewport.py` + `prose_overlay_actions_cursor.py` + the cursorless-resolve change. Behavior at the voice / canvas layer is unchanged: `overlay anchor`, `overlay show top/bottom/center`, `overlay center` (recenter cycle) all behave the same. Layer 4 of `scripts/headless-verify.py` flipped 45/46 → 46/46.
 
 ## 5. The portability claim — what going green proves
 
@@ -172,3 +163,12 @@ When the audit goes green:
 - Update this doc's status from RED to GREEN.
 - Add a Changelog entry noting which file became portable.
 - The portability claim in §5 is now true.
+
+## 7. Changelog
+
+- **2026-06-30** — Layer 4 flipped **RED → GREEN**. Three FAIL items resolved in three commits:
+  - `28f1aa3` `refactor(cursorless): drop stale talon actions import, lazy settings` — closes I2 leak in `prose_overlay_cursorless_resolve.py`.
+  - `bb939a2` `refactor(internal): pure-Python Rect, remove talon.ui from viewport` — closes both I1 leaks in `prose_overlay_viewport.py` (introduces pure-Python `Rect` dataclass; parameterizes screen_height).
+  - `[this commit, see `git log -- docs/LAYER_AUDIT.md`]` `docs(layer-audit): flip RED → GREEN; update LAYER_AUDIT.md status` — flips this doc's status header, moves §3 FAIL rows to a Resolved table, marks §4 as landed.
+
+  Two WARN findings (`prose_overlay.py` and `prose_overlay_actions_cursor.py` importing CURSORLESS directly) remain advisory — they're categorization questions and explicitly out of scope for this refactor (per §3 WARN notes). INTERNAL + CURSORLESS Python modules are now a drop-in primitive for non-Talon environments per §5.

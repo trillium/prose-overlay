@@ -63,6 +63,7 @@ from ..internal.draw_constants import (
     BUBBLE_TOP_GAP, BUBBLE_SHAPE_SCALE,
 )
 from ..internal.instance import instance as _instance
+from ..internal.panel_layout import place_bubbles as _place_bubbles
 from ..shim import shapes as _shapes
 
 
@@ -182,9 +183,14 @@ def draw_homophone_panels(
     y_base = y_start
     for row in rows:
         bubbles = _build_row_bubbles(
-            c, row, panel_alts, shape_assignments, y_base
+            c, row, panel_alts, shape_assignments, x_origin
         )
-        _place_row_bubbles(bubbles, x_origin)
+        # Delegate the band-assignment math to the talon-free helper in
+        # internal/panel_layout.py so the placement contract has a single
+        # source of truth and the L1 headless tests can exercise it
+        # without importing Skia. _place_bubbles mutates each bubble in
+        # place, writing `x` and `band`.
+        _place_bubbles(bubbles, x_origin, BUBBLE_OUTER_GAP)
         # Underline_y_base mirrors ui/draw_tokens.py's underline math: the
         # underline sits at `y_base + (DOT_RADIUS * 2) + DOT_GAP_Y +
         # TOKEN_FONT_SIZE + 2`. We then add UNDERLINE_RESERVE (to clear
@@ -211,7 +217,7 @@ def _build_row_bubbles(
     row: list[tuple[int, str, float]],
     panel_alts: dict[int, dict[str, str]],
     shape_assignments: dict[int, str],
-    y_base: float,
+    x_origin: float,
 ) -> list[_Bubble]:
     """Walk a single row, measure each panel entry's bubble, return specs.
 
@@ -219,9 +225,13 @@ def _build_row_bubbles(
     is in `panel_alts` but lack a shape assignment also skipped — the
     bubble's central anchor is the shape glyph, and a missing shape would
     leave a confusing chip-pair with no glyph between them.
+
+    Bubble ideal_x is set ABSOLUTE (already includes `x_origin`) so the
+    placement helper in internal/panel_layout.py can be called directly
+    without an extra translation pass.
     """
     bubbles: list[_Bubble] = []
-    x = 0.0  # x relative to row's x_origin; resolved to absolute by caller
+    x = x_origin  # absolute x of the current token's left edge
     for idx, _token, tw in row:
         entry = panel_alts.get(idx)
         shape_name = shape_assignments.get(idx)
@@ -236,7 +246,7 @@ def _build_row_bubbles(
 def _measure_bubble(
     c: SkiaCanvas,
     token_idx: int,
-    token_x_rel: float,
+    token_x_abs: float,
     token_w: float,
     shape_name: str,
     entry: dict[str, str],
@@ -302,58 +312,22 @@ def _measure_bubble(
     chip_h = BUBBLE_CHIP_FONT_SIZE + BUBBLE_CHIP_PAD_Y * 2
     bubble_h = max(chip_h, shape_h)
 
-    # Ideal x: bubble centered on the token. token_x_rel is row-relative;
-    # caller adds x_origin during the placement pass.
-    ideal_x_rel = token_x_rel + (token_w - bubble_w) / 2.0
+    # Ideal x: bubble centered on the token. ABSOLUTE — caller already
+    # passed `token_x_abs` including x_origin, so the placement helper
+    # can consume `ideal_x` directly.
+    ideal_x = token_x_abs + (token_w - bubble_w) / 2.0
 
     return _Bubble(
         token_idx=token_idx,
-        token_x=token_x_rel,
+        token_x=token_x_abs,
         token_w=token_w,
         shape_name=shape_name,
         left_chip=left_chip,
         right_chip=right_chip,
         bubble_w=bubble_w,
         bubble_h=bubble_h,
-        ideal_x=ideal_x_rel,
+        ideal_x=ideal_x,
     )
-
-
-# ---------------------------------------------------------------------------
-# Placement pass — assign bands so adjacent bubbles don't collide
-# ---------------------------------------------------------------------------
-
-def _place_row_bubbles(bubbles: list[_Bubble], x_origin: float) -> None:
-    """Assign each bubble a band (0=primary, 1=below, 2=below-below, …).
-
-    The first bubble takes band 0. Each subsequent bubble checks against
-    the rightmost bubble already placed on band 0; if their x-ranges
-    would be closer than `BUBBLE_OUTER_GAP`, the new bubble drops to
-    band 1. The same check then runs against the rightmost bubble on
-    band 1, etc., until we find a band with enough gap.
-
-    Also resolves the absolute `x` (adds `x_origin`) and soft-clamps to
-    `x >= x_origin` so a bubble whose ideal_x would underflow the panel
-    margin sticks at the margin instead.
-    """
-    # rightmost_on[band] = absolute right edge of the last bubble we placed
-    # on that band; missing key = no bubble yet on that band.
-    rightmost_on: dict[int, float] = {}
-    for b in bubbles:
-        abs_x = x_origin + b.ideal_x
-        # Soft left-clamp: never start a bubble before the panel margin.
-        if abs_x < x_origin:
-            abs_x = x_origin
-        # Find the lowest band where this bubble fits.
-        band = 0
-        while True:
-            r = rightmost_on.get(band)
-            if r is None or abs_x >= r + BUBBLE_OUTER_GAP:
-                break
-            band += 1
-        b.band = band
-        b.x = abs_x
-        rightmost_on[band] = abs_x + b.bubble_w
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +343,9 @@ def _draw_one_bubble(c: SkiaCanvas, b: _Bubble, y_top: float) -> None:
       3. Right chip (when present; 3-member or 4+ groups)
     """
     shape_w = _SHAPE_NATIVE_W * BUBBLE_SHAPE_SCALE
-    shape_h = _SHAPE_NATIVE_H * BUBBLE_SHAPE_SCALE
+    # shape_h is implicit: shapes.draw_hat_shape centers the glyph on (cx, cy),
+    # so we only need shape_w for horizontal layout and chip_mid_y for the
+    # vertical anchor. The actual painted height comes from the scaled SVG.
     chip_h = BUBBLE_CHIP_FONT_SIZE + BUBBLE_CHIP_PAD_Y * 2
 
     # Chip vertical center across the bubble. The shape paints centered on
@@ -378,7 +354,6 @@ def _draw_one_bubble(c: SkiaCanvas, b: _Bubble, y_top: float) -> None:
     # vertically on chip's mid-line so chips + shape read as one unit.
     chip_y = y_top + (b.bubble_h - chip_h) / 2.0
     chip_mid_y = chip_y + chip_h / 2.0
-    _ = shape_h  # shape_h not used directly — Skia centers via cx/cy
 
     # ----- Left chip --------------------------------------------------------
     left_color, left_alt, left_chip_w = b.left_chip

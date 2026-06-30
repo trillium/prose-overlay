@@ -653,6 +653,92 @@ def run_layer_1() -> None:
         new_word = panel_alts.get(idx, {}).get("green")
         assert new_word is None
 
+    # -----------------------------------------------------------------------
+    # Slice C redesign (2026-06-30) — bubble panel placement math
+    # internal/panel_layout.py is talon-free; load it via
+    # spec_from_file_location like the other layer-1 modules.
+    # -----------------------------------------------------------------------
+
+    panel_layout_spec = importlib.util.spec_from_file_location(
+        "prose_overlay_panel_layout",
+        REPO / "internal" / "panel_layout.py",
+    )
+    panel_layout = importlib.util.module_from_spec(panel_layout_spec)
+    panel_layout_spec.loader.exec_module(panel_layout)
+    BubbleLayout = panel_layout.BubbleLayout
+    place_bubbles = panel_layout.place_bubbles
+
+    with test("L1", "L1.52", "place_bubbles: non-colliding bubbles all sit on band 0"):
+        # Three bubbles spaced wider than BUBBLE_OUTER_GAP apart → all
+        # primary row. Mirrors the worked example in PHONES_SPEC §
+        # Scenario 4 addendum where three tokens each get their own
+        # bubble without wrapping.
+        bs = [
+            BubbleLayout(ideal_x=100.0, bubble_w=50.0),
+            BubbleLayout(ideal_x=180.0, bubble_w=50.0),
+            BubbleLayout(ideal_x=260.0, bubble_w=50.0),
+        ]
+        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
+        assert [b.band for b in bs] == [0, 0, 0], (
+            f"expected all band 0; got {[b.band for b in bs]}"
+        )
+        assert bs[0].x == 100.0 and bs[1].x == 180.0 and bs[2].x == 260.0
+
+    with test("L1", "L1.53", "place_bubbles: overlapping pair wraps the second to band 1"):
+        # Two bubbles whose ideal x positions sit within OUTER_GAP of
+        # each other — the second drops to band 1 (one row below the
+        # primary). Keeps chip sizing intact instead of squeezing
+        # horizontally.
+        bs = [
+            BubbleLayout(ideal_x=100.0, bubble_w=50.0),
+            BubbleLayout(ideal_x=110.0, bubble_w=50.0),
+        ]
+        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
+        assert bs[0].band == 0, f"got band {bs[0].band}"
+        assert bs[1].band == 1, f"got band {bs[1].band}"
+        # Both still on the canvas at their absolute x positions.
+        assert bs[0].x == 100.0
+        assert bs[1].x == 110.0
+
+    with test("L1", "L1.54", "place_bubbles: ideal_x below x_origin soft-clamps to x_origin"):
+        # A bubble whose ideal_x would underflow the panel margin sticks
+        # at x_origin. Prevents a wide bubble centered on a token near
+        # the panel's left edge from disappearing past the margin.
+        bs = [BubbleLayout(ideal_x=80.0, bubble_w=50.0)]
+        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
+        assert bs[0].x == 100.0, f"expected clamp to 100; got {bs[0].x}"
+        assert bs[0].band == 0
+
+    with test("L1", "L1.55", "place_bubbles: triple-collision distributes to bands 0, 1, 2"):
+        # Three bubbles whose ideal positions all sit within OUTER_GAP
+        # of each other — the second wraps to band 1, the third to
+        # band 2. Verifies the wrap loop walks beyond band 1 when
+        # needed.
+        bs = [
+            BubbleLayout(ideal_x=100.0, bubble_w=50.0),
+            BubbleLayout(ideal_x=105.0, bubble_w=50.0),
+            BubbleLayout(ideal_x=110.0, bubble_w=50.0),
+        ]
+        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
+        assert [b.band for b in bs] == [0, 1, 2], (
+            f"expected bands [0,1,2]; got {[b.band for b in bs]}"
+        )
+
+    with test("L1", "L1.56", "place_bubbles: separated bubble after wrap stays on band 0"):
+        # b0 sits at x=100 (band 0), b1 collides with b0 → band 1, but
+        # b2 sits far enough past b0's right edge that it fits back on
+        # band 0. Verifies the placer doesn't pessimistically stick on
+        # the wrapped band once started.
+        bs = [
+            BubbleLayout(ideal_x=100.0, bubble_w=50.0),  # → band 0, right edge 150
+            BubbleLayout(ideal_x=110.0, bubble_w=30.0),  # collides → band 1
+            BubbleLayout(ideal_x=200.0, bubble_w=50.0),  # past 150+8 → band 0
+        ]
+        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
+        assert [b.band for b in bs] == [0, 1, 0], (
+            f"expected bands [0,1,0]; got {[b.band for b in bs]}"
+        )
+
     with test("L1", "L1.49", "compute_panel_alts: unflagged or no-shape tokens are skipped"):
         # An unflagged token (not in `flagged`) MUST NOT appear in the
         # output even if shape_assignments has an entry for it.

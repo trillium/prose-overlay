@@ -166,6 +166,22 @@ def run_layer_1() -> None:
         assert b.undo() is True
         assert b.get_tokens() == ["a"], f"undo should restore single-letter token; got {b.get_tokens()!r}"
 
+    with test("L1", "L1.12b", "char-extend full repro: 'bubble','_','t','o','p' → 'bubble_top'"):
+        # Mirrors what prose_overlay_add_chars does at the buffer level for
+        # the user's exact example. Word 'bubble' arrives via add_text;
+        # subsequent chars ('_', 't', 'o', 'p') each extend the last token.
+        b = ProseBuffer()
+        b.add_text("bubble")
+        for ch in ["_", "t", "o", "p"]:
+            tokens = b.get_tokens()
+            new_tokens = tokens[:-1] + [tokens[-1] + ch]
+            b.commit_start("extend_chars", EditKind.STRUCTURAL)
+            b.set_tokens_raw(new_tokens)
+            b.commit_end()
+        assert b.get_tokens() == ["bubble_top"], (
+            f"expected one token 'bubble_top'; got {b.get_tokens()!r}"
+        )
+
     inst_mod = _load_instance_module()
     ProseOverlayState = inst_mod.ProseOverlayState
 
@@ -431,6 +447,11 @@ def run_layer_3() -> None:
         actions_log.clear()
         td._dispatch({"cmd": "add_letters", "letters": "abc"})
         assert actions_log == [("prose_overlay_add_letters", ("abc",), {})], actions_log
+
+    with test("L3", "L3.5b2", "_dispatch add_chars → prose_overlay_add_chars"):
+        actions_log.clear()
+        td._dispatch({"cmd": "add_chars", "chars": "_"})
+        assert actions_log == [("prose_overlay_add_chars", ("_",), {})], actions_log
 
     with test("L3", "L3.5c", "_dispatch reset → prose_overlay_reset"):
         actions_log.clear()

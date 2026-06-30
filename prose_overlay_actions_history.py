@@ -74,38 +74,50 @@ class Actions:
         for s in strings:
             actions.user.prose_overlay_add_text(s)
 
-    def prose_overlay_add_letters(letters: str):
-        """Add a NATO letter sequence to the buffer.
+    def prose_overlay_add_chars(chars: str):
+        """Add character-level input (letters, symbols, digits) to the buffer.
 
-        Consecutive letter utterances EXTEND the last token instead of
-        producing a new one — so "air" then "bat cap" yields one token
-        "abc" rather than two tokens "a", "bc". Any non-letter input
-        (dictation, formatter, symbol_key) resets the chain, so the next
-        letter utterance starts fresh.
+        Models a text editor: single-character inputs extend the token where
+        the cursor is. With no active cursor, extends the LAST token. With
+        an active cursor in a gap, currently appends as new token at that
+        gap (cursor-targeted char insertion is a future slice).
+
+        Drives the user-stated requirement:
+          dictation "bubble" "downscore" "trap" "odd" "pit"
+          → "bubble_top"  (one token, last token extended by each char)
+
+        Used by both the <user.letters> rule (NATO letter forms) and the
+        {user.symbol_key} rule (spoken symbol forms). Word-level inputs
+        (raw_prose, dictation_insert, formatter outputs) still route through
+        prose_overlay_add_text and produce new tokens on whitespace boundaries.
         """
-        if not letters:
+        if not chars:
             return
         from .prose_overlay_actions_cursor import _auto_scroll_to_cursor
         from .prose_overlay_state import EditKind
         extending = (
-            instance._last_input_source == "letters"
-            and instance.cursor is None
+            instance.cursor is None
             and bool(instance.buffer.get_tokens())
         )
         if extending:
             tokens = instance.buffer.get_tokens()
-            new_tokens = tokens[:-1] + [tokens[-1] + letters]
-            instance.buffer.commit_start("extend_letters", EditKind.STRUCTURAL)
+            new_tokens = tokens[:-1] + [tokens[-1] + chars]
+            instance.buffer.commit_start("extend_chars", EditKind.STRUCTURAL)
             instance.buffer.set_tokens_raw(new_tokens)
             instance.buffer.commit_end()
             _recompute_hats()
             _auto_scroll_to_cursor()
             instance.canvas.refresh()
         else:
-            # First letter utterance after non-letter input OR cursor-targeted —
-            # use the normal add path so insertion happens at cursor if active.
-            actions.user.prose_overlay_add_text(letters)
-        instance._last_input_source = "letters"
+            # Empty buffer OR cursor active — fall back to add_text so the
+            # input lands in the right place (start of buffer or at cursor).
+            actions.user.prose_overlay_add_text(chars)
+        instance._last_input_source = "chars"
+
+    def prose_overlay_add_letters(letters: str):
+        """Deprecated alias kept for the test driver's 'add_letters' cmd —
+        routes through prose_overlay_add_chars."""
+        actions.user.prose_overlay_add_chars(letters)
 
     def prose_overlay_speak():
         """Speak the current buffer contents via the speak TTS tool."""

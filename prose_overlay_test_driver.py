@@ -20,7 +20,8 @@ Commands (one JSON object per line):
 
   {"cmd": "show"}
   {"cmd": "add", "text": "hello world there"}
-  {"cmd": "add_letters", "letters": "abc"}   # extends last token if prior was also letters
+  {"cmd": "add_letters", "letters": "abc"}   # deprecated alias for add_chars
+  {"cmd": "add_chars", "chars": "_"}         # extends last token (chars-level input)
   {"cmd": "insert_format_code", "strings": ["the_quick_brown_fox"]}  # code-formatter route
   {"cmd": "hide"}
   {"cmd": "dump"}
@@ -117,6 +118,8 @@ def _dispatch(cmd: dict) -> None:
             actions.user.prose_overlay_add_text(cmd.get("text", ""))
         elif name == "add_letters":
             actions.user.prose_overlay_add_letters(cmd.get("letters", ""))
+        elif name == "add_chars":
+            actions.user.prose_overlay_add_chars(cmd.get("chars", ""))
         elif name == "insert_format_code":
             actions.user.prose_overlay_insert_format_code(cmd.get("strings", []))
         elif name == "hide":

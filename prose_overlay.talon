@@ -103,7 +103,7 @@ change <user.prose_hat_color> <user.letter>:
 # Without this, command-mode-only forms like "dot", "point", "semi", "slash", "dash" etc.
 # fire key() in the background window instead of routing to the overlay.
 # {user.symbol_key} includes all spoken forms — both command-and-dictation and command-only.
-{user.symbol_key}: user.prose_overlay_add_text(symbol_key)
+{user.symbol_key}: user.prose_overlay_add_chars(symbol_key)
 
 # Prose formatters (say / sentence / title) — "say hello world" → "hello world".
 # Mirrors text.talon:8 scoped to overlay-active so it fires in dictation mode
@@ -127,7 +127,7 @@ change <user.prose_hat_color> <user.letter>:
 # by community dictation. Routes through prose_overlay_add_letters so
 # consecutive letter utterances ("air" then "bat cap") EXTEND the last
 # token into one ("abc") rather than producing two tokens ("a","bc").
-<user.letters>: user.prose_overlay_add_letters(letters)
+<user.letters>: user.prose_overlay_add_chars(letters)
 
 # Viewport alignment — Helix/Emacs-style
 overlay show top: user.prose_overlay_align_top()

@@ -5,6 +5,7 @@
 mode: dictation
 tag: user.prose_overlay_auto
 -
+
 <user.raw_prose>:
     user.prose_overlay_show()
     user.prose_overlay_add_text(raw_prose)

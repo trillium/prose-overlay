@@ -4,6 +4,7 @@
 mode: command
 mode: dictation
 -
+
 ^prose overlay$: user.prose_overlay_show()
 ^overlay auto$: user.prose_overlay_toggle_auto_dictation()
 ^prose history$: user.prose_overlay_toggle_history()

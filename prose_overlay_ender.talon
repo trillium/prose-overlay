@@ -6,6 +6,7 @@
 mode: dictation
 tag: user.prose_overlay_active
 -
+
 # Line-ender with preceding text: add text then confirm
 <user.raw_prose> {user.dictation_ender}$:
     user.prose_overlay_add_text(raw_prose)

@@ -59,6 +59,10 @@ to be.
 | L1.17 | `add_text("the_quick_brown_fox")` → 1 token (snake formatter output) | buffer contract for formatters |
 | L1.18 | `add_text("theQuickBrownFox")` → 1 token (camel formatter output) | buffer contract for formatters |
 | L1.19 | `add_text("The Quick Brown Fox")` → 4 tokens (title-case has spaces) | documented split behavior |
+| L1.20 | `HAT_SHAPES` is a 10-tuple of strs (excludes 'dot') | slice 1 vocabulary |
+| L1.21 | `shape_pool() == HAT_SHAPES` | slice 1 round-robin contract |
+| L1.22 | Every spoken shape in `HAT_SHAPES` has an SVG file in `svg/` (cross → crosshairs.svg) | vendored asset coverage |
+| L1.23 | `_parse_svg_entries()` returns ≥10 entries (1 per shape, +1 default); all entries have non-empty `d` | parse smoke |
 
 ### Layer 2 — JS bundle via `bun` (no Talon)
 
@@ -102,6 +106,12 @@ These require the live Talon process. Document the gap; do not run.
 - `prose_overlay_targets_js.py` end-to-end (same)
 - Canvas refresh + draw cycle
 - `prose_overlay_trail.py` slice B against a real crash (HAT_ALLOC repro)
+- `prose_overlay_shapes.draw_hat_shape()` actual Skia paint (Slice 1) — the
+  module's vocabulary, parse, and asset-existence checks are L1.20-L1.23;
+  the `Path.from_svg` + FILL+STROKE compositing path is verify-in-Talon only.
+  Live check: `overlay shapes homo on` while a flagged word is in the
+  buffer; expect a small hat shape (bolt / curve / fox / ...) above the
+  letter-hat dot.
 
 ## 3. How the runner works
 

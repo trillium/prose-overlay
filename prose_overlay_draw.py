@@ -1,14 +1,10 @@
 """Prose Overlay Draw -- panel layout, overflow handling, and main draw routine.
 
 Renders word tokens in a horizontal flow layout with Cursorless-style hat dots.
-Delegates token rendering to prose_overlay_draw_tokens and shared constants to
-prose_overlay_draw_constants.
-
-Module-level state (anchor rect, scroll offset) is accessed by other action
-modules via `instance.draw_mod.*`.
+Delegates token rendering to prose_overlay_draw_tokens, shared constants to
+prose_overlay_draw_constants, and viewport state to prose_overlay_viewport
+(accessed via `instance.viewport`).
 """
-
-from typing import Optional
 
 from talon import settings, ui
 from talon.skia.canvas import Canvas as SkiaCanvas
@@ -19,7 +15,8 @@ from ...utils.overlay_kit import (
     draw_panel_frame,
 )
 from .prose_overlay_draw_constants import (
-    PANEL_RADIUS, PANEL_PAD, BG_COLOR, BORDER_COLOR,
+    PANEL_RADIUS, PANEL_PAD, PANEL_H_FRACTION,
+    BG_COLOR, BORDER_COLOR,
     BG_COLOR_FALLBACK, BORDER_COLOR_FALLBACK,
     HINT_COLOR, HINT_CMD_COLOR, LISTENING_COLOR, SEP_COLOR,
     TOKEN_FONT_SIZE, DOT_RADIUS, DOT_GAP_Y, LINE_HEIGHT,
@@ -27,6 +24,7 @@ from .prose_overlay_draw_constants import (
 from .prose_overlay_draw_tokens import _fit_text, _flow_layout, draw_cursor, _draw_token_rows
 from .prose_overlay_help import draw_help_panel, rotate_help_ring_buffer, HELP_COMMAND_POOL
 from .prose_overlay_history_panel import draw_history_panel, HISTORY_PAGE_SIZE
+from .prose_overlay_instance import instance
 
 # Re-export for canvas.py which imports draw_help_panel from this module.
 __all__ = ["draw_overlay", "draw_help_panel", "draw_history_panel", "HISTORY_PAGE_SIZE"]
@@ -36,91 +34,13 @@ __all__ = ["draw_overlay", "draw_help_panel", "draw_history_panel", "HISTORY_PAG
 # ---------------------------------------------------------------------------
 CONTENT_W_FRACTION = 0.80   # content zone: left 80% of screen width
 HELP_W_FRACTION    = 0.20   # help zone:    right 20% of screen width
-PANEL_H_FRACTION   = 0.10   # total panel height: 10% of screen height
 PANEL_Y_OFFSET = 0  # flush with top of screen
 
 # Mutable — adjusted by help_bigger / help_smaller commands via draw_mod.HINT_FONT_SIZE
 HINT_FONT_SIZE = 12
 
-# ---------------------------------------------------------------------------
-# Module-level state (read/written by action modules via instance.draw_mod.*)
-# ---------------------------------------------------------------------------
-
-# Anchor rect — when set, the overlay panel is scoped to this window's x/width.
-_anchor_rect: Optional[Rect] = None
-
-# Anchor position — where the panel attaches vertically.
-# "top"    → panel_y = top of anchor (or screen top)
-# "bottom" → panel_y = bottom of anchor (or screen bottom) minus panel height
-_anchor_position: str = "top"
-
-# Overflow state — set during each draw, read by auto-scroll helper.
+# Overflow state — set during each draw, read by debug snapshot.
 _hints_hidden_by_overflow: bool = False
-_scroll_offset: int = 0
-_last_rows: list = []  # cached row layout from last draw, used by compute_scroll_for_cursor
-
-
-# ---------------------------------------------------------------------------
-# State setters
-# ---------------------------------------------------------------------------
-
-def set_anchor_rect(rect: Optional[Rect]) -> None:
-    """Set (or clear) the anchor window rect used for window-scoped layout."""
-    global _anchor_rect
-    _anchor_rect = rect
-
-
-def set_anchor_position(position: str) -> None:
-    """Set the vertical attachment point: 'top' or 'bottom'."""
-    global _anchor_position
-    if position in ("top", "bottom"):
-        _anchor_position = position
-
-
-def set_scroll_offset(offset: int) -> None:
-    """Set the scroll row offset for the token viewport."""
-    global _scroll_offset
-    _scroll_offset = offset
-
-
-# ---------------------------------------------------------------------------
-# Layout helpers (used by auto-scroll and cursor tracking)
-# ---------------------------------------------------------------------------
-
-def get_max_visible_rows() -> int:
-    """Return the maximum number of token rows that fit in the panel."""
-    screen = ui.main_screen()
-    panel_h = screen.rect.height * PANEL_H_FRACTION
-    usable_h = panel_h - PANEL_PAD * 2
-    return max(1, int(usable_h / LINE_HEIGHT))
-
-
-def _find_cursor_row(rows: list, cursor: "int | None") -> "int | None":
-    if cursor is None:
-        return None
-    for row_idx, row in enumerate(rows):
-        first_tok = row[0][0]
-        last_tok = row[-1][0]
-        if first_tok <= cursor <= last_tok + 1:
-            return row_idx
-    return None
-
-
-def compute_scroll_for_cursor(
-    rows: list,
-    cursor: "int | None",
-    scroll_offset: int,
-    max_visible_rows: int,
-) -> int:
-    """Return the scroll offset needed to keep the cursor row visible."""
-    row_idx = _find_cursor_row(rows, cursor)
-    if row_idx is None:
-        return scroll_offset
-    if row_idx < scroll_offset:
-        return row_idx
-    if row_idx >= scroll_offset + max_visible_rows:
-        return row_idx - max_visible_rows + 1
-    return scroll_offset
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +74,11 @@ def draw_overlay(
     flash_color: 6-char hex color (no alpha) for the flash highlight.
     selection: (start_idx, end_idx) inclusive range of selected tokens.
     """
-    global _hints_hidden_by_overflow, _scroll_offset, _last_rows
+    global _hints_hidden_by_overflow
+
+    viewport = instance.viewport
+    anchor_rect = viewport._anchor_rect
+    anchor_position = viewport._anchor_position
 
     screen = ui.main_screen()
     sr = screen.rect
@@ -166,14 +90,14 @@ def draw_overlay(
     token_metrics = [(tok, c.paint.measure_text(tok)[1].width) for tok in tokens]
 
     # Panel geometry — window-scoped or full-screen, top or bottom attachment.
-    window_scoped = settings.get("user.prose_overlay_window_scoped") and _anchor_rect is not None
-    ref = _anchor_rect if window_scoped else sr
+    window_scoped = settings.get("user.prose_overlay_window_scoped") and anchor_rect is not None
+    ref = anchor_rect if window_scoped else sr
     panel_h = max(sr.height * PANEL_H_FRACTION, 3 * LINE_HEIGHT + PANEL_PAD * 2)
     panel_x = ref.x if window_scoped else sr.left
     panel_w = ref.width if window_scoped else sr.width
     panel_y = (
         ref.y + ref.height - panel_h
-        if _anchor_position == "bottom"
+        if anchor_position == "bottom"
         else (ref.y if window_scoped else sr.top + PANEL_Y_OFFSET)
     )
 
@@ -201,7 +125,7 @@ def draw_overlay(
     # In overflow mode label is hidden, so full usable_h is available.
     effective_h = usable_h if _hints_hidden_by_overflow else (usable_h - label_reserve)
     max_visible_rows = max(1, int(effective_h / LINE_HEIGHT))
-    _last_rows = list(rows)
+    viewport._last_rows = list(rows)
 
     if len(rows) > max_visible_rows:
         rows = rows[len(rows) - max_visible_rows:]

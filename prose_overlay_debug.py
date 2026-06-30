@@ -42,7 +42,7 @@ def _snapshot() -> dict:
         "token_count":    len(tokens),
         "tokens":         tokens,
         "hat_count":      len(instance.hat_assignments),
-        "scroll_offset":  dm._scroll_offset,
+        "scroll_offset":  instance.viewport.get_scroll_offset(),
         "hints_hidden":   dm._hints_hidden_by_overflow,
         "target_window":  instance.target_window_title,
     }

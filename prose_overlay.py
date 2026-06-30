@@ -12,6 +12,7 @@ from talon import Context, Module, actions, settings, ui
 from .prose_overlay_canvas import OverlayCanvas
 from . import prose_overlay_draw as _draw_mod_ref
 from .prose_overlay_state import ProseBuffer
+from .prose_overlay_viewport import Viewport
 from ...utils.overlay_kit import DismissibleOverlay
 from .prose_overlay_cursorless_resolve import (
     _state as _resolve_state,
@@ -83,6 +84,7 @@ _resolve_state.buffer = instance.buffer  # share the ProseBuffer instance with t
 instance.hat_assignments = {}
 instance.hat_to_token = {}
 instance.draw_mod = _draw_mod_ref
+instance.viewport = Viewport()
 
 _ctx = Context()
 _ctx_auto = Context()  # owns the prose_overlay_auto tag

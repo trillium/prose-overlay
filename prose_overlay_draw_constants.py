@@ -10,6 +10,7 @@ and side effects — pure Python only.
 # ---------------------------------------------------------------------------
 PANEL_RADIUS = 12
 PANEL_PAD = 12
+PANEL_H_FRACTION = 0.10  # total panel height: 10% of screen height
 
 # ---------------------------------------------------------------------------
 # Colors

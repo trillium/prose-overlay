@@ -32,6 +32,7 @@ class ProseOverlayState:
         self.history_page: int = 0
         self.history_overlay = None         # DismissibleOverlay
         self.draw_mod = None                # prose_overlay_draw module
+        self.viewport = None                # prose_overlay_viewport.Viewport
         self.hat_js_fallback: bool = False  # True when JS allocator failed; triggers orange color scheme
 
 

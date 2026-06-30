@@ -59,24 +59,20 @@ def _blink_tick():
 def _auto_scroll_to_cursor():
     """Snap the scroll viewport to keep the cursor row visible.
 
-    Reads the cached row layout from the last draw and adjusts _scroll_offset
-    in the draw module so the next frame shows the cursor.
-
-    NOTE: this is also called by prose_overlay_actions_layout and
-    prose_overlay.py action implementations that need scroll-after-cursor.
-    Kept here because it is tightly coupled to cursor state.
+    Reads the cached row layout from the last draw and adjusts the viewport
+    scroll offset so the next frame shows the cursor.
     """
-    draw_mod = instance.draw_mod
-    if draw_mod is None:
+    viewport = instance.viewport
+    if viewport is None:
         return
-    cached_rows = draw_mod._last_rows
+    cached_rows = viewport._last_rows
     if not cached_rows:
         return
-    max_vis = draw_mod.get_max_visible_rows()
-    new_offset = draw_mod.compute_scroll_for_cursor(
-        cached_rows, instance.cursor, draw_mod._scroll_offset, max_vis
+    max_vis = viewport.get_max_visible_rows()
+    new_offset = viewport.compute_scroll_for_cursor(
+        cached_rows, instance.cursor, viewport.get_scroll_offset(), max_vis
     )
-    draw_mod.set_scroll_offset(new_offset)
+    viewport.set_scroll_offset(new_offset)
 
 
 # ---------------------------------------------------------------------------

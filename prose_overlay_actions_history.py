@@ -143,8 +143,7 @@ class Actions:
 
     def prose_overlay_undo():
         """Undo the last prose overlay edit."""
-        draw_mod = instance.draw_mod
         if instance.buffer.undo():
-            draw_mod.set_scroll_offset(0)
+            instance.viewport.set_scroll_offset(0)
             _recompute_hats()
             instance.canvas.refresh()

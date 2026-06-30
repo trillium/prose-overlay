@@ -26,12 +26,12 @@ _PREFS_PATH = os.path.join(os.path.dirname(__file__), "prose_overlay_prefs.json"
 
 def _save_prefs() -> None:
     """Write current preferences to disk."""
-    draw_mod = instance.draw_mod
+    viewport = instance.viewport
     try:
         with open(_PREFS_PATH, "w") as f:
             json.dump({
                 "auto_dictation": instance.auto_dictation,
-                "anchor_position": draw_mod._anchor_position,
+                "anchor_position": viewport._anchor_position,
             }, f)
     except Exception as e:
         print(f"prose_overlay: could not save prefs: {e}")
@@ -39,7 +39,7 @@ def _save_prefs() -> None:
 
 def _load_prefs() -> None:
     """Load persisted preferences and apply them (called once at module init)."""
-    draw_mod = instance.draw_mod
+    viewport = instance.viewport
     try:
         with open(_PREFS_PATH) as f:
             prefs = json.load(f)
@@ -47,7 +47,7 @@ def _load_prefs() -> None:
         _sync_tags()  # canvas is not showing at init, so tags derive cleanly
         print(f"prose_overlay: auto-dictation restored to {'ON' if instance.auto_dictation else 'OFF'}")
         pos = prefs.get("anchor_position", "top")
-        draw_mod.set_anchor_position(pos)
+        viewport.set_anchor_position(pos)
         print(f"prose_overlay: anchor position restored to '{pos}'")
     except FileNotFoundError:
         pass  # first run — no prefs file yet
@@ -67,19 +67,19 @@ class Actions:
         if not settings.get("user.prose_overlay_enabled"):
             return
 
-        draw_mod = instance.draw_mod
+        viewport = instance.viewport
         # Record window title and capture anchor rect for window-scoped layout.
         try:
             win = ui.active_window()
             instance.target_window_title = win.title or ""
-            draw_mod.set_anchor_rect(win.rect)
+            viewport.set_anchor_rect(win.rect)
         except Exception:
             instance.target_window_title = ""
-            draw_mod.set_anchor_rect(None)
+            viewport.set_anchor_rect(None)
 
         instance.buffer.clear()
         instance.target_recall_name = None
-        draw_mod.set_scroll_offset(0)
+        viewport.set_scroll_offset(0)
         from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
         _prose_overlay_clear_cursor()
         _recompute_hats()
@@ -95,10 +95,9 @@ class Actions:
         """Hide the prose overlay and clear the buffer."""
         from .prose_overlay_actions_cursor import _prose_overlay_clear_cursor
         from .prose_overlay_actions_flash import _clear_flash
-        draw_mod = instance.draw_mod
         _prose_overlay_clear_cursor()
         _clear_flash()
-        draw_mod.set_scroll_offset(0)
+        instance.viewport.set_scroll_offset(0)
         instance.canvas.hide()
         instance.buffer.clear()
         _sync_tags()  # canvas.is_showing is now False

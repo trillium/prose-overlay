@@ -6,7 +6,17 @@
 mode: dictation
 tag: user.prose_overlay_active
 -
+
 <user.raw_prose>: user.prose_overlay_add_text(raw_prose)
+
+# Number words bypass raw_prose because raw_prose only includes number_prose_prefixed
+# ("numeral five"), not number_prose_unprefixed ("five", "42", "three point one four").
+# When the overlay is active, unprefixed numbers would otherwise fire via
+# numbers_unprefixed.talon (tag: user.unprefixed_numbers, always set) and insert
+# directly into the background window via key(). This rule has higher specificity
+# (mode: dictation + tag: user.prose_overlay_active > tag: user.unprefixed_numbers alone)
+# so it wins and routes all number speech into the overlay buffer instead.
+<user.number_string>: user.prose_overlay_add_text(number_string)
 
 # Window-name prefix: focus the window immediately, then buffer the prose.
 # "edgar hello world" → switches to edgar, adds "hello world" to buffer.

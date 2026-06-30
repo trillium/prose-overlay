@@ -16,6 +16,107 @@ When a row has a commit SHA or ISC reference, that's the durable record.
 
 ---
 
+## 0. Test coverage cross-walk (audit, 2026-06-30)
+
+> Run `python3 scripts/headless-verify.py` to re-run the suite — current state 45/45.
+
+### 0a. Headless coverage — what each test proves
+
+| Test ID | Layer | What it proves | Feature row(s) it covers |
+|---|---|---|---|
+| `L1.1` | pure-python | `ProseBuffer()` constructs | §1 / §7 substrate |
+| `L1.2` | pure-python | `add_text("testing testing one two three") → 5 tokens` | §1 raw-prose-to-tokens (buffer half) |
+| `L1.3` | pure-python | `undo()` restores prior state | §7 undo |
+| `L1.4` | pure-python | `redo()` replays | §7 redo |
+| `L1.5` | pure-python | `commit_start + 2× add_text + commit_end = 1 undo step` | §7 commit bracket |
+| `L1.6` | pure-python | `rev` advances monotonically | §7 substrate (cache invalidation) |
+| `L1.7` | pure-python | `compute_hat_assignments` for letters | §5 letter-hat dot |
+| `L1.8` | pure-python | digit token gets hat (Python fallback) | §2 digits get hats, §5 hats on digits/punct |
+| `L1.9` | pure-python | punct token gets hat (Python fallback) | §2 punct get hats, §5 hats on digits/punct |
+| `L1.10` | pure-python | end-to-end `["testing","testing","123"]` all hatted | §2 digit hats (full repro) |
+| `L1.11` | pure-python | "air" + "bat cap" → "abc" (letter extend) | §2 NATO letter extend |
+| `L1.12` | pure-python | letter-extend then undo restores prior token | §2 + §7 |
+| `L1.12b` | pure-python | "bubble" + "_" + "t" + "o" + "p" → "bubble_top" | §2 word+chars compose, §11 user repro |
+| `L1.13` | pure-python | `ProseOverlayState.reset()` wipes data | §8 overlay reset |
+| `L1.14` | pure-python | `reset()` preserves object identity | §8 overlay reset safety |
+| `L1.15` | pure-python | `hint_enabled()` returns True by default | §5 homophone underline (default-on contract) |
+| `L1.16` | pure-python | `is_flagged("their")` / `is_flagged("there")` | §5 homophone CSV load |
+| `L1.16b` | pure-python | `shapes_enabled()` returns True by default | §5 shape hats (default-on contract) |
+| `L1.17` | pure-python | `add_text("the_quick_brown_fox") → 1 token` | §3e code formatter buffer contract |
+| `L1.18` | pure-python | `add_text("theQuickBrownFox") → 1 token` | §3e code formatter buffer contract |
+| `L1.19` | pure-python | `add_text("The Quick Brown Fox") → 4 tokens` | §3e title-case splits on spaces |
+| `L1.20` | pure-python | `HAT_SHAPES` is 10 strings | §5 shape hats vocab |
+| `L1.21` | pure-python | `shape_pool() == HAT_SHAPES` | §5 shape hats public API |
+| `L1.22` | pure-python | 10 SVG files exist in `svg/` | §5 shape hats assets |
+| `L1.23` | pure-python | `_parse_svg_entries` returns ≥10 entries | §5 shape hats parser |
+| `L2.1` | bun | bundle loads | §5 JS allocator alive |
+| `L2.2` | bun | `proseAllocateHats(["foo","bar"])` returns hats | §5 letter-hat dot (JS path) |
+| `L2.3` | bun | `proseAllocateHats(["123"])` returns hat | §2 digits get hats (JS path) |
+| `L2.4` | bun | `proseAllocateHats(["!"])` returns hat | §2 punct get hats (JS path) |
+| `L2.5` | bun | end-to-end `["testing","testing","123"]` all hatted (JS path) | §2 digit hats (full repro, JS path) |
+| `L3.1`–`L3.10` | stubbed-talon | test-driver dispatch routes commands to actions correctly | §8 test driver (all cmds: add, show, hide, dump, delete_hat, add_letters, add_chars, insert_format_code, reset, clear_buffer, bogus, malformed JSON, _pos advance, set on/off) |
+
+**Headless coverage by surface:**
+- ✅ Buffer state machinery — comprehensive (L1.1–L1.6, L1.11–L1.14)
+- ✅ Python hat allocator — comprehensive (L1.7–L1.10)
+- ✅ JS hat allocator — comprehensive (L2.1–L2.5)
+- ✅ Homophone module data layer — strong (L1.15–L1.16b)
+- ✅ Shape module vocab + assets + parser — strong (L1.20–L1.23)
+- ✅ Test-driver command dispatch — comprehensive (L3.*)
+- ✅ Formatter output buffer contract — adequate (L1.17–L1.19)
+
+### 0b. Shipped features with NO headless test (live-verify-only)
+
+These are `[x]` in the tables below but the runner does NOT exercise them. Verification depends on running Talon and observing behavior.
+
+| Feature row | Why live-only |
+|---|---|
+| §1 raw-prose grammar routing | `<user.raw_prose>` requires Talon's grammar matcher |
+| §1 number_string routing | same — Talon capture |
+| §1 trailing-punct split (talon side) | community grammar; buffer side IS tested via `_split_trailing_punct` |
+| §1 phrase-ender insert | community grammar |
+| §1 auto-show on dictation toggle | end-to-end mode + tag + canvas hand-off |
+| §1 window-name prefix retarget | Talon capture + window switching |
+| §1 history recall | action surface; voice rule routing |
+| §3a–§3f every Cursorless verb | resolver outputs require Talon-side target dicts (no headless fixtures yet) |
+| §4 token / range selection | depends on cursorless resolver end-to-end |
+| §4 selection highlight render | live Skia paint |
+| §5 hats on digits/punct rendered visually | live Skia paint (allocator IS tested) |
+| §5 homophone underline rendered | live Skia paint (data layer IS tested) |
+| §5 pre-execution flash | live timing + paint |
+| §5 hat-JS-fallback orange chrome | live; allocator failure path |
+| §5 cursor blink / change-mode amber | live render |
+| §5 shape hats rendered | live Skia paint (vocab/parser tested) |
+| §6 history panel / confirm / auto / retarget / anchor / dismiss / viewport | actions + voice |
+| §7 dictation coalescing toggle behavior | timing-dependent; threshold logic isolated but not tested under simulated time |
+| §8 always-on JSONL diff + log rotation | live writes |
+| §8 draw-time hook coverage | live |
+| §8 paper-trail slice A | env-gated faulthandler — needs crash fixture |
+| §9 every rule-specificity assertion | Talon grammar matcher — there is no headless grammar simulator |
+
+### 0c. Coverage stats
+
+- **Total shipped features (`[x]`):** ~66
+- **With headless regression tests:** ~18 (counting unique feature rows; some tests cover multiple rows)
+- **Live-only verification:** ~48
+- **Headless coverage ratio:** ~27%
+
+This is intentional. The headless layer covers the parts that CAN be tested without Talon: pure-Python state, JS bundle output via bun, command-dispatch routing under stubs. Everything that depends on Talon's grammar matcher, Skia render pipeline, or real action chain stays in live-verify until we build harness layers for those (a stubbed action-chain layer would lift this to ~45%; a Talon-grammar simulator would lift it further but is expensive).
+
+### 0d. Highest-leverage gaps to consider adding
+
+If we want to push the ratio up cheaply:
+
+1. **Buffer-side trailing punct test** — `ProseBuffer().add_text("hello.") → ["hello", "."]`. Easy add to L1.
+2. **Resolver-side scope tests** — feed synthetic target dicts into `_resolve_target_to_token_range` and assert token ranges. Cursorless's actual targets are JSON shapes; we can construct fixtures without Talon. Big lift in §3 coverage.
+3. **Action chain stubbed** — Layer 4. Stub Talon enough to import `prose_overlay_actions_*` and exercise the action methods. Catches integration bugs the dispatch-routing tests miss.
+4. **Underline-default-on assertion at the SETTING level** — currently L1.15 tests the runtime flag; we don't test the `mod.setting(default=True)`. Mostly a doc-vs-code consistency guard.
+5. **Coalescing threshold logic** — `_GROUP_DELAY_S` boundary test without actual timing (inject timestamps).
+
+Items 2 + 3 are the meaningful coverage leaps. The other three are quick wins.
+
+---
+
 ## 1. Dictation insertion
 
 > Spoken prose becomes tokens in the buffer. The "type continuously" model.

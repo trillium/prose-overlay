@@ -19,7 +19,9 @@ from .prose_overlay_draw_constants import (
     CURSOR_COLOR_NAVIGATE, CURSOR_COLOR_CHANGE,
     CURSOR_WIDTH, CURSOR_CHANGE_ZONE_WIDTH, CURSOR_CHANGE_ZONE_ALPHA,
     HOMOPHONE_UNDERLINE_COLOR, HOMOPHONE_UNDERLINE_HEIGHT,
+    HOMOPHONE_SHAPE_SCALE, HOMOPHONE_SHAPE_DEFAULT_COLOR,
 )
+from . import prose_overlay_shapes as _shapes
 
 
 # ---------------------------------------------------------------------------
@@ -113,12 +115,26 @@ def _draw_token_rows(
     selection: tuple[int, int] | None,
     tokens: list[str],
     flagged_indices: "set[int] | frozenset[int]" = frozenset(),
+    shape_enabled: bool = False,
 ) -> None:
     """Render token rows with hat dots, flash/selection highlights, and cursor.
 
     x_origin  — leftmost x for each row (typically panel_x + PANEL_PAD)
     y_start   — top of the first row (typically panel_y + PANEL_PAD)
+    shape_enabled — when True, paint a Cursorless-style hat shape above each
+                    flagged token (Slice 1 of HOMOPHONE_SHAPES_PLAN.md).
+                    Shape selected by flagged-rank round-robin against
+                    prose_overlay_shapes.HAT_SHAPES. Default off.
     """
+    # Pre-compute the flagged-rank lookup once per draw — Slice 1 paints
+    # shape_pool()[rank % 10] above each flagged token, where rank is the
+    # index within sorted(flagged_indices). Round-robin lets us avoid
+    # introducing instance.shape_assignments (Slice 2's job).
+    flagged_rank: dict[int, int] = {}
+    if shape_enabled and flagged_indices:
+        for rank, idx in enumerate(sorted(flagged_indices)):
+            flagged_rank[idx] = rank
+
     y_base = y_start
     for row in rows:
         x = x_origin
@@ -150,6 +166,29 @@ def _draw_token_rows(
                     c.draw_circle(dot_cx, dot_cy, DOT_RADIUS + 1)
                 c.paint.color = dot_color
                 c.draw_circle(dot_cx, dot_cy, DOT_RADIUS)
+
+            # Homophone hat shape (Slice 1 — HOMOPHONE_SHAPES_PLAN.md §3)
+            # Paint above the existing letter-hat dot when the token is
+            # flagged AND shape_enabled is on. Coexists with the underline
+            # (Slice A) — both paint when both flags fire. Shape selected by
+            # round-robin over HAT_SHAPES against flagged-rank. Anchored to
+            # the dot's (dot_cx, dot_cy) so it tracks the hat character; the
+            # SVG renderer takes care of centering against its own viewBox.
+            if has_hat and idx in flagged_rank:
+                pool = _shapes.shape_pool()
+                shape_name = pool[flagged_rank[idx] % len(pool)]
+                shape_color_hex = HAT_COLOR_HEX.get(
+                    HOMOPHONE_SHAPE_DEFAULT_COLOR, HAT_COLOR,
+                )
+                _shapes.draw_hat_shape(
+                    c,
+                    shape_name=shape_name,
+                    color=shape_color_hex,
+                    cx=dot_cx,
+                    cy=dot_cy,
+                    scale=HOMOPHONE_SHAPE_SCALE,
+                    alpha=255,
+                )
 
             # Highlight rect (flash or selection)
             highlight_color: str | None = None

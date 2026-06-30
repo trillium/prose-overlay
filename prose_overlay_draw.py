@@ -23,6 +23,7 @@ from .prose_overlay_draw_constants import (
 )
 from .prose_overlay_draw_tokens import _fit_text, _flow_layout, draw_cursor, _draw_token_rows
 from . import prose_overlay_homophones as _homophones
+from . import prose_overlay_shapes as _shapes_runtime
 from .prose_overlay_help import draw_help_panel, rotate_help_ring_buffer, HELP_COMMAND_POOL
 from .prose_overlay_history_panel import draw_history_panel, HISTORY_PAGE_SIZE
 from .prose_overlay_instance import instance
@@ -161,6 +162,14 @@ def draw_overlay(
             if settings.get("user.prose_overlay_homophone_hint") or _homophones.hint_enabled()
             else frozenset()
         )
+        # Slice 1 of HOMOPHONE_SHAPES_PLAN.md — paint hat shape over flagged
+        # tokens. Default OFF (per plan §6.1); flip on via the static
+        # setting or the runtime `overlay shapes homo on` toggle (which
+        # mutates the module flag in prose_overlay_shapes).
+        shape_enabled = bool(
+            settings.get("user.prose_overlay_homophone_shapes")
+            or _shapes_runtime.shapes_enabled()
+        )
         _draw_token_rows(
             c, rows,
             x_origin=panel_x + PANEL_PAD,
@@ -174,6 +183,7 @@ def draw_overlay(
             selection=selection,
             tokens=tokens,
             flagged_indices=flagged,
+            shape_enabled=shape_enabled,
         )
 
     # Target window label — bottom-left of content zone (hidden during overflow)

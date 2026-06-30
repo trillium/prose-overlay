@@ -14,6 +14,8 @@ from .prose_overlay_instance import instance
 
 mod = Module()
 
+_anchor_win = None
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -34,7 +36,22 @@ def _on_win_focus(win):
     instance.canvas.refresh()
 
 
+def _on_win_move(win):
+    if not instance.canvas.is_showing:
+        return
+    if _anchor_win is None:
+        return
+    try:
+        if win.id != _anchor_win.id:
+            return
+        instance.draw_mod.set_anchor_rect(win.rect)
+        instance.canvas.refresh()
+    except Exception:
+        pass
+
+
 ui.register("win_focus", _on_win_focus)
+ui.register("win_move", _on_win_move)
 
 
 def _save_prefs_from_layout():
@@ -54,9 +71,11 @@ class Actions:
 
         Updates the layout anchor immediately if the overlay is showing.
         """
+        global _anchor_win
         draw_mod = instance.draw_mod
         try:
             win = ui.active_window()
+            _anchor_win = win
             draw_mod.set_anchor_rect(win.rect)
             if instance.canvas.is_showing:
                 instance.canvas.refresh()
@@ -65,6 +84,8 @@ class Actions:
 
     def prose_overlay_clear_anchor():
         """Remove the window anchor — overlay reverts to full-screen width."""
+        global _anchor_win
+        _anchor_win = None
         draw_mod = instance.draw_mod
         draw_mod.set_anchor_rect(None)
         if instance.canvas.is_showing:
@@ -73,6 +94,11 @@ class Actions:
     def prose_overlay_set_anchor_position(position: str):
         """Set the vertical attachment point: 'top' or 'bottom'. Persisted to prefs."""
         draw_mod = instance.draw_mod
+        try:
+            win = ui.active_window()
+            draw_mod.set_anchor_rect(win.rect)
+        except Exception:
+            pass
         draw_mod.set_anchor_position(position)
         _save_prefs_from_layout()
         if instance.canvas.is_showing:

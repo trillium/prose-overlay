@@ -668,11 +668,10 @@ def run_layer_1() -> None:
     BubbleLayout = panel_layout.BubbleLayout
     place_bubbles = panel_layout.place_bubbles
 
-    with test("L1", "L1.52", "place_bubbles: non-colliding bubbles all sit on band 0"):
+    with test("L1", "L1.52", "place_bubbles: non-colliding bubbles keep their ideal_x (horizontal-only)"):
         # Three bubbles spaced wider than BUBBLE_OUTER_GAP apart → all
-        # primary row. Mirrors the worked example in PHONES_SPEC §
-        # Scenario 4 addendum where three tokens each get their own
-        # bubble without wrapping.
+        # sit at their requested ideal_x with no shift. v2 contract:
+        # single horizontal row; no vertical band wrap.
         bs = [
             BubbleLayout(ideal_x=100.0, bubble_w=50.0),
             BubbleLayout(ideal_x=180.0, bubble_w=50.0),
@@ -680,25 +679,29 @@ def run_layer_1() -> None:
         ]
         place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
         assert [b.band for b in bs] == [0, 0, 0], (
-            f"expected all band 0; got {[b.band for b in bs]}"
+            f"v2 always band 0; got {[b.band for b in bs]}"
         )
-        assert bs[0].x == 100.0 and bs[1].x == 180.0 and bs[2].x == 260.0
+        assert bs[0].x == 100.0 and bs[1].x == 180.0 and bs[2].x == 260.0, (
+            f"expected ideal_x preserved; got {[b.x for b in bs]}"
+        )
 
-    with test("L1", "L1.53", "place_bubbles: overlapping pair wraps the second to band 1"):
+    with test("L1", "L1.53", "place_bubbles: overlapping pair shifts the second RIGHT (no vertical wrap)"):
         # Two bubbles whose ideal x positions sit within OUTER_GAP of
-        # each other — the second drops to band 1 (one row below the
-        # primary). Keeps chip sizing intact instead of squeezing
-        # horizontally.
+        # each other. v2 contract: the second shifts RIGHT to
+        # `prev_right + outer_gap`, not down a band. Preserves
+        # horizontal order at the cost of moving the bubble away from
+        # its token's center.
         bs = [
-            BubbleLayout(ideal_x=100.0, bubble_w=50.0),
-            BubbleLayout(ideal_x=110.0, bubble_w=50.0),
+            BubbleLayout(ideal_x=100.0, bubble_w=50.0),  # right edge 150
+            BubbleLayout(ideal_x=110.0, bubble_w=50.0),  # collides → shift to 158
         ]
         place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
-        assert bs[0].band == 0, f"got band {bs[0].band}"
-        assert bs[1].band == 1, f"got band {bs[1].band}"
-        # Both still on the canvas at their absolute x positions.
-        assert bs[0].x == 100.0
-        assert bs[1].x == 110.0
+        assert bs[0].band == 0 and bs[1].band == 0, (
+            f"v2 single band; got {[b.band for b in bs]}"
+        )
+        assert bs[0].x == 100.0, f"first bubble untouched; got {bs[0].x}"
+        # Second sits at first.right + outer_gap = 150 + 8 = 158.
+        assert bs[1].x == 158.0, f"expected shift to 158; got {bs[1].x}"
 
     with test("L1", "L1.54", "place_bubbles: ideal_x below x_origin soft-clamps to x_origin"):
         # A bubble whose ideal_x would underflow the panel margin sticks
@@ -709,35 +712,55 @@ def run_layer_1() -> None:
         assert bs[0].x == 100.0, f"expected clamp to 100; got {bs[0].x}"
         assert bs[0].band == 0
 
-    with test("L1", "L1.55", "place_bubbles: triple-collision distributes to bands 0, 1, 2"):
+    with test("L1", "L1.55", "place_bubbles: triple-collision ratchets right (no vertical wrap)"):
         # Three bubbles whose ideal positions all sit within OUTER_GAP
-        # of each other — the second wraps to band 1, the third to
-        # band 2. Verifies the wrap loop walks beyond band 1 when
-        # needed.
+        # of each other. v2 contract: each successive bubble shifts to
+        # the previous one's right edge + outer_gap. The third may end
+        # up far past its token's center but is still on the single
+        # horizontal row.
         bs = [
-            BubbleLayout(ideal_x=100.0, bubble_w=50.0),
-            BubbleLayout(ideal_x=105.0, bubble_w=50.0),
-            BubbleLayout(ideal_x=110.0, bubble_w=50.0),
+            BubbleLayout(ideal_x=100.0, bubble_w=50.0),  # right edge 150
+            BubbleLayout(ideal_x=105.0, bubble_w=50.0),  # → 158, right edge 208
+            BubbleLayout(ideal_x=110.0, bubble_w=50.0),  # → 216, right edge 266
         ]
         place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
-        assert [b.band for b in bs] == [0, 1, 2], (
-            f"expected bands [0,1,2]; got {[b.band for b in bs]}"
+        assert [b.band for b in bs] == [0, 0, 0], (
+            f"v2 single band; got {[b.band for b in bs]}"
+        )
+        assert [b.x for b in bs] == [100.0, 158.0, 216.0], (
+            f"expected right-shift cascade; got {[b.x for b in bs]}"
         )
 
-    with test("L1", "L1.56", "place_bubbles: separated bubble after wrap stays on band 0"):
-        # b0 sits at x=100 (band 0), b1 collides with b0 → band 1, but
-        # b2 sits far enough past b0's right edge that it fits back on
-        # band 0. Verifies the placer doesn't pessimistically stick on
-        # the wrapped band once started.
+    with test("L1", "L1.56", "place_bubbles: separated bubble after shift keeps its ideal_x"):
+        # b0 sits at x=100 (right edge 150), b1 collides with b0 and
+        # shifts right to 158 (right edge 188), b2 sits at 200 which
+        # is past b1.right + outer_gap (188 + 8 = 196), so b2 stays
+        # at its ideal_x. Verifies the placer doesn't over-shift once
+        # the path is clear.
         bs = [
-            BubbleLayout(ideal_x=100.0, bubble_w=50.0),  # → band 0, right edge 150
-            BubbleLayout(ideal_x=110.0, bubble_w=30.0),  # collides → band 1
-            BubbleLayout(ideal_x=200.0, bubble_w=50.0),  # past 150+8 → band 0
+            BubbleLayout(ideal_x=100.0, bubble_w=50.0),  # untouched
+            BubbleLayout(ideal_x=110.0, bubble_w=30.0),  # shift to 158
+            BubbleLayout(ideal_x=200.0, bubble_w=50.0),  # past 196, keep
         ]
         place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
-        assert [b.band for b in bs] == [0, 1, 0], (
-            f"expected bands [0,1,0]; got {[b.band for b in bs]}"
+        assert [b.band for b in bs] == [0, 0, 0], (
+            f"v2 single band; got {[b.band for b in bs]}"
         )
+        assert bs[0].x == 100.0
+        assert bs[1].x == 158.0, f"expected shift to 158; got {bs[1].x}"
+        assert bs[2].x == 200.0, f"expected ideal_x preserved; got {bs[2].x}"
+
+    with test("L1", "L1.57", "place_bubbles: clamp-then-shift composes correctly"):
+        # b0's ideal_x underflows x_origin AND b1 collides with the
+        # clamped b0. Verifies that the right-shift uses the CLAMPED
+        # position as the basis, not the raw ideal_x.
+        bs = [
+            BubbleLayout(ideal_x=80.0, bubble_w=50.0),   # clamped to 100, right 150
+            BubbleLayout(ideal_x=120.0, bubble_w=30.0),  # collides → shift to 158
+        ]
+        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
+        assert bs[0].x == 100.0
+        assert bs[1].x == 158.0, f"expected shift to 158 (post-clamp basis); got {bs[1].x}"
 
     with test("L1", "L1.49", "compute_panel_alts: unflagged or no-shape tokens are skipped"):
         # An unflagged token (not in `flagged`) MUST NOT appear in the

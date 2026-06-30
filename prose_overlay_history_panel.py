@@ -16,21 +16,15 @@ from ...utils.overlay_kit import (
     draw_panel_frame,
     draw_separator,
 )
+from .prose_overlay_draw_constants import (
+    PANEL_RADIUS, PANEL_PAD,
+    BG_COLOR, BORDER_COLOR, TOKEN_COLOR,
+    HINT_COLOR, HINT_CMD_COLOR, SEP_COLOR, HELP_TITLE_COLOR,
+    TOKEN_FONT_SIZE,
+)
 
-# ---------------------------------------------------------------------------
-# Visual constants (mirrors prose_overlay_draw.py — keep in sync)
-# ---------------------------------------------------------------------------
-PANEL_RADIUS = 12
-PANEL_PAD = 12
-
-BG_COLOR = "1a1a2add"
-BORDER_COLOR = "4488aacc"
-TOKEN_COLOR = "eeeeffee"
-HINT_COLOR = "888899cc"
-HINT_CMD_COLOR = "ccccddee"
-SEP_COLOR = "44556688"
-HELP_TITLE_COLOR = "66aaccee"
-
+# HINT_FONT_SIZE is mutable state owned by prose_overlay_draw — use a local
+# default here for the history panel, which doesn't participate in resize commands.
 HINT_FONT_SIZE = 12
 
 # ---------------------------------------------------------------------------

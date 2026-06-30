@@ -31,13 +31,13 @@ class Actions:
 
     def prose_overlay_help_next():
         """Advance to next help page (wraps)."""
-        from .prose_overlay_draw import HELP_PAGES
+        from .prose_overlay_help import HELP_PAGES
         instance.help_page = (instance.help_page + 1) % len(HELP_PAGES)
         instance.canvas.refresh()
 
     def prose_overlay_help_back():
         """Go to previous help page (wraps)."""
-        from .prose_overlay_draw import HELP_PAGES
+        from .prose_overlay_help import HELP_PAGES
         instance.help_page = (instance.help_page - 1) % len(HELP_PAGES)
         instance.canvas.refresh()
 

@@ -12,7 +12,7 @@ Contains:
 
 from talon import Module, cron
 
-from .prose_overlay_instance import instance
+from .internal.instance import instance
 
 mod = Module()
 

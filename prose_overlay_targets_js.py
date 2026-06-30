@@ -21,13 +21,13 @@ import os
 
 import talon.lib.js as js
 
-from .prose_overlay_instance import instance
+from .internal.instance import instance
 from .prose_overlay_cursorless_resolve import _state
 from .prose_overlay_surrounding_pair import (
     _char_range_to_token_range,
     _cursor_gap_to_char_offset,
 )
-from . import prose_overlay_trail as _trail
+from .internal import trail as _trail
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ Never imports prose_overlay.py.
 
 from talon import Module, actions, ui
 
-from .prose_overlay_instance import instance
+from .internal.instance import instance
 
 mod = Module()
 

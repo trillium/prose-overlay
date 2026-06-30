@@ -12,7 +12,7 @@ import os
 
 from talon import Module, actions, settings
 
-from .prose_overlay_instance import instance
+from .internal.instance import instance
 from .prose_overlay_actions_core import _recompute_hats, _sync_tags
 
 mod = Module()
@@ -85,7 +85,7 @@ class Actions:
         _recompute_hats()
         instance.canvas.show()
         _sync_tags()  # canvas.is_showing is now True
-        from .prose_overlay_debug import emit_if_changed
+        from .internal.debug import emit_if_changed
         emit_if_changed("show")
         # Auto-enable dictation so <user.raw_prose> routes to the buffer.
         # prose_overlay_dictation.talon requires mode: dictation to fire.
@@ -101,7 +101,7 @@ class Actions:
         instance.canvas.hide()
         instance.buffer.clear()
         _sync_tags()  # canvas.is_showing is now False
-        from .prose_overlay_debug import emit_if_changed
+        from .internal.debug import emit_if_changed
         emit_if_changed("hide")
         instance.target_window_title = ""
         instance.target_recall_name = None
@@ -136,7 +136,7 @@ class Actions:
 
     def prose_overlay_debug(enabled: int):
         """Enable (1) or disable (0) JSONL state-change debug logging."""
-        from .prose_overlay_debug import set_debug_mode
+        from .internal.debug import set_debug_mode
         set_debug_mode(bool(enabled))
 
     def prose_overlay_dump_state():
@@ -160,7 +160,7 @@ class Actions:
 
     def prose_overlay_set_homophone_hint(enabled: int):
         """Enable (1) or disable (0) the homophone-underline indicator (slice A)."""
-        from . import prose_overlay_homophones as _h
+        from .internal import homophones as _h
         _h.set_hint_enabled(bool(enabled))
         if instance.canvas.is_showing:
             instance.canvas.refresh()
@@ -206,7 +206,7 @@ class Actions:
         _recompute_hats()
         if instance.canvas is not None:
             instance.canvas.refresh()
-        from .prose_overlay_debug import emit_if_changed
+        from .internal.debug import emit_if_changed
         emit_if_changed("clear_buffer")
         print("prose_overlay: buffer cleared (canvas still showing)")
 
@@ -245,7 +245,7 @@ class Actions:
             instance.history_overlay.hide()
         instance.reset()
         _sync_tags()
-        from .prose_overlay_debug import emit_if_changed
+        from .internal.debug import emit_if_changed
         emit_if_changed("reset")
         actions.mode.enable("command")
         actions.mode.disable("dictation")

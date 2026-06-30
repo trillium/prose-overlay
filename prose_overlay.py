@@ -11,15 +11,15 @@ from talon import Context, Module, actions, settings, ui
 
 from .prose_overlay_canvas import OverlayCanvas
 from . import prose_overlay_draw as _draw_mod_ref
-from .prose_overlay_state import ProseBuffer
-from .prose_overlay_viewport import Viewport
+from .internal.state import ProseBuffer
+from .internal.viewport import Viewport
 from ...utils.overlay_kit import DismissibleOverlay
 from .prose_overlay_cursorless_resolve import (
     _state as _resolve_state,
 )
-from .prose_overlay_instance import instance
+from .internal.instance import instance
 from .prose_overlay_actions_core import _recompute_hats, _sync_tags, _hat_to_index
-from . import prose_overlay_trail  # noqa: F401
+from .internal import trail  # noqa: F401
 from . import prose_overlay_test_driver  # noqa: F401
 
 mod = Module()

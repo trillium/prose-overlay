@@ -16,7 +16,7 @@ from ...utils.overlay_kit import (
     draw_panel_frame,
     draw_separator,
 )
-from .prose_overlay_draw_constants import (
+from .internal.draw_constants import (
     PANEL_RADIUS, PANEL_PAD,
     BG_COLOR, BORDER_COLOR, TOKEN_COLOR,
     HINT_COLOR, HINT_CMD_COLOR, SEP_COLOR, HELP_TITLE_COLOR,

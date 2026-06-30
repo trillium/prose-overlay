@@ -14,7 +14,7 @@ from ...utils.overlay_kit import (
     DismissibleOverlay,
     draw_panel_frame,
 )
-from .prose_overlay_draw_constants import (
+from .internal.draw_constants import (
     PANEL_RADIUS, PANEL_PAD, PANEL_H_FRACTION,
     BG_COLOR, BORDER_COLOR,
     BG_COLOR_FALLBACK, BORDER_COLOR_FALLBACK,
@@ -22,11 +22,11 @@ from .prose_overlay_draw_constants import (
     TOKEN_FONT_SIZE, DOT_RADIUS, DOT_GAP_Y, LINE_HEIGHT,
 )
 from .prose_overlay_draw_tokens import _fit_text, _flow_layout, draw_cursor, _draw_token_rows
-from . import prose_overlay_homophones as _homophones
+from .internal import homophones as _homophones
 from . import prose_overlay_shapes as _shapes_runtime
 from .prose_overlay_help import draw_help_panel, rotate_help_ring_buffer, HELP_COMMAND_POOL
 from .prose_overlay_history_panel import draw_history_panel, HISTORY_PAGE_SIZE
-from .prose_overlay_instance import instance
+from .internal.instance import instance
 
 # Re-export for canvas.py which imports draw_help_panel from this module.
 __all__ = ["draw_overlay", "draw_help_panel", "draw_history_panel", "HISTORY_PAGE_SIZE"]
@@ -220,7 +220,7 @@ def draw_overlay(
     # Continuous capture — emit on every draw. emit_if_changed dedupes by
     # snapshot equality so this is a no-op when nothing changed since the
     # last earlier-stage hook fired (set_cursor, recompute_hats, show, hide).
-    from . import prose_overlay_debug
+    from .internal import debug as prose_overlay_debug
     prose_overlay_debug.emit_if_changed("draw")
 
     return panel_rect

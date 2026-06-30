@@ -45,9 +45,9 @@ def set_debug_mode(enabled: bool) -> None:
 
 def _snapshot() -> dict:
     """Capture a point-in-time snapshot of all prose overlay state."""
-    from .prose_overlay_instance import instance
-    from . import prose_overlay_draw as dm
-    from . import prose_overlay_homophones as _h
+    from .instance import instance
+    from ..ui import draw as dm
+    from . import homophones as _h
 
     tokens = instance.buffer.get_tokens()
     # Per-token hat mark: "color-letter" if hatted, "-" if not. Flat dict

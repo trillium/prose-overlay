@@ -11,7 +11,7 @@ the same instance at draw time.
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .prose_overlay_draw_constants import PANEL_H_FRACTION, PANEL_PAD, LINE_HEIGHT
+from .draw_constants import PANEL_H_FRACTION, PANEL_PAD, LINE_HEIGHT
 
 
 @dataclass(frozen=True)

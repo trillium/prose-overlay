@@ -10,9 +10,9 @@ Contains:
 
 from talon import Module
 
-from .prose_overlay_instance import instance
+from .internal.instance import instance
 from .prose_overlay_actions_core import _hat_to_index, _recompute_hats
-from .prose_overlay_state import EditKind
+from .internal.state import EditKind
 
 mod = Module()
 

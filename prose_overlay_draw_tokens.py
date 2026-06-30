@@ -13,7 +13,7 @@ from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect
 
 from ...utils.overlay_kit import draw_rounded_rect
-from .prose_overlay_draw_constants import (
+from .internal.draw_constants import (
     DOT_RADIUS, DOT_GAP_Y, TOKEN_FONT_SIZE, TOKEN_GAP_X, LINE_HEIGHT,
     TOKEN_COLOR, HAT_COLOR, HAT_COLOR_HEX, HAT_ALPHABET,
     CURSOR_COLOR_NAVIGATE, CURSOR_COLOR_CHANGE,

@@ -10,8 +10,8 @@ from typing import Any
 
 from talon import Module, actions
 
-from .prose_overlay_instance import instance
-from .prose_overlay_state import EditKind
+from .internal.instance import instance
+from .internal.state import EditKind
 from .prose_overlay_actions_core import _recompute_hats
 from .prose_overlay_actions_flash import _flash_tokens, _action_color
 from .prose_overlay_cursorless_resolve import (

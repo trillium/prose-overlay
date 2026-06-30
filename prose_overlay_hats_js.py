@@ -14,8 +14,8 @@ import json
 import os
 import talon.lib.js as js
 
-from .prose_overlay_state import compute_hat_assignments as _py_compute_hat_assignments
-from . import prose_overlay_trail as _trail
+from .internal.state import compute_hat_assignments as _py_compute_hat_assignments
+from .internal import trail as _trail
 
 # ---------------------------------------------------------------------------
 # Module-level JS context — created once, reused across calls

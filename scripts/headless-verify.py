@@ -17,7 +17,7 @@ import types
 from contextlib import contextmanager
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-STATE_PY = REPO / "prose_overlay_state.py"
+STATE_PY = REPO / "internal" / "state.py"
 HAT_JS = REPO / "js" / "prose_allocate_hats.js"
 TEST_DRIVER_PY = REPO / "prose_overlay_test_driver.py"
 
@@ -58,7 +58,7 @@ def _load_instance_module():
     """Load prose_overlay_instance.py — ProseOverlayState is dependency-free."""
     spec = importlib.util.spec_from_file_location(
         "prose_overlay_instance",
-        REPO / "prose_overlay_instance.py",
+        REPO / "internal" / "instance.py",
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -232,7 +232,7 @@ def run_layer_1() -> None:
 
     homophones_spec = importlib.util.spec_from_file_location(
         "prose_overlay_homophones",
-        REPO / "prose_overlay_homophones.py",
+        REPO / "internal" / "homophones.py",
     )
     homophones = importlib.util.module_from_spec(homophones_spec)
     homophones_spec.loader.exec_module(homophones)

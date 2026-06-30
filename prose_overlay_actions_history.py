@@ -10,7 +10,7 @@ import subprocess
 
 from talon import Module, actions
 
-from .prose_overlay_instance import instance
+from .internal.instance import instance
 from .prose_overlay_actions_core import _recompute_hats
 
 mod = Module()
@@ -94,7 +94,7 @@ class Actions:
         if not chars:
             return
         from .prose_overlay_actions_cursor import _auto_scroll_to_cursor
-        from .prose_overlay_state import EditKind
+        from .internal.state import EditKind
         extending = (
             instance.cursor is None
             and bool(instance.buffer.get_tokens())
@@ -216,6 +216,6 @@ class Actions:
 
     def prose_overlay_undo_group_set(enabled: int):
         """Toggle CM6-style dictation coalescing. 1 = group within 400ms, 0 = off."""
-        from . import prose_overlay_state as _state
+        from .internal import state as _state
         _state._GROUP_DELAY_S = 0.400 if enabled else 0.0
         print(f"prose_overlay: undo grouping {'ON (400ms)' if enabled else 'OFF'}")

@@ -22,6 +22,7 @@ from ..internal.draw_constants import (
     TOKEN_FONT_SIZE, DOT_RADIUS, DOT_GAP_Y, LINE_HEIGHT,
 )
 from .draw_tokens import _fit_text, _flow_layout, draw_cursor, _draw_token_rows
+from .draw_panels import draw_homophone_panels
 from ..internal import homophones as _homophones
 from ..shim import shapes as _shapes_runtime
 from .help import draw_help_panel, rotate_help_ring_buffer, HELP_COMMAND_POOL
@@ -185,6 +186,20 @@ def draw_overlay(
             flagged_indices=flagged,
             shape_enabled=shape_enabled,
         )
+
+        # Slice C of docs/PHONES_SPEC.md Scenario 4 — expanded panels
+        # rendered AFTER the token rows so panel chips can paint over
+        # the row's underline reserve without being clipped. No-op when
+        # instance.homophone_panel_alts is empty (shapes off, no flagged
+        # tokens with > 1 group member, or shapes_enabled gate flipped
+        # in _recompute_hats).
+        if shape_enabled:
+            draw_homophone_panels(
+                c,
+                rows,
+                x_origin=panel_x + PANEL_PAD,
+                y_start=panel_y + PANEL_PAD,
+            )
 
     # Target window label — bottom-left of content zone (hidden during overflow)
     if target_label and not _hints_hidden_by_overflow:

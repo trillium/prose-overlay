@@ -42,7 +42,8 @@ Read this if you're using the overlay and want to know what to say.
 ### Homophone surface
 
 - [`homophone_underline.md`](homophone_underline.md) — amber dotted underline (always-on flag)
-- [`homophone_shapes.md`](homophone_shapes.md) — shape hats (`bolt`, `wing`, `frame`, …)
+- [`homophone_shapes.md`](homophone_shapes.md) — shape hats (`bolt`, `wing`, `frame`, …); same group = same shape
+- [`phones.md`](phones.md) — `phone <shape>` / `phones <word>` / `<color> <shape>` swap actions
 
 ### History
 

@@ -3,10 +3,10 @@ task: Voice-first prose editor for Talon — Cursorless verbs on a floating buff
 slug: prose-overlay-v2
 effort: E4
 phase: build
-progress: 9/24
+progress: 10/24
 mode: build
 started: 2026-05-21T00:00:00Z
-updated: 2026-06-30T00:00:00Z
+updated: 2026-06-30T08:00:00Z
 project: prose_overlay
 ---
 
@@ -75,7 +75,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - [x] ISC-12: Voice toggle for homophone hint (`overlay hints homo on/off`) — `prose_overlay_actions_visibility.py:prose_overlay_set_homophone_hint`
 - [ ] ISC-13: Homophone slice B — `phone <hat>` cycles to next group member (per `docs/HOMOPHONE_UI_PLAN.md`)
 - [ ] ISC-14: Hat shape vocabulary integrated for shape-coded homophone swap (per `docs/HOMOPHONE_SHAPES_LOCATION.md`)
-- [ ] ISC-15: Scope-preview flash before execution — when user speaks a scope verb, the resolved range flashes before the destructive action
+- [x] ISC-15: Scope-preview flash before execution — when user speaks a scope verb, the resolved range flashes before the destructive action (satisfied by inheritance — `_flash_tokens(indices, color, _execute)` schedules `_execute` after a 150ms `cron.after`, so every dispatcher that resolves a target through `_resolve_target_to_token_range` — including scope verbs via `_apply_containing_scope` / `_scope_word` / `_scope_regex` / `_scope_surrounding_pair` — flashes the resolved range before mutating; this turn added `flash` + `flash_color` to the debug snapshot so the Test-Strategy probe has greppable fields)
 
 ### Phase 4 — Observability + headless driving
 
@@ -102,7 +102,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 | 10 | visual | force JS allocator failure, assert orange chrome appears | manual or screenshot diff |
 | 11–12 | logic | dictate flagged words with hint on, assert underline drawn (via debug log `flagged` field) | test-overlay.sh + grep flagged |
 | 13–14 | feature | per HOMOPHONE_UI_PLAN slice criteria | future slices |
-| 15 | visual | speak scope verb, assert flash event in debug log before mutation | grep flash_indices in debug.jsonl |
+| 15 | visual | speak scope verb, assert `flash` field diff appears in debug.jsonl before the `tokens` field diff | `jq 'select(.diff.flash)' ~/.talon/prose_overlay_debug.jsonl` |
 | 16–17 | observability | mutate buffer 1000×, assert log grew + rotated at 5 MB | test-overlay.sh + wc/ls -la |
 | 18 | crash | reproduce HAT_ALLOC overflow under PROSE_OVERLAY_TRAIL=1, assert traceback in faulthandler.log | manual repro |
 | 19 | integration | shell pipes 10 commands, debug log shows 10 diffs | test-overlay.sh batch + grep |
@@ -122,7 +122,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 | HomophoneSliceA | Static dotted underline behind opt-in flag | ISC-11..12 | shipped |
 | HomophoneSwap | `phone <hat>` cycle (slice B) | ISC-13 | planned |
 | HatShapeIntegration | Lift mouse-clock shape vocabulary for swap UI | ISC-14 | located |
-| ScopePreviewFlash | Pre-execution flash of resolved scope | ISC-15 | planned |
+| ScopePreviewFlash | Pre-execution flash of resolved scope | ISC-15 | shipped |
 | DebugStreamRich | Always-on JSONL with full snapshot + rotation | ISC-16..17 | shipped |
 | StackOverflowTrail | Paper-trail slice tree (A: faulthandler; B: preamble) | ISC-18, ISC-20 | A shipped |
 | TestDriver | Headless JSON queue for shell-driven dispatch | ISC-19 | shipped |
@@ -137,9 +137,12 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - **2026-06-30 — Numbers and pure-punctuation tokens get NO hat** (commit `3c8c9e9`). The prior fallback used `token[0]` as the hat letter even for digits, but Talon's `user.letter` capture only accepts a-z so the hat could never be selected — dead pixels. Real number addressing (e.g. `chuck num 1`) requires a separate hat namespace + voice capture; planned for a future slice if usage warrants.
 - **2026-06-30 — Debug mode default ON.** Off-by-default observability is bad practice — nobody enables it before the bug they wanted to diagnose. The 5 MB log rotation bounds disk use.
 - **2026-06-29 — Cursorless rule shape: LIST + CAPTURE not CAPTURE + CAPTURE** (commit `44a01a5`). Wins specificity tie-break against cursorless.talon's CAPTURE + CAPTURE rule whenever the PO context is active.
+- **2026-06-30 — ISC-15 satisfied by inheritance, not new code.** Audit during loop turn 1 showed `_flash_tokens(indices, color, _execute)` schedules the mutation as a 150ms-deferred callback for every dispatcher (`prose_overlay_run_action`, `_range`, `apply_formatter`, `bring_move`, all hat-delete variants, cursor-setters). Scope verbs route through `prose_overlay_run_action` and resolve through `_resolve_target_to_token_range` which delegates to scope handlers — same callback path, same pre-execution flash. The missing piece was observability: `_snapshot()` didn't include `instance.flash_state`. Closed with two field additions (`flash`, `flash_color`). Doctrine win: prefer recognizing an existing satisfied criterion over building speculative new code.
+- **2026-06-30 — Delegation soft-floor override at E3 (show your math).** The work was a 2-line dict-literal addition plus targeted ISA edits — spawning Forge in a worktree adds ~10× the actual work in setup, context re-derivation, and merge overhead. Inline edit + direct ISA writes. Cato/Anvil not auto-included at E3.
 
 ## Changelog
 
+- **2026-06-30** — Loop turn 1 (autonomous): ISC-15 (scope-preview flash) flipped green by audit + observability close. 10/24.
 - **2026-06-30** — Phase 2 active. 9/24 ISCs green. Today's session shipped: viewport extraction (ISC-22), buffer rev counter (ISC-21), homophone slice A (ISC-11, ISC-12), hat-shape locate (ISC-14 substrate), stack-overflow trail slice A (ISC-18), always-on debug + draw hook (ISC-16, ISC-17), test driver (ISC-19). Plus three plan docs: `docs/UNDO_REDO_PLAN.md`, `docs/HOMOPHONE_UI_PLAN.md`, `docs/STACK_OVERFLOW_PAPER_TRAIL_PLAN.md`.
 - **2026-06-04** — Cursorless verb surface filled (ISCs 1–7 green via commits `44a01a5`, `46c93fc`, `170a0f7`).
 - **2026-05-31** — Wave 3 refactor (cursor, layout, history, help, visibility action files split out of monolithic prose_overlay.py).

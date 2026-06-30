@@ -41,9 +41,11 @@ import xml.etree.ElementTree as ET
 # command `overlay shapes homo on` mutates this flag instead of the static
 # user.prose_overlay_homophone_shapes setting. The draw module ORs both
 # (static setting OR runtime flag) so either path turns shapes on.
-# Default OFF per HOMOPHONE_SHAPES_PLAN.md §6.1 — Slice 1 ships invisible
-# at the voice layer.
-_shapes_enabled: bool = False
+# Default ON since 2026-06-30 (user keep verdict — mirrors the slice-A
+# homophone-hint default flip; rationale per memory
+# feedback_overlay_subtle_hints_wrong: must-perceive signals should default
+# loud, not subtle). Toggle off via `overlay shapes homo off`.
+_shapes_enabled: bool = True
 
 
 def set_shapes_enabled(v: bool) -> None:

@@ -85,15 +85,16 @@ mod.setting(
 mod.setting(
     "prose_overlay_homophone_shapes",
     type=bool,
-    default=False,
+    default=True,
     desc=(
         "When true, paint a Cursorless-style hat shape (bolt, frame, eye, "
         "…) above every flagged token, on top of the existing letter-hat "
         "dot. Slice 1 of the homophone-shapes exploration "
-        "(docs/HOMOPHONE_SHAPES_PLAN.md). Default OFF per plan §6.1 — "
-        "Slice 1 is invisible at the voice layer until 'overlay shapes "
-        "homo on' fires. Coexists with the underline (Slice A) when both "
-        "are enabled."
+        "(docs/HOMOPHONE_SHAPES_PLAN.md). Default ON since 2026-06-30 "
+        "(user keep verdict — mirrors the slice-A homophone-hint default "
+        "flip; rationale per memory feedback_overlay_subtle_hints_wrong: "
+        "must-perceive signals should default loud, not subtle). Toggle "
+        "off via 'overlay shapes homo off'."
     ),
 )
 

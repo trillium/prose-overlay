@@ -243,6 +243,24 @@ def run_layer_1() -> None:
             f"{homophones.hint_enabled()!r}"
         )
 
+    shapes_spec = importlib.util.spec_from_file_location(
+        "prose_overlay_shapes",
+        REPO / "prose_overlay_shapes.py",
+    )
+    try:
+        shapes_mod = importlib.util.module_from_spec(shapes_spec)
+        shapes_spec.loader.exec_module(shapes_mod)
+    except Exception:
+        shapes_mod = None
+
+    with test("L1", "L1.16b", "shapes_enabled() is True by default (keep verdict)"):
+        if shapes_mod is None:
+            raise AssertionError("prose_overlay_shapes failed to import")
+        assert shapes_mod.shapes_enabled() is True, (
+            f"default should be ON after 2026-06-30 keep verdict; got "
+            f"{shapes_mod.shapes_enabled()!r}"
+        )
+
     with test("L1", "L1.16", "homophone flag set is populated from CSV (non-empty)"):
         # The CSV path is hardcoded to trillium_talon's homophones.csv; if the
         # path doesn't exist on this machine the load function returns an empty

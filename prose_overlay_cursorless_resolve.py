@@ -253,17 +253,141 @@ def _cursorless_symbol_to_token_index(decorated_symbol: dict) -> int:
     return _state.hat_to_token.get((character.lower(), prose_color), -1)
 
 
+def _resolve_mark_to_base_idx(mark, tokens) -> "int | None | str":
+    """Resolve a mark dict to a base token index.
+
+    Returns an int index, None (mark absent / unrecognized — caller continues),
+    or the sentinel string "error" if a recognized mark failed to resolve.
+    """
+    if mark is None:
+        return None
+    mark_type = mark.get("type")
+    if mark_type == "decoratedSymbol":
+        idx = _cursorless_symbol_to_token_index(mark)
+        if idx < 0:
+            print(
+                f"prose_overlay: decorated symbol not found in hat map: "
+                f"{mark.get('character')!r} / {mark.get('symbolColor')!r}"
+            )
+            return "error"
+        return idx
+    if mark_type == "cursor":
+        if _state.cursor is not None:
+            return min(max(_state.cursor, 0), len(tokens) - 1)
+        return len(tokens) - 1
+    return None
+
+
+def _cursor_fallback_idx(tokens) -> "int | None":
+    """Clamp the active cursor to a valid token index, or None if no cursor."""
+    if _state.cursor is None:
+        return None
+    return min(max(_state.cursor, 0), len(tokens) - 1)
+
+
+def _apply_extend_through_start_of(tokens, base_idx, _mod) -> "tuple[int, int] | None":
+    if base_idx is None:
+        base_idx = _cursor_fallback_idx(tokens)
+        if base_idx is None:
+            print("prose_overlay: extendThroughStartOf requires an active cursor")
+            return None
+    return (0, base_idx)
+
+
+def _apply_extend_through_end_of(tokens, base_idx, _mod) -> "tuple[int, int] | None":
+    if base_idx is None:
+        base_idx = _cursor_fallback_idx(tokens)
+        if base_idx is None:
+            print("prose_overlay: extendThroughEndOf requires an active cursor")
+            return None
+    return (base_idx, len(tokens) - 1)
+
+
+def _apply_every_scope(tokens, _base_idx, _mod) -> "tuple[int, int] | None":
+    return (0, len(tokens) - 1)
+
+
+def _scope_word(tokens, base_idx, scope_type) -> "tuple[int, int] | None":
+    if base_idx is not None:
+        return (base_idx, base_idx)
+    tok_idx = _cursor_fallback_idx(tokens)
+    if tok_idx is None:
+        print(f"prose_overlay: scope '{scope_type}' requires a mark or active cursor")
+        return None
+    return (tok_idx, tok_idx)
+
+
+def _scope_surrounding_pair(tokens, base_idx, mod) -> "tuple[int, int] | None":
+    if base_idx is not None:
+        anchor_tok_idx = base_idx
+    else:
+        anchor_tok_idx = _cursor_fallback_idx(tokens)
+        if anchor_tok_idx is None:
+            print("prose_overlay: scope 'surroundingPair' requires a mark or active cursor")
+            return None
+    delimiter = mod.get("scopeType", {}).get("delimiter", "any")
+    return _resolve_surrounding_pair(tokens, anchor_tok_idx, delimiter)
+
+
+def _scope_regex(tokens, base_idx, scope_type) -> "tuple[int, int] | None":
+    if base_idx is not None:
+        anchor_char = _token_idx_to_char_offset(base_idx, tokens)
+    elif _state.cursor is not None:
+        anchor_char = _cursor_gap_to_char_offset(_state.cursor, tokens)
+    else:
+        print(f"prose_overlay: scope '{scope_type}' requires a mark or active cursor")
+        return None
+    text = " ".join(tokens)
+    pattern = _REGEX_SCOPE_PATTERNS[scope_type]
+    for m in pattern.finditer(text):
+        if m.start() <= anchor_char <= m.end():
+            result = _char_range_to_token_range(m.start(), m.end(), tokens)
+            if result is not None:
+                return result
+    print(f"prose_overlay: no '{scope_type}' match at anchor position")
+    return None
+
+
+def _apply_containing_scope(tokens, base_idx, mod) -> "tuple[int, int] | None":
+    """Handle containingScope / preferredScope by dispatching on scope type.
+
+    Anchor precedence: when the target carries a mark (base_idx is set), the
+    scope is computed around that token; otherwise fall back to the cursor.
+    """
+    scope_type = mod.get("scopeType", {}).get("type", "")
+    if scope_type in _WHOLE_BUFFER_SCOPE_TYPES:
+        return (0, len(tokens) - 1)
+    if scope_type in _WORD_SCOPE_TYPES:
+        return _scope_word(tokens, base_idx, scope_type)
+    if scope_type == "surroundingPair":
+        return _scope_surrounding_pair(tokens, base_idx, mod)
+    if scope_type in _REGEX_SCOPE_PATTERNS:
+        return _scope_regex(tokens, base_idx, scope_type)
+    print(f"prose_overlay: unrecognized scope type '{scope_type}'")
+    return None
+
+
+# Dispatch table: modifier type -> handler. Unrecognized mod_types fall through
+# (matches the original chained-if behavior, including the intentional skip of
+# relativeScope — see CURSORLESS_REIMPLEMENTATIONS.md §2).
+_MODIFIER_HANDLERS = {
+    "extendThroughStartOf": _apply_extend_through_start_of,
+    "extendThroughEndOf":   _apply_extend_through_end_of,
+    "everyScope":           _apply_every_scope,
+    "containingScope":      _apply_containing_scope,
+    "preferredScope":       _apply_containing_scope,
+}
+
+
 def _resolve_primitive_to_token_range(target) -> "tuple[int, int] | None":
     """Resolve a PrimitiveTarget to (start_token_idx, end_token_idx) inclusive.
 
     Two-phase:
     1. Resolve the mark to a base token index (decoratedSymbol → hat map,
        no mark → cursor position).
-    2. Apply modifiers to the base index to compute the final range:
-       - extendThroughStartOf ("head"): (0, base_idx)
-       - extendThroughEndOf  ("tail"): (base_idx, len-1)
-       - containingScope/everyScope: whole-buffer or cursor-token range
-       - no modifier: (base_idx, base_idx)
+    2. Apply modifiers via _MODIFIER_HANDLERS dispatch. The first handler that
+       returns (i.e. matches a known mod_type) terminates the loop. Unknown
+       mod_types are skipped — matching the prior chained-if behavior.
 
     Returns None if the target cannot be resolved, logging the reason.
     """
@@ -272,120 +396,19 @@ def _resolve_primitive_to_token_range(target) -> "tuple[int, int] | None":
         print("prose_overlay: buffer is empty — cannot resolve target")
         return None
 
-    mark = target.mark  # dict or None
-    modifiers = target.modifiers or []  # list of dicts
+    mark = target.mark
+    modifiers = target.modifiers or []
 
-    # --- Step 1: resolve mark to base token index ------------------------------
-    base_idx: "int | None" = None
+    base = _resolve_mark_to_base_idx(mark, tokens)
+    if base == "error":
+        return None
+    base_idx: "int | None" = base
 
-    if mark is not None:
-        mark_type = mark.get("type")
-        if mark_type == "decoratedSymbol":
-            idx = _cursorless_symbol_to_token_index(mark)
-            if idx < 0:
-                print(
-                    f"prose_overlay: decorated symbol not found in hat map: "
-                    f"{mark.get('character')!r} / {mark.get('symbolColor')!r}"
-                )
-                return None
-            base_idx = idx
-        elif mark_type == "cursor":
-            # "this" in Cursorless — currentSelection maps to cursor position.
-            # If no editing cursor is set, fall back to the last token (where
-            # dictation is currently appending).
-            if _state.cursor is not None:
-                base_idx = min(max(_state.cursor, 0), len(tokens) - 1)
-            else:
-                base_idx = len(tokens) - 1
-    # If mark is None (or unrecognized), base_idx stays None; modifiers may supply the range.
-
-    # --- Step 2: apply modifiers -----------------------------------------------
     for mod in modifiers:
-        mod_type = mod.get("type")
+        handler = _MODIFIER_HANDLERS.get(mod.get("type"))
+        if handler is not None:
+            return handler(tokens, base_idx, mod)
 
-        # "chuck head <hat>" / "chuck head this" — from start through base token
-        if mod_type == "extendThroughStartOf":
-            if base_idx is None:
-                if _state.cursor is None:
-                    print("prose_overlay: extendThroughStartOf requires an active cursor")
-                    return None
-                base_idx = min(max(_state.cursor, 0), len(tokens) - 1)
-            return (0, base_idx)
-
-        # "chuck tail <hat>" / "chuck tail this" — from base token through end
-        if mod_type == "extendThroughEndOf":
-            if base_idx is None:
-                if _state.cursor is None:
-                    print("prose_overlay: extendThroughEndOf requires an active cursor")
-                    return None
-                base_idx = min(max(_state.cursor, 0), len(tokens) - 1)
-            return (base_idx, len(tokens) - 1)
-
-        # everyScope — "each <scope>" always means the entire buffer in a
-        # single-line prose context. Ignore scope type; return full range.
-        if mod_type == "everyScope":
-            return (0, len(tokens) - 1)
-
-        # containingScope / preferredScope — scope at the mark (or cursor).
-        #
-        # Anchor precedence: when the target carries a mark (base_idx is set),
-        # the scope is computed around that token. Without a mark, fall back
-        # to the cursor. This is what makes phrases like "chuck sentence drum"
-        # find the sentence containing the drum hat — not the sentence at the
-        # cursor.
-        if mod_type in ("containingScope", "preferredScope"):
-            scope_type = mod.get("scopeType", {}).get("type", "")
-            if scope_type in _WHOLE_BUFFER_SCOPE_TYPES:
-                return (0, len(tokens) - 1)
-            if scope_type in _WORD_SCOPE_TYPES:
-                if base_idx is not None:
-                    return (base_idx, base_idx)
-                if _state.cursor is None:
-                    print(
-                        f"prose_overlay: scope '{scope_type}' requires a mark or active cursor"
-                    )
-                    return None
-                tok_idx = min(max(_state.cursor, 0), len(tokens) - 1)
-                return (tok_idx, tok_idx)
-            if scope_type == "surroundingPair":
-                if base_idx is not None:
-                    anchor_tok_idx = base_idx
-                elif _state.cursor is not None:
-                    anchor_tok_idx = min(max(_state.cursor, 0), len(tokens) - 1)
-                else:
-                    print("prose_overlay: scope 'surroundingPair' requires a mark or active cursor")
-                    return None
-                delimiter = mod.get("scopeType", {}).get("delimiter", "any")
-                return _resolve_surrounding_pair(tokens, anchor_tok_idx, delimiter)
-            if scope_type in _REGEX_SCOPE_PATTERNS:
-                if base_idx is not None:
-                    anchor_char = _token_idx_to_char_offset(base_idx, tokens)
-                elif _state.cursor is not None:
-                    anchor_char = _cursor_gap_to_char_offset(_state.cursor, tokens)
-                else:
-                    print(
-                        f"prose_overlay: scope '{scope_type}' requires a mark or active cursor"
-                    )
-                    return None
-                text = " ".join(tokens)
-                pattern = _REGEX_SCOPE_PATTERNS[scope_type]
-                for m in pattern.finditer(text):
-                    if m.start() <= anchor_char <= m.end():
-                        result = _char_range_to_token_range(m.start(), m.end(), tokens)
-                        if result is not None:
-                            return result
-                print(f"prose_overlay: no '{scope_type}' match at anchor position")
-                return None
-            print(f"prose_overlay: unrecognized scope type '{scope_type}'")
-            return None
-
-        # relativeScope ("next <scope>", "previous <scope>", "next two <scope>")
-        # is intentionally NOT handled here. It lives in cursorless-engine's
-        # RelativeScopeStage and should be reached by extending the JS shim
-        # to call cursorless's processTargets, not by re-implementing the
-        # walk in Python. See CURSORLESS_REIMPLEMENTATIONS.md §2.
-
-    # --- Step 3: no modifiers — return base index as single-token range --------
     if base_idx is not None:
         return (base_idx, base_idx)
 

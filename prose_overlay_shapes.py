@@ -35,6 +35,27 @@ import os
 import xml.etree.ElementTree as ET
 
 # ---------------------------------------------------------------------------
+# Runtime toggle — mirrors the prose_overlay_homophones._hint_enabled pattern
+# ---------------------------------------------------------------------------
+# Talon doesn't have a public live-setter for module settings, so the voice
+# command `overlay shapes homo on` mutates this flag instead of the static
+# user.prose_overlay_homophone_shapes setting. The draw module ORs both
+# (static setting OR runtime flag) so either path turns shapes on.
+# Default OFF per HOMOPHONE_SHAPES_PLAN.md §6.1 — Slice 1 ships invisible
+# at the voice layer.
+_shapes_enabled: bool = False
+
+
+def set_shapes_enabled(v: bool) -> None:
+    global _shapes_enabled
+    _shapes_enabled = bool(v)
+
+
+def shapes_enabled() -> bool:
+    return _shapes_enabled
+
+
+# ---------------------------------------------------------------------------
 # Public vocabulary
 # ---------------------------------------------------------------------------
 

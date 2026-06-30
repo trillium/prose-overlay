@@ -12,7 +12,7 @@ Contains:
 from ..internal.instance import instance
 from .hats_js import compute_hat_assignments
 from . import hats_js as _hats_js_mod
-from .shapes import compute_shape_assignments, shapes_enabled
+from .shapes import compute_shape_assignments, shapes_enabled, compute_panel_alts
 from ..cursorless.resolve import (
     _state as _resolve_state,
 )
@@ -109,6 +109,21 @@ def _recompute_hats():
             new_positions[idx] = pos
     instance.next_alt_assignments = new_next_alt
     instance.position_assignments = new_positions
+
+    # Slice C of docs/PHONES_SPEC.md — per-shape-hatted-token panel.
+    # compute_panel_alts walks instance.shape_assignments and builds the
+    # color → alt_word mapping that the panel renderer paints and the
+    # color-addressed swap action looks up. Cheap (O(shape_count) with
+    # small constants); no memoization needed for the same reason as
+    # next_alt_assignments above.
+    if shapes_on and instance.shape_assignments:
+        instance.homophone_panel_alts = compute_panel_alts(
+            tokens=tokens,
+            flagged=flagged_for_cycle,
+            shape_assignments=instance.shape_assignments,
+        )
+    else:
+        instance.homophone_panel_alts = {}
 
     from ..internal.debug import emit_if_changed
     emit_if_changed("recompute_hats")

@@ -1,2 +1,9 @@
 __pycache__/
 prose_overlay_prefs.json
+
+# ISA-loop turn reports — ephemeral progress notes, one per loop iteration.
+# Durable progress lives in commits + ISA.md checkbox updates; turn files
+# are scaffolding for the loop itself. README + STATEMENT.md stay tracked.
+turns/*
+!turns/README.md
+!turns/STATEMENT.md

@@ -54,8 +54,6 @@ def compute_hat_assignments(
             for ci, ch in enumerate(token)
             if ch.lower().isalpha()
         ]
-        if not candidates and token:
-            candidates = [(0, token[0])]
         if not candidates:
             continue
 

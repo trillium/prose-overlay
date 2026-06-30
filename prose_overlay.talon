@@ -73,6 +73,34 @@ overlay shapes homo off: user.prose_overlay_set_homophone_shapes(0)
 (phone | phones) {user.prose_hat_shape}:
     user.prose_overlay_phone_shape(prose_hat_shape)
 
+# Slice B of docs/PHONES_SPEC.md — addressing by current surface word.
+# Scenario 5. Uses trillium_talon's existing user.homophones_canonical
+# capture (in core/homophones/homophones.py:175); when the overlay is
+# active, this rule wins context specificity over the modal HUD rule of
+# the same shape in core/homophones/homophones.talon. The community
+# modal HUD still works when the overlay is NOT active.
+phones <user.homophones_canonical>:
+    user.prose_overlay_phone_word(homophones_canonical)
+
+# Slice B of docs/PHONES_SPEC.md — addressing by letter hat (Scenario 6).
+# Two variants: gray-default and explicit color prefix. The action is a
+# no-op when the addressed token is unflagged (OQ10 default). Caveat:
+# the letter-hat allocator may reassign the slot after a swap (the new
+# word may not have a `letter` char), so repeated `phones <letter>` may
+# target different tokens. Use `phone <shape>` for muscle-memory cycling.
+#
+# OQ9 disambiguation: when the spoken word matches BOTH the homophones_canonical
+# list AND the letter NATO form (rare — e.g. "air"), Talon's matcher
+# picks by context specificity. Both rules sit in the overlay-active
+# context with the same gate set. The homophones_canonical list is the
+# narrower / more specific match by intent — but Talon resolves by
+# rule order/length, not semantics, so document the resolution as
+# "first match wins" and surface a TTS hint if surprise reports come in.
+phones <user.letter>:
+    user.prose_overlay_phone_letter(letter)
+phones <user.prose_hat_color> <user.letter>:
+    user.prose_overlay_phone_letter(letter, prose_hat_color)
+
 # Toggle auto-show on all dictation phrases
 overlay auto: user.prose_overlay_toggle_auto_dictation()
 

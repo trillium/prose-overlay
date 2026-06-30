@@ -360,7 +360,8 @@ def _draw_one_bubble(c: SkiaCanvas, b: _Bubble, y_top: float) -> None:
 
     Pieces, left to right:
       1. Left chip (color background, alt text on top)
-      2. Homophone shape glyph (small, amber, centered between gaps)
+      2. Homophone shape glyph (small, amber, on a black backdrop
+         circle for contrast against the bright chip colors)
       3. Right chip (when present; 3-member or 4+ groups)
     """
     shape_w = _SHAPE_NATIVE_W * BUBBLE_SHAPE_SCALE
@@ -381,18 +382,12 @@ def _draw_one_bubble(c: SkiaCanvas, b: _Bubble, y_top: float) -> None:
     left_x = b.x
     _draw_chip(c, left_color, left_alt, left_x, chip_y, left_chip_w, chip_h)
 
-    # ----- Shape glyph ------------------------------------------------------
+    # ----- Shape glyph (with backdrop) -------------------------------------
     shape_x_left = left_x + left_chip_w + BUBBLE_INNER_GAP
     shape_cx = shape_x_left + shape_w / 2.0
     shape_cy = chip_mid_y
-    _shapes.draw_hat_shape(
-        c,
-        shape_name=b.shape_name,
-        color=HOMOPHONE_SHAPE_COLOR_HEX,
-        cx=shape_cx,
-        cy=shape_cy,
-        scale=BUBBLE_SHAPE_SCALE,
-        alpha=255,
+    _draw_shape_with_backdrop(
+        c, shape_name=b.shape_name, cx=shape_cx, cy=shape_cy,
     )
 
     # ----- Right chip (when present) ---------------------------------------
@@ -400,6 +395,62 @@ def _draw_one_bubble(c: SkiaCanvas, b: _Bubble, y_top: float) -> None:
         right_color, right_alt, right_chip_w = b.right_chip
         right_x = shape_x_left + shape_w + BUBBLE_INNER_GAP
         _draw_chip(c, right_color, right_alt, right_x, chip_y, right_chip_w, chip_h)
+
+
+def _draw_shape_with_backdrop(
+    c: SkiaCanvas,
+    shape_name: str,
+    cx: float,
+    cy: float,
+) -> None:
+    """Paint a black disc THEN the homophone shape glyph on top.
+
+    v2 redesign per PHONES_SPEC commit d535611. The chips on either
+    side of the shape are bright Cursorless-palette colors (yellow,
+    blue, green, …); the amber shape glyph between them was hard to
+    spot against any of those backgrounds. A near-black backdrop
+    circle (BUBBLE_SHAPE_BACKDROP_COLOR — slightly transparent so it
+    doesn't punch a visual hole) gives the glyph a consistent contrast
+    surface.
+
+    Backdrop sizing: BUBBLE_SHAPE_BACKDROP_FACTOR scales the circle
+    radius relative to the shape's own native radius (_SVG_W *
+    BUBBLE_SHAPE_SCALE / 2). The factor lives in
+    internal/draw_constants.py so it can be tuned by eye without
+    touching this file.
+
+    Kept separate from `shim/shapes.py:draw_hat_shape` (Option B in
+    the spec) so the shape painter stays focused on its single
+    responsibility — the backdrop is a panel-render concern, not a
+    shape-vocabulary concern.
+    """
+    # Shape native radius at the bubble's scale. Use _SVG_W (the wider
+    # of the two viewBox dimensions) so the disc encloses the glyph's
+    # widest extent.
+    shape_radius = _SHAPE_NATIVE_W * BUBBLE_SHAPE_SCALE / 2.0
+    backdrop_radius = shape_radius * BUBBLE_SHAPE_BACKDROP_FACTOR
+
+    # Backdrop disc — filled, no stroke. Save/restore paint state so
+    # this routine is composable: it doesn't matter what style/color
+    # the caller had set before.
+    prev_style = c.paint.style
+    prev_color = c.paint.color
+    c.paint.style = c.paint.Style.FILL
+    c.paint.color = BUBBLE_SHAPE_BACKDROP_COLOR
+    c.draw_circle(cx, cy, backdrop_radius)
+    c.paint.style = prev_style
+    c.paint.color = prev_color
+
+    # Shape glyph on top.
+    _shapes.draw_hat_shape(
+        c,
+        shape_name=shape_name,
+        color=HOMOPHONE_SHAPE_COLOR_HEX,
+        cx=cx,
+        cy=cy,
+        scale=BUBBLE_SHAPE_SCALE,
+        alpha=255,
+    )
 
 
 def _draw_chip(

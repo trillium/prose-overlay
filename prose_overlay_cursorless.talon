@@ -25,8 +25,8 @@
 mode: dictation
 mode: command
 tag: user.prose_overlay_active
-not tag: user.mouse_clock_showing
-not tag: user.clock_ring_showing
+and not tag: user.mouse_clock_showing
+and not tag: user.clock_ring_showing
 -
 
 # ===========================================================================

@@ -3561,3 +3561,487 @@ def run_layer_1() -> None:
         assert before == after, f"state mutated: before={before}, after={after}"
         assert tokens_arg == ["a", "b"], f"tokens mutated: {tokens_arg}"
         assert widths_arg == [10.0, 15.0], f"widths mutated: {widths_arg}"
+
+    # -----------------------------------------------------------------------
+    # Move 4e (top-level layout orchestrator) — ui/layout_root.py
+    # Pure orchestrator that composes the four sub-builders into a full
+    # LayoutModel. Uses a fake canvas for text measurement (the only impure
+    # step). No live paint; wire-up into draw_overlay is env-gated (see
+    # ui/draw.py:_layout_model_enabled and ui/draw_from_model.py). L1
+    # tests here lock in the composition shape and the pure-function
+    # contract at the orchestrator level.
+    # -----------------------------------------------------------------------
+
+    # Additional internal modules the orchestrator imports at composition
+    # time — register them under po_lt_pkg so layout_root's relative
+    # imports resolve without pulling talon in.
+
+    # internal/instance.py — orchestrator does `from ..internal.instance
+    # import instance as _live_instance` inside the function body. Load
+    # it under po_lt_pkg.internal.instance so the guarded fallback finds
+    # the shared instance without hitting the real filesystem tree.
+    inst_spec_lr = importlib.util.spec_from_file_location(
+        "po_lt_pkg.internal.instance",
+        REPO / "internal" / "instance.py",
+    )
+    inst_mod_lr = importlib.util.module_from_spec(inst_spec_lr)
+    _sys.modules["po_lt_pkg.internal.instance"] = inst_mod_lr
+    inst_spec_lr.loader.exec_module(inst_mod_lr)
+
+    # internal/homophones.py — pulls a CSV at import time. The read is
+    # try/except-guarded so a missing file falls through cleanly. Load
+    # under po_lt_pkg so `from ..internal import homophones as _homophones`
+    # resolves. hint_enabled() defaults to True (see homophones module),
+    # so the orchestrator's `flagged` set is computed even with an empty
+    # CSV — the set is just empty.
+    homo_spec_lr = importlib.util.spec_from_file_location(
+        "po_lt_pkg.internal.homophones",
+        REPO / "internal" / "homophones.py",
+    )
+    homo_mod_lr = importlib.util.module_from_spec(homo_spec_lr)
+    _sys.modules["po_lt_pkg.internal.homophones"] = homo_mod_lr
+    homo_spec_lr.loader.exec_module(homo_mod_lr)
+
+    # shim/__init__.py so `from ..shim import shapes` resolves under
+    # po_lt_pkg.
+    _lt_shim_pkg = _types_lt.ModuleType("po_lt_pkg.shim")
+    _lt_shim_pkg.__path__ = []
+    _sys.modules["po_lt_pkg.shim"] = _lt_shim_pkg
+
+    # shim/shapes.py — lazy Skia imports; safe to load headless. Load
+    # under po_lt_pkg.shim.shapes so the orchestrator's
+    # `from ..shim import shapes as _shapes_runtime` finds it.
+    shapes_spec_lr = importlib.util.spec_from_file_location(
+        "po_lt_pkg.shim.shapes",
+        REPO / "shim" / "shapes.py",
+    )
+    shapes_mod_lr = importlib.util.module_from_spec(shapes_spec_lr)
+    _sys.modules["po_lt_pkg.shim.shapes"] = shapes_mod_lr
+    shapes_spec_lr.loader.exec_module(shapes_mod_lr)
+
+    # Now load the orchestrator itself.
+    lr_spec = importlib.util.spec_from_file_location(
+        "po_lt_pkg.ui.layout_root",
+        REPO / "ui" / "layout_root.py",
+    )
+    lr_mod = importlib.util.module_from_spec(lr_spec)
+    _sys.modules["po_lt_pkg.ui.layout_root"] = lr_mod
+    lr_spec.loader.exec_module(lr_mod)
+
+    _compose_layout = lr_mod.layout
+    _LayoutModel = lr_mod.LayoutModel
+
+    # -----------------------------------------------------------------------
+    # Fake canvas — the orchestrator only calls canvas.paint.typeface (write),
+    # canvas.paint.textsize (read + write), and canvas.paint.measure_text
+    # (read; returns a (metrics, rect_like) tuple with rect_like.width).
+    # A width mapper drives determinism: every token width is 10 * len(tok).
+    # -----------------------------------------------------------------------
+
+    class _FakeMeasureRect:
+        __slots__ = ("width",)
+        def __init__(self, width):
+            self.width = width
+
+    class _FakePaint:
+        def __init__(self):
+            self.typeface = None
+            self.textsize = 0
+
+        def measure_text(self, text):
+            # Return a (metrics-ish, rect-with-width) tuple matching Skia's
+            # measure_text contract. The orchestrator only reads [1].width.
+            return (None, _FakeMeasureRect(len(text) * 10.0))
+
+    class _FakeCanvas:
+        def __init__(self):
+            self.paint = _FakePaint()
+
+    # -----------------------------------------------------------------------
+    # Fake screen rect + fake overlay — the orchestrator reads
+    # state.screen_rect (width / height / left / top / x / y accessors) and
+    # goes through instance.runtime.viewport for anchor state. For test we
+    # replace the shared instance's viewport with a stub via monkey-patching.
+    # -----------------------------------------------------------------------
+
+    class _FakeScreenRect:
+        def __init__(self, x=0.0, y=0.0, width=1000.0, height=800.0):
+            self.x = x
+            self.y = y
+            self.width = width
+            self.height = height
+            # draw_overlay also reads .left / .top — mirror x / y.
+            self.left = x
+            self.top = y
+
+    class _FakeViewport:
+        def __init__(self, anchor_rect=None, anchor_position="top"):
+            self._anchor_rect = anchor_rect
+            self._anchor_position = anchor_position
+
+    class _FakeOverlay:
+        # The orchestrator accepts overlay but doesn't call any method on it
+        # (viewport access goes through the instance). Kept as a marker
+        # argument for API parity.
+        pass
+
+    # Point the shared instance's viewport at a fake for these tests.
+    # Each test restores the original after — the instance object survives
+    # across tests, so leaving a stub in place would leak into later tests.
+    _live_instance = inst_mod_lr.instance
+    _orig_viewport = _live_instance.runtime.viewport
+
+    def _install_fake_viewport(anchor_rect=None, anchor_position="top"):
+        _live_instance.runtime.viewport = _FakeViewport(
+            anchor_rect=anchor_rect, anchor_position=anchor_position
+        )
+
+    def _restore_viewport():
+        _live_instance.runtime.viewport = _orig_viewport
+
+    # -----------------------------------------------------------------------
+    # State stub — the orchestrator reads a lot of state fields.
+    # Instead of building an ad-hoc stub, use the real _State from
+    # internal/instance.py and populate the fields we care about; the
+    # sub-builders read what they need via getattr fallbacks. buffer is
+    # a lightweight get_tokens/get_selection surface.
+    # -----------------------------------------------------------------------
+
+    class _FakeBuffer:
+        def __init__(self, tokens=None, selection=None):
+            self._tokens = list(tokens or [])
+            self._selection = selection
+
+        def get_tokens(self):
+            return list(self._tokens)
+
+        def get_selection(self):
+            return self._selection
+
+    # Sentinel so callers can request "no screen_rect" (None) distinctly
+    # from "use the default fake screen". A plain None default on the kw
+    # arg would conflate the two.
+    _SR_DEFAULT = object()
+
+    def _mk_state(
+        *,
+        tokens=None,
+        selection=None,
+        screen_rect=_SR_DEFAULT,
+        window_scoped=False,
+        homophone_hint=False,
+        homophone_shapes=False,
+        shape_assignments=None,
+        position_assignments=None,
+        homophone_panel_alts=None,
+        flash_state=None,
+        help_visible=False,
+        help_page=0,
+        cursor=None,
+        change_mode=False,
+        blink_on=True,
+    ):
+        st = inst_mod_lr._State()
+        st.buffer = _FakeBuffer(tokens=tokens, selection=selection)
+        # sentinel → default fake; explicit None → propagate None; other
+        # value → use it verbatim.
+        if screen_rect is _SR_DEFAULT:
+            st.screen_rect = _FakeScreenRect()
+        else:
+            st.screen_rect = screen_rect
+        st.window_scoped = window_scoped
+        st.homophone_hint = homophone_hint
+        st.homophone_shapes = homophone_shapes
+        st.shape_assignments = shape_assignments or {}
+        st.position_assignments = position_assignments or {}
+        st.homophone_panel_alts = homophone_panel_alts or {}
+        st.flash_state = flash_state or {}
+        st.help_visible = help_visible
+        st.help_page = help_page
+        st.cursor = cursor
+        st.change_mode = change_mode
+        st.blink_on = blink_on
+        return st
+
+    with test(
+        "L1",
+        "L1.126",
+        "layout(): screen_rect=None → zero-panel LayoutModel with empty fields",
+    ):
+        _install_fake_viewport()
+        try:
+            st = _mk_state(tokens=["a"], screen_rect=None)
+            canvas = _FakeCanvas()
+            model = _compose_layout(st, canvas, _FakeOverlay())
+            assert isinstance(model, _LayoutModel), (
+                f"expected LayoutModel; got {type(model).__name__}"
+            )
+            assert model.panel.w == 0.0 and model.panel.h == 0.0, (
+                f"panel should be zero when screen_rect is None; got "
+                f"{model.panel!r}"
+            )
+            assert model.tokens == []
+            assert model.selection is None
+            assert model.flash is None
+            assert model.bubbles == []
+            assert model.help is None
+            assert model.cursor is None
+            assert model.hints_hidden_by_overflow is False
+        finally:
+            _restore_viewport()
+
+    with test(
+        "L1",
+        "L1.127",
+        "layout(): basic composition — panel + content_area + help_area + tokens",
+    ):
+        _install_fake_viewport()
+        try:
+            st = _mk_state(tokens=["hello", "world"])
+            canvas = _FakeCanvas()
+            model = _compose_layout(st, canvas, _FakeOverlay())
+
+            # Panel geometry — 1000x800 screen, PANEL_H_FRACTION=0.10 so
+            # panel_h is max(80, 3*LINE_HEIGHT + 2*PANEL_PAD).
+            expected_panel_h = max(
+                800.0 * dc_mod_lt.PANEL_H_FRACTION,
+                3 * dc_mod_lt.LINE_HEIGHT + dc_mod_lt.PANEL_PAD * 2,
+            )
+            assert model.panel.w == 1000.0
+            assert model.panel.h == expected_panel_h
+            assert model.panel.x == 0.0
+            assert model.panel.y == 0.0
+
+            # Content area: content_w = 1000 * 0.80 = 800; usable
+            # content-x width is 800 - 2*PANEL_PAD.
+            assert model.content_area.w == 800.0 - dc_mod_lt.PANEL_PAD * 2
+            assert model.content_area.x == 0.0 + dc_mod_lt.PANEL_PAD
+
+            # Help area is present when hints aren't overflow-hidden.
+            assert model.help_area is not None, (
+                "help_area should be present under non-overflow layout"
+            )
+            # Help x anchor: panel_x + content_w
+            assert model.help_area.x == 0.0 + 800.0
+
+            # Two tokens survive.
+            assert len(model.tokens) == 2
+            assert model.tokens[0].text == "hello"
+            assert model.tokens[1].text == "world"
+            # Text alignment: token 0 at x_origin = 0 + PANEL_PAD.
+            assert model.tokens[0].rect.x == float(dc_mod_lt.PANEL_PAD)
+            # Widths from fake measurer: len(tok) * 10.
+            assert model.tokens[0].rect.w == 50.0  # "hello"
+            assert model.tokens[1].rect.w == 50.0  # "world"
+
+            assert model.hints_hidden_by_overflow is False
+            assert model.using_fallback is False
+        finally:
+            _restore_viewport()
+
+    with test(
+        "L1",
+        "L1.128",
+        "layout(): empty tokens → empty model.tokens, cursor at 0 lands at origin",
+    ):
+        _install_fake_viewport()
+        try:
+            st = _mk_state(tokens=[], cursor=0)
+            canvas = _FakeCanvas()
+            model = _compose_layout(st, canvas, _FakeOverlay(), cursor=0)
+
+            assert model.tokens == []
+            # Cursor should be present for cursor=0 on empty buffer.
+            assert model.cursor is not None, (
+                "cursor=0 with empty tokens should emit a cursor at origin"
+            )
+            # x_origin = 0 + PANEL_PAD; cursor rect x is that minus 1 per
+            # the paint code contract (see layout_help_cursor's cursor
+            # geometry).
+            expected_x = float(dc_mod_lt.PANEL_PAD) - 1
+            assert model.cursor.rect.x == expected_x, (
+                f"cursor x should be x_origin - 1; got {model.cursor.rect.x}, "
+                f"expected {expected_x}"
+            )
+        finally:
+            _restore_viewport()
+
+    with test(
+        "L1",
+        "L1.129",
+        "layout(): using_fallback + target_label propagated to model",
+    ):
+        _install_fake_viewport()
+        try:
+            st = _mk_state(tokens=["one"])
+            canvas = _FakeCanvas()
+            model = _compose_layout(
+                st,
+                canvas,
+                _FakeOverlay(),
+                using_fallback=True,
+                target_label="foo.txt",
+            )
+            assert model.using_fallback is True
+            assert model.target_label == "foo.txt"
+        finally:
+            _restore_viewport()
+
+    with test(
+        "L1",
+        "L1.130",
+        "layout(): selection arg overrides state.buffer.get_selection() via shim",
+    ):
+        _install_fake_viewport()
+        try:
+            # State's buffer reports no selection. The caller's selection
+            # arg should still produce a SelectionOverlay.
+            st = _mk_state(tokens=["a", "b", "c"], selection=None)
+            canvas = _FakeCanvas()
+            model = _compose_layout(
+                st,
+                canvas,
+                _FakeOverlay(),
+                selection=(0, 1),
+            )
+            assert model.selection is not None, (
+                "caller-supplied selection arg should synthesize a "
+                "SelectionOverlay"
+            )
+            # Two tokens covered: idx 0 + idx 1.
+            assert len(model.selection.rects) == 2
+        finally:
+            _restore_viewport()
+
+    with test(
+        "L1",
+        "L1.131",
+        "layout(): flash_indices + flash_color arg synthesizes flash overlay",
+    ):
+        _install_fake_viewport()
+        try:
+            # Empty state flash; caller's args should still produce a
+            # FlashOverlay via the _FlashOverrideState shim.
+            st = _mk_state(tokens=["a", "b", "c"])
+            canvas = _FakeCanvas()
+            model = _compose_layout(
+                st,
+                canvas,
+                _FakeOverlay(),
+                flash_indices=[2],
+                flash_color="ff0000",
+            )
+            assert model.flash is not None, (
+                "flash_indices+flash_color args should synthesize a FlashOverlay"
+            )
+            assert len(model.flash.rects) == 1
+            # Color rewrite: 6 chars + "4d" alpha.
+            assert model.flash.color == "ff00004d", (
+                f"flash color should be flash_color[:6]+'4d'; got "
+                f"{model.flash.color!r}"
+            )
+        finally:
+            _restore_viewport()
+
+    with test(
+        "L1",
+        "L1.132",
+        "layout(): overflow detection — many tokens → hints_hidden_by_overflow",
+    ):
+        _install_fake_viewport()
+        try:
+            # Tiny screen so a handful of tokens can't fit in the content
+            # zone height. PANEL_H_FRACTION=0.10 of screen height governs
+            # panel_h; a tiny screen forces a tiny panel and overflow.
+            tiny_screen = _FakeScreenRect(width=200.0, height=100.0)
+            # Many single-char tokens → many rows on a narrow content zone.
+            tokens_arg = [chr(ord("a") + i) for i in range(30)]
+            st = _mk_state(tokens=tokens_arg, screen_rect=tiny_screen)
+            canvas = _FakeCanvas()
+            model = _compose_layout(st, canvas, _FakeOverlay())
+
+            # Under overflow: hints_hidden_by_overflow=True; help_area=None.
+            assert model.hints_hidden_by_overflow is True, (
+                "many tokens on a tiny screen should trigger overflow"
+            )
+            assert model.help_area is None, (
+                "help_area should be None when hints hidden by overflow"
+            )
+        finally:
+            _restore_viewport()
+
+    with test(
+        "L1",
+        "L1.133",
+        "layout(): determinism — same inputs, structurally-equal outputs",
+    ):
+        _install_fake_viewport()
+        try:
+            st1 = _mk_state(tokens=["hello", "world"])
+            st2 = _mk_state(tokens=["hello", "world"])
+            canvas1 = _FakeCanvas()
+            canvas2 = _FakeCanvas()
+            m1 = _compose_layout(st1, canvas1, _FakeOverlay())
+            m2 = _compose_layout(st2, canvas2, _FakeOverlay())
+            # LayoutModel is frozen; equality is structural.
+            assert m1 == m2, (
+                "layout() should be deterministic — same inputs should "
+                "produce dataclass-equal outputs"
+            )
+            assert m1 is not m2, "must return a fresh LayoutModel per call"
+        finally:
+            _restore_viewport()
+
+    with test(
+        "L1",
+        "L1.134",
+        "layout(): no state mutation — inputs untouched after composition",
+    ):
+        _install_fake_viewport()
+        try:
+            st = _mk_state(
+                tokens=["a", "b", "c"],
+                shape_assignments={0: "wing"},
+                position_assignments={0: (0, 2)},
+            )
+            # Snapshot pre-call.
+            shape_before = dict(st.shape_assignments)
+            pos_before = dict(st.position_assignments)
+            homo_alts_before = dict(st.homophone_panel_alts)
+            flash_before = dict(st.flash_state)
+
+            canvas = _FakeCanvas()
+            _compose_layout(st, canvas, _FakeOverlay())
+
+            assert st.shape_assignments == shape_before, "shape mutated"
+            assert st.position_assignments == pos_before, "position mutated"
+            assert st.homophone_panel_alts == homo_alts_before, "alts mutated"
+            assert st.flash_state == flash_before, "flash mutated"
+            # Buffer tokens should be unchanged.
+            assert st.buffer.get_tokens() == ["a", "b", "c"], (
+                "buffer tokens mutated"
+            )
+        finally:
+            _restore_viewport()
+
+    with test(
+        "L1",
+        "L1.135",
+        "layout(): LayoutModel is frozen — mutation raises FrozenInstanceError",
+    ):
+        _install_fake_viewport()
+        try:
+            import dataclasses as _dc_lr
+            st = _mk_state(tokens=["a"])
+            canvas = _FakeCanvas()
+            model = _compose_layout(st, canvas, _FakeOverlay())
+            try:
+                model.using_fallback = True
+            except _dc_lr.FrozenInstanceError:
+                pass
+            else:
+                raise AssertionError(
+                    "LayoutModel accepted mutation — should be frozen"
+                )
+        finally:
+            _restore_viewport()

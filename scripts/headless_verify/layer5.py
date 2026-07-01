@@ -865,3 +865,46 @@ def run_layer_5() -> None:
             "shim/targets_js.py:_target_to_json must call _translate_modifier on each modifier — "
             "without it, surroundingPair delimiter translation is dead code"
         )
+
+    # -------------------------------------------------------------------------
+    # JS-only rows — wishlist items #6, #7, #9, #10, #11 (modifier cluster).
+    # -------------------------------------------------------------------------
+    #
+    # These modifiers (ordinalScope / relativeScope / everyScope / first-last
+    # via ordinal / leading-trailing) all ride the shipped
+    # `js/prose_resolve_targets.js` bundle — the stage classes are present at
+    # the lines documented in `docs/BUNDLE_REST_SCOPE.md §1`. The Python
+    # fallback (`cursorless/resolve.py:161-167`) has NO handler for these mod
+    # types, so a parity test would fail by design — the resolver returns
+    # `(base_idx, base_idx)` for any unknown modifier per `resolve.py:186-187`.
+    #
+    # The documented stance per `docs/BUNDLE_REST_SCOPE.md §Cluster C` is
+    # JS-only for this cluster, matching the sub-word / ISC-9 retirement
+    # direction. So these rows exercise ONLY the JS bundle and assert the
+    # returned char range converts to the expected token range. If the bundle
+    # is ever rebuilt in a way that drops a stage class, L2.8's fail-closed
+    # inventory grep catches that; if a stage is present but returns the wrong
+    # shape, THIS layer catches it.
+    #
+    # `docs/BUNDLE_REST_SCOPE.md §7` tracks the wishlist item shipping status.
+
+    # Wishlist #7 — OrdinalScope, `take first word` (cursor at start).
+    # From cursor at char 0 with ordinalScope start=0 length=1 word, the
+    # OrdinalScopeStage (bundle line 18899) picks the first word in the
+    # containing document → token 0 ("the").
+    with test("L5", "L5.20", "wishlist #7 — `take first word` (ordinalScope start=0)"):
+        target = {
+            "type": "primitive",
+            "mark": {"type": "cursor"},
+            "modifiers": [
+                {"type": "ordinalScope", "scopeType": {"type": "word"},
+                 "start": 0, "length": 1},
+            ],
+        }
+        hat_entries = _build_hat_map_for_js(_STD_TOKENS, _STD_LETTERS, color="default")
+        js_result = _run_js_resolver(target, _STD_TOKENS, hat_entries, cursor_char=0)
+        expected = [(0, 0)]
+        assert js_result == expected, (
+            f"L5.20 (#7): ordinalScope first word — got {js_result!r}, "
+            f"expected {expected!r}"
+        )

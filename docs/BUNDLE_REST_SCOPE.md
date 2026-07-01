@@ -461,9 +461,31 @@ decisions blocking the modifier cluster.
   fail-informational). Ratchet: when a wishlist action ships, move its
   entry from `ACTIONS_PLANNED` into `ACTIONS_MUST_HAVE` in the SAME PR.
   Headless: 127 → 129 green.
-- **Next up per §7 order:** #7 OrdinalScope. Blocked on OQ2 (grammar
-  routing verification against Talon log) — needs a live Talon session
-  to confirm `<user.cursorless_target>` at
-  `prose_overlay_cursorless.talon:47` flows ordinalScope modifiers
-  through. Answering OQ2 unblocks the full modifier cluster
-  (#6, #7, #9, #10, #11).
+
+- **OQ2 resolution log (2026-07-01)** — resolved **YES statically** (no
+  live Talon session needed). Static reading of cursorless-talon shows
+  `<user.cursorless_target>` composes `cursorless_primitive_or_range_target`,
+  which delegates to `cursorless_primitive_target`, whose rule is
+  `<user.cursorless_modifier>+ [<user.cursorless_mark>] | <user.cursorless_mark>`
+  (`~/.talon/user/cursorless-talon/src/targets/primitive_target.py:8-25`).
+  `cursorless_modifier` at `~/.talon/user/cursorless-talon/src/modifiers/modifiers.py:32-44`
+  is a union that includes every wishlist modifier: `cursorless_interior_modifier`,
+  `cursorless_simple_modifier` (leading/trailing/bounds/just),
+  `cursorless_simple_scope_modifier` (every scope),
+  `cursorless_ordinal_scope`, `cursorless_relative_scope`. Therefore all
+  five modifiers of Cluster C (#6, #7, #9, #10, #11) flow through
+  `<user.cursorless_target>` at `prose_overlay_cursorless.talon:47` with
+  ZERO new prose-overlay grammar rules. The cluster is grammar routing +
+  Python-fallback stance + L5 test rows per item — no shim captures.
+
+- **#7 OrdinalScope** — ✅ shipped 2026-07-01 (SHA recorded when #10 commits).
+  Zero-grammar rebuild per OQ2=YES. Python-fallback documented as
+  JS-only per `§Cluster C` — matches sub-word / ISC-9 direction. L5.20
+  added (JS-only shape probe: `ordinalScope start=0 length=1 word` from
+  cursor → token 0). MANUAL_VERIFICATION row 21 added
+  (`take first word` → "the"). FEATURE_PARITY §3c row added.
+
+- **Next up per §7 order:** #10 first/last (rolls into #7 semantically —
+  `take last word`), then #9 every, #6 RelativeScope, #11
+  leading/trailing (semantics degenerate on prose per OQ3 —
+  see item shipping notes).

@@ -56,6 +56,7 @@ showing the overlay (5 tokens, hats t/a/b/d/e on each token respectively).
 | 18 | 33 | range: `chuck air past drum` | std | tokens 1..3 deleted | | f9-18.png | |
 | 19 | — | list: `take air and drum` | std | both "air" and "drum" selected | | f9-19.png | |
 | 20 | — | format: `format snake air past drum` | std | tokens 1..3 → `air_ball_drum` | | f9-20.png | |
+| 21 | #7 | `take first word` | std | "the" highlighted (token 0) | | f9-21.png | |
 
 (Buffer key: `std` = `the air ball drum echo` with default-color hats.)
 

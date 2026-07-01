@@ -19,6 +19,8 @@ from contextlib import contextmanager
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 STATE_PY = REPO / "internal" / "state.py"
 HAT_JS = REPO / "js" / "prose_allocate_hats.js"
+ACTIONS_JS = REPO / "js" / "prose_actions.js"
+RESOLVE_JS = REPO / "js" / "prose_resolve_targets.js"
 TEST_DRIVER_PY = REPO / "ui" / "test_driver.py"
 
 # ---------------------------------------------------------------------------

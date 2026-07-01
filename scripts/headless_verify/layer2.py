@@ -10,7 +10,7 @@ import json
 import pathlib
 import subprocess
 
-from .common import DIM, HAT_JS, RESET, test
+from .common import ACTIONS_JS, DIM, HAT_JS, RESET, RESOLVE_JS, test
 
 # =============================================================================
 # Layer 2 — JS bundle via bun
@@ -157,4 +157,110 @@ process.stdout.write(out);
         r_shape = json.loads(proc.stdout)
         assert "0" in r_shape, f"missing hat: {r_shape}"
         assert "styleName" in r_shape["0"], f"styleName absent under shape-enabled: {r_shape}"
+
+    # L2.8 — Resolver bundle canonical inventory. Item #14 done properly per
+    # docs/BUNDLE_REST_SCOPE.md §3. Every stage class a shipped grammar rule
+    # can reach — plus the sub-word substrate (WordScopeHandler, WordTokenizer,
+    # CAMEL_REGEX) — is fail-closed must-have. Absent-planned handlers are
+    # printed informationally, never fail (until the corresponding wishlist
+    # item ships, at which point the row moves into TARGETS_MUST_HAVE).
+    #
+    # Rationale for grep-shape ('var NAME = class' or 'var NAME = '):
+    # esbuild emits IIFE bundles as 'var Foo = class {...}' at module scope
+    # (see js/prose_resolve_targets.js:15505 for the canonical form).
+    # Substring-grep is robust to bundle formatter changes; sub-class chains
+    # (HeadStage / TailStage extend HeadTailStage) match 'var HeadStage = class'.
+    with test(
+        "L2",
+        "L2.8",
+        "resolver bundle canonical inventory — every wishlist stage present",
+    ):
+        src = pathlib.Path(RESOLVE_JS).read_text()
+        # Fail-closed must-haves — every identifier a shipped grammar rule
+        # or JS-only resolver path today can reach. See scope doc §1 for
+        # the class → wishlist-item map.
+        TARGETS_MUST_HAVE = (
+            # Stage classes already reachable via the JS resolver default
+            # (F9 landed 2026-06-30). Present in bundle line refs from
+            # docs/BUNDLE_REST_SCOPE.md §1.
+            ("EveryScopeStage", "var EveryScopeStage = class"),
+            ("HeadStage", "var HeadStage = class"),
+            ("TailStage", "var TailStage = class"),
+            ("InteriorOnlyStage", "var InteriorOnlyStage = class"),
+            ("ExcludeInteriorStage", "var ExcludeInteriorStage = class"),
+            ("LeadingStage", "var LeadingStage = class"),
+            ("TrailingStage", "var TrailingStage = class"),
+            ("OrdinalScopeStage", "var OrdinalScopeStage = class"),
+            ("RelativeScopeStage", "var RelativeScopeStage = class"),
+            ("BoundedNonWhitespaceSequenceStage", "var BoundedNonWhitespaceSequenceStage = class"),
+            # Sub-word substrate — from docs/SUBWORD_INVESTIGATION.md §1.
+            # L2.6 already asserts WordScopeHandler for backward compat;
+            # covering here too keeps this test's inventory self-contained.
+            ("WordScopeHandler", "var WordScopeHandler = class"),
+            ("WordTokenizer", "var WordTokenizer = class"),
+            ("CAMEL_REGEX", "var CAMEL_REGEX ="),
+        )
+        missing = [name for name, needle in TARGETS_MUST_HAVE if needle not in src]
+        assert not missing, (
+            f"resolver bundle missing must-have identifiers: {missing} — "
+            "either the tree-shaker got aggressive or proseTargetsStandalone.ts "
+            "no longer pulls the full ModifierStageFactoryImpl. See "
+            "docs/BUNDLE_REST_SCOPE.md §1."
+        )
+
+    # L2.9 — Actions bundle canonical inventory. Fail-closed on the 7 shipped
+    # actions from proseActionsStandalone.ts:200-207 (regression guard for a
+    # bad rebuild dropping one). Fail-informational for planned action names
+    # from wishlist items #3 (swap), #4 (paste), #5 (wrap), #12 (clone),
+    # #13 (reverse) — prints ABSENT-planned lines so a future rebuild that
+    # ships one flips the row of its own accord (add to _MUST_HAVE when
+    # shipping the wishlist item). See docs/BUNDLE_REST_SCOPE.md §3.
+    with test(
+        "L2",
+        "L2.9",
+        "actions bundle canonical inventory — 7 shipped actions present, planned actions inventoried",
+    ):
+        src = pathlib.Path(ACTIONS_JS).read_text()
+        # Fail-closed: the seven shipped action names from the dispatcher
+        # (proseRunAction switch at prose_actions.js:239-266). Each is
+        # both a function definition and a string-form case label; probe
+        # the string form since it's what the Python dispatcher sends.
+        ACTIONS_MUST_HAVE = (
+            "\"remove\"",
+            "\"setSelection\"",
+            "\"clearAndSetSelection\"",
+            "\"replaceWithTarget\"",
+            "\"moveToTarget\"",
+            "\"setSelectionBefore\"",
+            "\"setSelectionAfter\"",
+        )
+        missing = [name for name in ACTIONS_MUST_HAVE if name not in src]
+        assert not missing, (
+            f"actions bundle missing shipped action names: {missing} — "
+            "proseActionsStandalone.ts dispatch switch regressed. See "
+            "docs/BUNDLE_REST_SCOPE.md §1."
+        )
+        # Dispatcher itself — a bundle without proseRunAction is unusable
+        # regardless of which action names survived.
+        assert (
+            "globalThis.proseRunAction" in src
+        ), "actions bundle missing proseRunAction export — bundle unusable"
+
+        # Fail-informational: wishlist actions not yet shipped. Present
+        # here as documentation; when one ships, MOVE it up into
+        # ACTIONS_MUST_HAVE in the same PR that lands the action.
+        # Mapping: docs/BUNDLE_REST_SCOPE.md §7 recommended-order.
+        ACTIONS_PLANNED = (
+            ("swap", "#3 Swap action"),
+            ("pasteAtDestination", "#4 Paste at destination"),
+            ("wrap", "#5 Wrap paired delimiter"),
+            ("insertCopyBefore", "#12 Clone (Before variant)"),
+            ("insertCopyAfter", "#12 Clone (After variant)"),
+            ("reverseTargets", "#13 Reverse"),
+        )
+        for name, label in ACTIONS_PLANNED:
+            state = "PRESENT" if f'"{name}"' in src else "ABSENT — planned"
+            # DIM-print so this stays visible in the L2 block without
+            # cluttering fail summaries. Never asserts.
+            print(f"    {DIM}[L2.9 inventory] {name:22s} {state:22s} ({label}){RESET}")
 

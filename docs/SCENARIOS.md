@@ -147,6 +147,21 @@ Group by feature area, not by chronological order.
 
 ---
 
+## Hat allocation
+
+### S9 — hats reallocate on selection/cursor change in the same draw frame
+
+**Given** the buffer contains multiple tokens where one token holds a colored hat because stability inertia kept the default variant on a farther token (e.g. `hey` has `blue-h` because `this` still holds `gray-h`), and the user speaks a hat-targeted verb that moves selection/cursor onto or adjacent to the colored-hat token (e.g. `take blue air`).
+**When** the selection updates in response, the target's flash paints, and the buffer state advances by one revision (or by cursor-only change).
+**Then** `_recompute_hats` runs in the SAME draw frame as the selection paint — the new near-cursor rank triggers the greedy allocator, the previously-colored near-cursor token grabs a default gray hat (possibly on a different letter), and the just-painted selection sits on top of the already-updated hat map. The user should NEVER see a stale colored hat on the newly-selected token even for one frame.
+
+- **Status:** `[ ]` spec-only. Depends on the `stability="greedy"` allocator fix landed in `74ecf0a` (2026-07-01) but ALSO on the recompute-trigger firing on cursor-only changes, not just buffer mutations. Current trigger sites are `_recompute_hats` after `add_text`/`delete_token`/`commit_end` — a `take` action that only updates cursor/selection may skip recompute, leaving the hat map stale until the next mutation.
+- **Layer:** L3 (dispatch — verify `take` / `pre` / `post` actions call `_recompute_hats` in the same tick) + live-verify for single-frame visual consistency.
+- **Related:** `shim/actions_core.py:_recompute_hats` (trigger point), `ui/actions_cursor.py` and `shim/actions_cursorless.py` (`take` / `pre` / `post` / `cursor` action call sites), `internal/state.py` (cursor + selection state), `internal/debug.py` (the `draw`-trigger diff snapshot that would show a stale-then-updated hat map if recompute lags). Also depends on `docs/CURSORLESS_NEAR_CURSOR_BIAS.md` findings — greedy stability is what makes the reshuffle possible at all.
+- **Test hooks:** the always-on `~/.talon/prose_overlay_debug.jsonl` records `hats` on every recompute; a probe would (1) speak `take blue air`, (2) `jq -c 'select(.trigger=="recompute_hats")' | tail -1` and confirm the diff includes `air` → `gray-*`, (3) confirm the immediately-following `draw` diff shows both selection AND updated hats (no intermediate frame with the stale allocation).
+
+---
+
 ## Bundle contents / handlers
 
 <!-- Bundle-side scenarios (once BUNDLE_SHAPE_SCOPE.md and BUNDLE_REST_SCOPE.md land) go here. -->

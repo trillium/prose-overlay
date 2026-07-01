@@ -25,6 +25,7 @@ Usage:
 
 import json
 import os
+import sys
 from datetime import datetime
 
 # Default ON — observability beats forgetting to enable it. Override via
@@ -43,8 +44,66 @@ def set_debug_mode(enabled: bool) -> None:
     print(f"prose_overlay: debug mode {'ON' if enabled else 'OFF'} → {DEBUG_LOG}")
 
 
+def _get_setting(name: str):
+    """Read a Talon setting defensively — None when Talon isn't loaded.
+
+    The internal layer stays Talon-free by contract (see scripts/layer-audit.py
+    I5.INTERNAL_LAZY_TALON). Rather than issuing a lazy `from talon import
+    settings`, we resolve `talon` through `sys.modules` — which is populated
+    only when the module has been imported elsewhere (the live Talon runtime).
+    In headless verify + unit tests there is no `talon` key in `sys.modules`,
+    and we return None cleanly. Every exception is swallowed so a partial
+    Talon environment (e.g. a stubbed `talon` module without `.settings`)
+    still falls through to None instead of crashing the snapshot.
+    """
+    try:
+        talon_mod = sys.modules.get("talon")
+        if talon_mod is None:
+            return None
+        settings = getattr(talon_mod, "settings", None)
+        if settings is None:
+            return None
+        return settings.get(name)
+    except Exception:
+        return None
+
+
+def _rect_summary(rect) -> dict | None:
+    """Convert a rect-like object to a JSON-friendly {x, y, w, h} dict.
+
+    Duck-typed on `x/y/width/height` so both the internal Rect dataclass
+    (from internal/viewport.py) and talon.ui.Rect pass through cleanly.
+    Returns None when the input is None so the snapshot consumer sees a
+    stable JSON `null` for the "no anchor rect" case.
+    """
+    if rect is None:
+        return None
+    try:
+        return {
+            "x": rect.x,
+            "y": rect.y,
+            "w": rect.width,
+            "h": rect.height,
+        }
+    except AttributeError:
+        return None
+
+
 def _snapshot() -> dict:
-    """Capture a point-in-time snapshot of all prose overlay state."""
+    """Capture a point-in-time snapshot of all prose overlay state.
+
+    Lossless view of every visual-affecting piece of state: buffer tokens +
+    rev + selection, hat + shape + panel assignments, cycling group state,
+    viewport (scroll + anchor), settings that gate rendering, and transient
+    render flags (flash, overflow, help page). Field ORDER is stable — new
+    fields APPEND at the end so jq consumers snapshotting older logs stay
+    backwards-compatible with the leading keys.
+
+    Rules:
+      - JSON-friendly: tuples → lists, None stays None, keys stringify cleanly.
+      - Settings live behind `_get_setting` (returns None when Talon absent).
+      - Rects live behind `_rect_summary` (returns {x,y,w,h} dict or None).
+    """
     from .instance import instance
     from ..ui import draw as dm
     from . import homophones as _h
@@ -59,6 +118,45 @@ def _snapshot() -> dict:
     }
     unhatted_indices = [i for i in range(len(tokens)) if i not in hats]
     flagged = sorted(_h.flagged_indices(tokens)) if tokens else []
+
+    # ------------------------------------------------------------------
+    # JSON-friendly derivations for lossless-snapshot fields.
+    # ------------------------------------------------------------------
+    # Selection lives on the buffer as an internal tuple[int, int] or None;
+    # accessed via get_selection() (the public accessor). Convert tuple → list
+    # so json.dumps stays trivial and jq sees an array not a stringified tuple.
+    sel = instance.buffer.get_selection()
+    selection_field = list(sel) if sel is not None else None
+
+    # position_assignments values are tuple[int, int] (active_idx, group_size).
+    # json.dumps handles tuples but treats them as arrays — for consistency
+    # with `selection_field` and to keep values greppable we materialize as
+    # lists explicitly. Keys stringified because Python's json emits int keys
+    # as numeric strings anyway; making that explicit prevents jq consumers
+    # from having to guard for two shapes across versions.
+    pos_assignments_raw = instance.position_assignments or {}
+    position_assignments_field = {
+        str(k): list(v) for k, v in pos_assignments_raw.items()
+    }
+
+    # shape / next_alt / panel dicts already carry JSON-friendly values
+    # (str / dict[str,str]); stringify keys for the same jq-consistency reason.
+    shape_assignments_field = {
+        str(k): v for k, v in (instance.shape_assignments or {}).items()
+    }
+    next_alt_assignments_field = {
+        str(k): v for k, v in (instance.next_alt_assignments or {}).items()
+    }
+    homophone_panel_alts_field = {
+        str(k): dict(v) for k, v in (instance.homophone_panel_alts or {}).items()
+    }
+
+    # Viewport anchor state — captured alongside scroll_offset so a JSONL
+    # line fully reproduces where the panel sits on screen without needing
+    # to replay the window-scope handshake.
+    viewport = instance.viewport
+    anchor_position_field = getattr(viewport, "_anchor_position", None)
+    anchor_rect_field = _rect_summary(getattr(viewport, "_anchor_rect", None))
 
     return {
         "showing":        instance.canvas.is_showing,
@@ -80,6 +178,24 @@ def _snapshot() -> dict:
         "target_window":  instance.target_window_title,
         "flash":          list(instance.flash_state.get("indices", [])),
         "flash_color":    instance.flash_state.get("color", ""),
+        # ------------------------------------------------------------------
+        # Lossless-snapshot additions (2026-07-01, S9-motivated).
+        # Field ORDER: strictly appended after the historical keys above so
+        # any existing jq snapshots keyed on the legacy layout continue to
+        # match. Do NOT reorder the block above.
+        # ------------------------------------------------------------------
+        "selection":                    selection_field,
+        "shape_assignments":            shape_assignments_field,
+        "homophone_panel_alts":         homophone_panel_alts_field,
+        "next_alt_assignments":         next_alt_assignments_field,
+        "position_assignments":         position_assignments_field,
+        "help_page":                    instance.help_page,
+        "viewport_anchor_position":     anchor_position_field,
+        "viewport_anchor_rect_summary": anchor_rect_field,
+        "homophone_shapes_setting":     _get_setting("user.prose_overlay_homophone_shapes"),
+        "homophone_hint_setting":       _get_setting("user.prose_overlay_homophone_hint"),
+        "window_scoped_setting":        _get_setting("user.prose_overlay_window_scoped"),
+        "hat_cursor_greedy_setting":    _get_setting("user.prose_overlay_hat_cursor_greedy"),
     }
 
 

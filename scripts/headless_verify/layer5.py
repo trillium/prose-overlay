@@ -991,3 +991,80 @@ def run_layer_5() -> None:
             f"L5.23 (#6): relativeScope next word from 'a' — got "
             f"{js_result!r}, expected {expected!r}"
         )
+
+    # Wishlist #11 — leading / trailing whitespace modifiers on prose.
+    # OQ3 in `docs/BUNDLE_REST_SCOPE.md §6` flagged the semantics as
+    # degenerate on a single-line space-joined prose buffer where every
+    # token is separated by exactly one space. The bundle DOES ship
+    # `LeadingStage` at :18845 and `TrailingStage` at :18860 and grammar
+    # routing is free per OQ2=YES (leading/trailing are entries in
+    # `cursorless_simple_modifier` per
+    # `~/.talon/user/cursorless-talon/src/modifiers/modifiers.py:26`).
+    # But the returned range is the whitespace BETWEEN tokens — a
+    # 1-char range that does NOT overlap any token, so the standard
+    # `_run_js_resolver` helper (which converts char→token ranges)
+    # would raise. We assert the raw char-range shape instead, which
+    # documents the bundle behavior for future callers. Token-facing
+    # semantics remain undefined on prose (there is no leading/trailing
+    # whitespace INSIDE a prose token — tokens are already atomic).
+    # This ships as tested-JS-only-degenerate; user-facing `chuck
+    # leading` etc. is a no-op on prose buffers and should be gated at
+    # the grammar / shim layer if we ever wire it, not exposed raw.
+    with test("L5", "L5.24", "wishlist #11 — leading / trailing return whitespace char ranges (degenerate on prose)"):
+        hat_entries = _build_hat_map_for_js(_STD_TOKENS, _STD_LETTERS, color="default")
+        text = " ".join(_STD_TOKENS)
+        payload_base = {
+            "documentJson": json.dumps({
+                "text": text,
+                "cursorAnchorChar": 0,
+                "cursorActiveChar": 0,
+            }),
+            "hatMapJson": json.dumps({"entries": hat_entries}),
+            "cursorJson": json.dumps({"gap": -1}),
+        }
+        bundle_path = REPO / "js" / "prose_resolve_targets.js"
+
+        def _raw_char_ranges(target_dict: dict) -> "list[tuple[int, int]]":
+            payload = dict(payload_base, targetJson=json.dumps(target_dict))
+            script = f"""
+const code = require('fs').readFileSync('{bundle_path}', 'utf8');
+eval(code);
+const p = {json.dumps(payload)};
+const out = globalThis.proseResolveTarget(
+  p.targetJson, p.documentJson, p.hatMapJson, p.cursorJson,
+);
+process.stdout.write(out);
+"""
+            tmp = pathlib.Path("/tmp/headless-verify-leading-probe.js")
+            tmp.write_text(script)
+            proc = subprocess.run(
+                ["bun", str(tmp)], capture_output=True, text=True, timeout=15,
+            )
+            assert proc.returncode == 0, f"bun exited {proc.returncode}: {proc.stderr.strip()[:300]}"
+            result = json.loads(proc.stdout)
+            assert "error" not in result, f"JS bundle error: {result['error']!r}"
+            ranges = result.get("contentRanges") or []
+            assert ranges, "bundle returned no ranges for leading/trailing"
+            return [(r["start"]["character"], r["end"]["character"]) for r in ranges]
+
+        # leading on 'a' (token 1 "air") — space BEFORE "air" is chars [3,4].
+        leading_ranges = _raw_char_ranges({
+            "type": "primitive",
+            "mark": {"type": "decoratedSymbol", "symbolColor": "default", "character": "a"},
+            "modifiers": [{"type": "leading"}],
+        })
+        assert leading_ranges == [(3, 4)], (
+            f"L5.24 (#11 leading): expected [(3,4)] (space before 'air'), "
+            f"got {leading_ranges!r} — bundle stage shape may have changed"
+        )
+
+        # trailing on 'a' — space AFTER "air" is chars [7,8].
+        trailing_ranges = _raw_char_ranges({
+            "type": "primitive",
+            "mark": {"type": "decoratedSymbol", "symbolColor": "default", "character": "a"},
+            "modifiers": [{"type": "trailing"}],
+        })
+        assert trailing_ranges == [(7, 8)], (
+            f"L5.24 (#11 trailing): expected [(7,8)] (space after 'air'), "
+            f"got {trailing_ranges!r} — bundle stage shape may have changed"
+        )

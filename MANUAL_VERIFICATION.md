@@ -61,6 +61,8 @@ showing the overlay (5 tokens, hats t/a/b/d/e on each token respectively).
 | 23 | #9 | `take every word` (bare) | std | Known partial: current bundle returns 1 range (containing word), not 5. See `docs/BUNDLE_REST_SCOPE.md §7 #9`. | | f9-23.png | |
 | 24 | #9 | `take every word` composed w/ file scope | std | 5 ranges, one per token | | f9-24.png | |
 | 25 | #6 | `take next word air` | std | "ball" highlighted (token 2 — the word after 'a' mark) | | f9-25.png | |
+| 26 | #11 | `chuck leading air` | std | Documented degenerate on prose (OQ3 resolved 2026-07-01): bundle returns the 1-char whitespace between tokens. User-facing no-op; should be gated at grammar/shim if wired. See `docs/BUNDLE_REST_SCOPE.md §7 #11`. | | f9-26.png | |
+| 27 | #11 | `chuck trailing air` | std | Same degenerate shape as row 26 — trailing side. | | f9-27.png | |
 
 (Buffer key: `std` = `the air ball drum echo` with default-color hats.)
 

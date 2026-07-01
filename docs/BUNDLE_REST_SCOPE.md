@@ -514,14 +514,30 @@ decisions blocking the modifier cluster.
   gap docs. MANUAL_VERIFICATION rows 23 (bare — known partial) and 24
   (composed — 5 ranges) added.
 
-- **#6 RelativeScope** — ✅ shipped 2026-07-01 (SHA recorded when #11
-  commits). Zero-grammar rebuild per OQ2=YES; `RelativeScopeStage`
-  shipped at bundle line 19103; grammar routing free because
+- **#6 RelativeScope** — ✅ shipped commit `f4912cc` (2026-07-01).
+  Zero-grammar rebuild per OQ2=YES; `RelativeScopeStage` shipped at
+  bundle line 19103; grammar routing free because
   `cursorless_relative_scope` is a `cursorless_modifier` variant.
   L5.23 added (JS-only: `relativeScope offset=1 length=1 forward` from
   mark 'a' → token 2). MANUAL_VERIFICATION row 25 added
   (`take next word air` → "ball"). FEATURE_PARITY §3c row added.
   Python fallback: JS-only per §Cluster C.
 
-- **Next up per §7 order:** #11 leading/trailing (semantics degenerate on
-  prose per OQ3 — see item shipping notes).
+- **OQ3 resolution log (2026-07-01)** — resolved **degenerate on prose**.
+  Bundle probe confirms `LeadingStage`/`TrailingStage` return a 1-char
+  whitespace range (the single space BETWEEN tokens on a space-joined
+  prose buffer). Since prose tokens have no interior whitespace and
+  our buffer's inter-token whitespace is exactly one space, the
+  returned range has no token-level meaning — `_char_range_to_token_range`
+  returns `None` on it. Cursorless's LeadingStage/TrailingStage operate
+  on whitespace WITHIN a scope; our flat prose buffer has none. Item
+  #11 flips to `[—]` in `docs/FEATURE_PARITY.md §3c` and the bundle
+  shape is asserted stable in L5.24.
+
+- **#11 leading/trailing** — ✅ shipped 2026-07-01 (SHA recorded in a
+  follow-up commit — this is the final Cluster C item).
+  Zero-grammar rebuild per OQ2=YES; stages ship in bundle. OQ3 resolved
+  degenerate — see log above. L5.24 added (JS-only, raw char-range
+  assertion). MANUAL_VERIFICATION rows 26, 27 added. FEATURE_PARITY
+  §3c row added marked `[—]` (out-of-scope on prose — no token-level
+  semantics).

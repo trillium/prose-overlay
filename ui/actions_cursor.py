@@ -120,6 +120,12 @@ class Actions:
             return
         _prose_overlay_set_cursor(index, change_mode=False)
         _auto_scroll_to_cursor()
+        # Recompute hats so greedy stability sees the new cursor position and
+        # reshuffles defaults toward the near-cursor token in the SAME draw
+        # frame (SCENARIOS.md §S9). Without this, `pre blue air` moves the
+        # cursor onto `air` but the hat map keeps `blue-h` until the next
+        # buffer mutation, forcing the user to keep saying `blue h`.
+        _recompute_hats()
         instance.canvas.refresh()
 
     def prose_overlay_set_cursor_after_hat(letter: str, color: str = "gray"):
@@ -129,6 +135,7 @@ class Actions:
             return
         _prose_overlay_set_cursor(index + 1, change_mode=False)
         _auto_scroll_to_cursor()
+        _recompute_hats()  # S9 — reshuffle defaults toward the new cursor
         instance.canvas.refresh()
 
     def prose_overlay_get_cursor() -> int:
@@ -147,12 +154,14 @@ class Actions:
         """Move cursor to before the first token (pre file)."""
         _prose_overlay_set_cursor(0)
         _auto_scroll_to_cursor(strategy="start")
+        _recompute_hats()  # S9 — reshuffle defaults toward the start
         instance.canvas.refresh()
 
     def prose_overlay_cursor_end():
         """Move cursor to after the last token (post file)."""
         _prose_overlay_set_cursor(len(instance.buffer))
         _auto_scroll_to_cursor(strategy="end")
+        _recompute_hats()  # S9 — reshuffle defaults toward the end
         instance.canvas.refresh()
 
     def prose_overlay_change_hat(letter: str, color: str = "gray"):

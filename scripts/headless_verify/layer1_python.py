@@ -4590,3 +4590,240 @@ def run_layer_1() -> None:
             raise AssertionError(
                 "execute() should raise TypeError on unknown op type"
             )
+
+    # -----------------------------------------------------------------------
+    # New PaintOp variants — RoundedRectOp + ShapeGlyphOp (retirement of the
+    # env gate). Frozen-dataclass contract + execute() dispatch.
+    #
+    # RoundedRectOp routes to overlay_kit.draw_rounded_rect (Skia path
+    # under the hood). ShapeGlyphOp routes to shim.shapes.draw_hat_shape
+    # (SVG path cache). Both need lightweight module stubs so the L1
+    # tests don't drag in Talon.
+    # -----------------------------------------------------------------------
+
+    _RoundedRectOp = po_mod.RoundedRectOp
+    _ShapeGlyphOp = po_mod.ShapeGlyphOp
+
+    with test(
+        "L1",
+        "L1.151",
+        "paint_ops: RoundedRectOp constructs with defaults and is frozen",
+    ):
+        import dataclasses as _dc_po
+        op = _RoundedRectOp(
+            x=1.0, y=2.0, w=3.0, h=4.0, radius=2.0, color="ff0000ff"
+        )
+        assert op.stroke is False
+        assert op.stroke_width == 1.0
+        assert op.radius == 2.0
+        try:
+            op.color = "00ff00ff"
+        except _dc_po.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError(
+                "RoundedRectOp accepted mutation — should be frozen"
+            )
+
+    with test(
+        "L1",
+        "L1.152",
+        "paint_ops: ShapeGlyphOp constructs with defaults and is frozen",
+    ):
+        import dataclasses as _dc_po
+        op = _ShapeGlyphOp(
+            shape_name="bolt", cx=50.0, cy=60.0, scale=1.0, color="ffb74d"
+        )
+        assert op.alpha == 255
+        assert op.outline is None
+        try:
+            op.shape_name = "frame"
+        except _dc_po.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError(
+                "ShapeGlyphOp accepted mutation — should be frozen"
+            )
+
+    # RoundedRectOp / ShapeGlyphOp execute() dispatch — needs stubs for
+    # overlay_kit.draw_rounded_rect and shim.shapes.draw_hat_shape. The
+    # sink imports both lazily; we register lightweight fakes in
+    # sys.modules that record their calls into the canvas log.
+
+    # utils.overlay_kit stub — provides draw_rounded_rect. The sink
+    # imports it via `from ....utils.overlay_kit import draw_rounded_rect`,
+    # which resolves relative to the module's `po_lt_pkg.ui.paint_ops`
+    # position (4-dots-up = the top-level root that hosts the fake
+    # `trillium_talon` package tree). Under the L1 test harness the module
+    # was loaded via spec_from_file_location so relative imports use
+    # `__package__` = "po_lt_pkg.ui". Four dots up from `po_lt_pkg.ui.paint_ops`
+    # is the ANCHOR — Python's importlib requires those parent packages to
+    # exist as module objects to resolve the relative path. We supply them
+    # as empty ModuleType shells + register a fake `utils.overlay_kit`
+    # under the same anchor.
+
+    # Build the parent package chain for `....utils.overlay_kit`:
+    # relative import from po_lt_pkg.ui.paint_ops with 4 dots means:
+    #   level 4 → strip 4 name components off po_lt_pkg.ui.paint_ops
+    #   = ""  (empty; the anchor). Then append "utils.overlay_kit".
+    # Under normal Talon load the module lives 4 packages deep; under the
+    # L1 harness it lives in po_lt_pkg.ui.paint_ops (only 3 deep). To
+    # avoid patching the source, we place `po_lt_pkg` as the anchor with
+    # a stub `utils.overlay_kit` subtree AND add empty synthetic parents.
+    # The importlib._bootstrap logic for "from A import B" with a level
+    # N walks package.__name__ up N times then joins.
+    #
+    # Simpler path: monkey-patch a stub for the SPECIFIC relative import
+    # by pre-registering `po_lt_pkg.utils.overlay_kit` — but that's still
+    # 2 levels short. Cleanest: add empty parents (a two-level up from
+    # `po_lt_pkg.ui.paint_ops` is `po_lt_pkg`; three-level is empty).
+    #
+    # For the test, we shortcut: patch the sink to import from a fixed
+    # module name via sys.modules trickery. Register the stub under
+    # every plausible parent path and let importlib find whichever
+    # matches.
+
+    _fake_okit = _types_lt.ModuleType("_fake_overlay_kit")
+
+    _drr_log: list = []
+
+    def _stub_draw_rounded_rect(canvas, rect, radius):
+        _drr_log.append(("draw_rounded_rect", rect.x, rect.y, rect.w, rect.h, radius))
+        # Match real behavior: it calls c.draw_path under the hood; the
+        # recording canvas doesn't have a draw_path so we just log.
+
+    _fake_okit.draw_rounded_rect = _stub_draw_rounded_rect
+
+    # The relative import `from ....utils.overlay_kit import draw_rounded_rect`
+    # inside execute() resolves against `po_mod.__package__`. Under the L1
+    # harness po_mod was loaded as `po_lt_pkg.ui.paint_ops` so `__package__`
+    # is "po_lt_pkg.ui" — level 4 attempts to climb 4 segments up from a
+    # 2-segment package, which raises "attempted relative import beyond
+    # top-level package". Under Talon the module lives at
+    # `trillium_talon.trillium.plugin.prose_overlay.ui.paint_ops` so 4 dots
+    # resolves to `trillium_talon.trillium.utils.overlay_kit`.
+    #
+    # Temporarily deepen po_mod's __package__ to match the Talon layout,
+    # register the parent package chain, and register the fake overlay_kit
+    # under the resolved path. We restore __package__ after these tests.
+    _po_pkg_orig = po_mod.__package__
+    _po_pkg_deep = "po_lt_deep_stub.plugin.prose_overlay.ui"
+    po_mod.__package__ = _po_pkg_deep
+    for _mp in (
+        "po_lt_deep_stub",
+        "po_lt_deep_stub.plugin",
+        "po_lt_deep_stub.plugin.prose_overlay",
+        "po_lt_deep_stub.plugin.prose_overlay.ui",
+        "po_lt_deep_stub.utils",
+    ):
+        if _mp not in _sys.modules:
+            _sys.modules[_mp] = _types_lt.ModuleType(_mp)
+    _sys.modules["po_lt_deep_stub.utils.overlay_kit"] = _fake_okit
+    # ..shim.shapes anchor for ShapeGlyphOp — level 2, so we need
+    # po_lt_deep_stub.plugin.prose_overlay.shim.shapes
+    for _mp in (
+        "po_lt_deep_stub.plugin.prose_overlay.shim",
+    ):
+        if _mp not in _sys.modules:
+            _sys.modules[_mp] = _types_lt.ModuleType(_mp)
+
+    with test(
+        "L1",
+        "L1.153",
+        "execute: RoundedRectOp(stroke=False) → FILL + color + draw_rounded_rect",
+    ):
+        _drr_log.clear()
+        canvas = _RecordingCanvas()
+        # Give the recording canvas a no-op draw_path so if the real helper
+        # ever gets invoked instead of the stub, we don't crash.
+        canvas.draw_path = lambda path: canvas.log.append(("draw_path",))
+        _execute(
+            [_RoundedRectOp(
+                x=5.0, y=10.0, w=100.0, h=20.0,
+                radius=3.0, color="089ad340",
+            )],
+            canvas,
+        )
+        assert ("set_style", "FILL") in canvas.log
+        assert ("set_color", "089ad340") in canvas.log
+        assert _drr_log, (
+            f"expected stub draw_rounded_rect call; drr_log={_drr_log}, canvas.log={canvas.log}"
+        )
+        assert _drr_log[0][0] == "draw_rounded_rect"
+        assert _drr_log[0][1:6] == (5.0, 10.0, 100.0, 20.0, 3.0), (
+            f"rounded rect geometry mismatch; got {_drr_log[0]}"
+        )
+
+    with test(
+        "L1",
+        "L1.154",
+        "execute: RoundedRectOp(stroke=True) → STROKE, stroke_width, then FILL restored",
+    ):
+        _drr_log.clear()
+        canvas = _RecordingCanvas()
+        canvas.draw_path = lambda path: canvas.log.append(("draw_path",))
+        _execute(
+            [_RoundedRectOp(
+                x=0.0, y=0.0, w=10.0, h=10.0,
+                radius=2.0, color="ffffffff",
+                stroke=True, stroke_width=1.5,
+            )],
+            canvas,
+        )
+        style_events = [e for e in canvas.log if e[0] == "set_style"]
+        assert style_events[0] == ("set_style", "STROKE"), (
+            f"first style set should be STROKE; got {style_events!r}"
+        )
+        assert ("set_stroke_width", 1.5) in canvas.log
+        assert style_events[-1] == ("set_style", "FILL"), (
+            f"last style set should restore FILL; got {style_events!r}"
+        )
+
+    # shim.shapes stub. The sink imports it via
+    # `from ..shim import shapes as _shapes_sink`. Package anchor is
+    # `po_lt_pkg.ui.paint_ops` (relative level 2 → `po_lt_pkg`, then
+    # `shim.shapes`). Register under po_lt_pkg.shim and po_lt_pkg.shim.shapes.
+
+    _fake_shapes = _types_lt.ModuleType("_fake_shapes")
+    _shape_glyph_log: list = []
+
+    def _stub_draw_hat_shape(canvas, shape_name, color, cx, cy, scale=0.75, alpha=255, outline=None):
+        _shape_glyph_log.append(
+            ("draw_hat_shape", shape_name, color, cx, cy, scale, alpha, outline)
+        )
+
+    _fake_shapes.draw_hat_shape = _stub_draw_hat_shape
+
+    # Register under the deepened package path so `from ..shim import shapes`
+    # (level 2 from `po_lt_deep_stub.plugin.prose_overlay.ui`) resolves to
+    # `po_lt_deep_stub.plugin.prose_overlay.shim.shapes`.
+    _sys.modules["po_lt_deep_stub.plugin.prose_overlay.shim.shapes"] = _fake_shapes
+    _fake_shim_pkg = _sys.modules["po_lt_deep_stub.plugin.prose_overlay.shim"]
+    _fake_shim_pkg.shapes = _fake_shapes
+
+    with test(
+        "L1",
+        "L1.155",
+        "execute: ShapeGlyphOp → shim.shapes.draw_hat_shape called with fields",
+    ):
+        _shape_glyph_log.clear()
+        canvas = _RecordingCanvas()
+        _execute(
+            [_ShapeGlyphOp(
+                shape_name="bolt", cx=50.0, cy=60.0, scale=1.1,
+                color="ffb74d", alpha=200, outline="000000",
+            )],
+            canvas,
+        )
+        assert _shape_glyph_log, (
+            f"expected stub draw_hat_shape call; log={_shape_glyph_log}"
+        )
+        entry = _shape_glyph_log[0]
+        assert entry == (
+            "draw_hat_shape", "bolt", "ffb74d", 50.0, 60.0, 1.1, 200, "000000"
+        ), f"draw_hat_shape args mismatch; got {entry!r}"
+
+    # Restore po_mod.__package__ so subsequent test files that import
+    # po_lt_pkg.ui.paint_ops (currently none, but future L1 tests may)
+    # see the original stub-tree path.
+    po_mod.__package__ = _po_pkg_orig

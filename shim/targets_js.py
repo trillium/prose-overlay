@@ -233,7 +233,7 @@ def resolve_target(target) -> "list[tuple[int, int]]":
     """
     _ensure_loaded()
 
-    buffer = _state.buffer or instance.buffer
+    buffer = _state.buffer or instance.state.buffer
     tokens = list(buffer.get_tokens()) if buffer is not None else []
     if not tokens:
         raise RuntimeError("prose overlay buffer is empty; cannot resolve target")
@@ -241,7 +241,7 @@ def resolve_target(target) -> "list[tuple[int, int]]":
     target_dict = _target_to_json(target)
     target_json = json.dumps(target_dict)
     doc_json = _build_document_json(tokens, _state.cursor)
-    hat_map_json = _build_hat_map_json(tokens, instance.hat_assignments)
+    hat_map_json = _build_hat_map_json(tokens, instance.state.hat_assignments)
     cursor_json = json.dumps({
         "gap": _state.cursor if _state.cursor is not None else -1,
     })

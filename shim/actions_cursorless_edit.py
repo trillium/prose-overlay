@@ -33,7 +33,7 @@ def _po_matcher_misfire(site: str, action_name: str, target: Any) -> None:
         "action_name": action_name,
         "target_type": type(target).__name__,
         "canvas_is_showing": False,
-        "ctx_tags": list(getattr(instance.ctx, "tags", None) or []),
+        "ctx_tags": list(getattr(instance.runtime.ctx, "tags", None) or []),
     }
     try:
         actions.user.registry_probe_dump(label, extras)
@@ -111,7 +111,7 @@ def _selection_to_gap(active_char: int, tokens: list[str]) -> int:
 
 
 def _apply_edit_plan(plan: dict) -> None:
-    """Apply the JS-shim edit plan to instance.buffer and update the cursor.
+    """Apply the JS-shim edit plan to instance.state.buffer and update the cursor.
 
     Edits are applied in reverse character-offset order so later edits don't
     shift earlier offsets. Supported edit types: delete, insert, replace.
@@ -127,20 +127,20 @@ def _apply_edit_plan(plan: dict) -> None:
 
     # Bracket the whole edit-plan application as one undo step. set_tokens_raw
     # records the full-buffer delta into the open group automatically.
-    instance.buffer.commit_start("cursorless_edit", EditKind.STRUCTURAL)
+    instance.state.buffer.commit_start("cursorless_edit", EditKind.STRUCTURAL)
     try:
-        text = instance.buffer.get_text()
+        text = instance.state.buffer.get_text()
         for edit in sorted(edits, key=_edit_start, reverse=True):
             text = _apply_one_edit(text, edit)
         new_tokens = text.strip().split() if text.strip() else []
-        instance.buffer.set_tokens_raw(new_tokens)
+        instance.state.buffer.set_tokens_raw(new_tokens)
     finally:
-        instance.buffer.commit_end()
+        instance.state.buffer.commit_end()
 
     if new_selections:
         active_char = new_selections[0].get("active", {}).get("character", None)
         if active_char is not None:
-            gap = _selection_to_gap(active_char, instance.buffer.get_tokens())
+            gap = _selection_to_gap(active_char, instance.state.buffer.get_tokens())
             _prose_overlay_set_cursor(gap)
         else:
             _prose_overlay_clear_cursor()

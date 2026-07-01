@@ -22,25 +22,25 @@ class Actions:
         """Retarget the overlay to a recall named window.
         On confirm, that window will be focused before text is inserted.
         """
-        instance.target_recall_name = name
-        instance.target_window_title = name
-        instance.canvas.refresh()
+        instance.state.target_recall_name = name
+        instance.state.target_window_title = name
+        instance.runtime.canvas.refresh()
 
     def prose_overlay_retarget_focus(name: str):
         """Retarget AND immediately focus the named recall window.
         Use when the window name leads a phrase: the window is frontmost
         so confirm can insert directly without an extra focus step.
         """
-        instance.target_recall_name = name
-        instance.target_window_title = name
-        instance.canvas.refresh()
+        instance.state.target_recall_name = name
+        instance.state.target_window_title = name
+        instance.runtime.canvas.refresh()
         actions.user.recall_window(name)
 
     def prose_overlay_get_target_label() -> str:
         """Return the display label for the current target window."""
-        if instance.target_recall_name:
-            return f"→ {instance.target_recall_name}"
-        if instance.target_window_title:
-            t = instance.target_window_title
+        if instance.state.target_recall_name:
+            return f"→ {instance.state.target_recall_name}"
+        if instance.state.target_window_title:
+            t = instance.state.target_window_title
             return f"→ {t[:40]}…" if len(t) > 40 else f"→ {t}"
         return ""

@@ -356,7 +356,7 @@ _CACHE_KEY_LIMIT = 8  # bounded — keep last N cache entries to avoid growth
 
 
 def _clear_shape_cache() -> None:
-    """Reset the memoization cache. Used by instance.reset() and by tests."""
+    """Reset the memoization cache. Used by ProseOverlayState.reset() and by tests."""
     _SHAPE_CACHE.clear()
 
 
@@ -381,7 +381,7 @@ def compute_shape_assignments(
         flagged: set/frozenset of token indices that are flagged homophones
         rev: buffer rev counter — included in the memoization key so the
              cache invalidates on every buffer mutation
-        prior: previous assignment dict (typically ``instance.shape_assignments``
+        prior: previous assignment dict (typically ``instance.state.shape_assignments``
                from the last allocator run); the prior shape for any token
                in a group is preserved as that group's shape on the next
                call, even if that specific token-idx was removed.

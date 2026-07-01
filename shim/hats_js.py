@@ -27,11 +27,11 @@ _ctx: js.Context | None = None
 _fn = None  # js.Object — the proseAllocateHats function
 
 # True when JS allocator failed and the Python fallback is being used.
-# Read by prose_overlay_actions_core._recompute_hats() to sync instance.hat_js_fallback.
+# Read by prose_overlay_actions_core._recompute_hats() to sync instance.state.hat_js_fallback.
 _using_fallback: bool = False
 
 # Repr of the last exception that forced the fallback. Sync'd onto
-# instance.hat_js_last_err so the always-on debug JSONL captures WHY the
+# instance.state.hat_js_last_err so the always-on debug JSONL captures WHY the
 # fallback fired — the 52-events-in-one-session pattern from 2026-06-30
 # had no root-cause data because the exception message only went to
 # stdout (Talon log), not to the diff-based observability stream.

@@ -304,6 +304,8 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
         CURSOR_WIDTH,
         DOT_GAP_Y,
         DOT_RADIUS,
+        HAT_COLOR,
+        HAT_COLOR_HEX,
         HINT_CMD_COLOR,
         LISTENING_COLOR,
         PANEL_PAD,
@@ -353,6 +355,47 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
                 + DOT_GAP_Y
                 + TOKEN_FONT_SIZE
             )
+
+            # 1. Letter hat dot (with black-hat white outline). Mirrors
+            #    ui/draw_tokens.py:215-220. The HatMark's position.x/y
+            #    already sit at the dot's top-left; we recover the center
+            #    via +DOT_RADIUS on each axis (the builder guarantees
+            #    position.w == position.h == 2*DOT_RADIUS).
+            hat = tok.hat
+            if hat is not None:
+                dot_cx = hat.position.x + hat.position.w / 2.0
+                dot_cy = hat.position.y + hat.position.h / 2.0
+                dot_color = HAT_COLOR_HEX.get(hat.color, HAT_COLOR)
+                # Black hat gets an outer white outline circle so it reads
+                # against dark backgrounds (mirrors draw_tokens.py:216-218
+                # verbatim: white filled circle at radius+1 painted BEFORE
+                # the colored dot at radius).
+                if dot_color == HAT_COLOR_HEX["black"]:
+                    ops.append(
+                        EllipseOp(
+                            cx=dot_cx,
+                            cy=dot_cy,
+                            rx=DOT_RADIUS + 1,
+                            ry=DOT_RADIUS + 1,
+                            color="ffffffff",
+                            stroke=False,
+                        )
+                    )
+                ops.append(
+                    EllipseOp(
+                        cx=dot_cx,
+                        cy=dot_cy,
+                        rx=DOT_RADIUS,
+                        ry=DOT_RADIUS,
+                        color=dot_color,
+                        stroke=False,
+                    )
+                )
+
+            # 2. Shape hat glyph (Cursorless SVG shape above token) — a
+            #    later commit wires this via ShapeGlyphOp; keep placeholder.
+
+            # 3. Token text.
             ops.append(
                 TextOp(
                     x=tok.rect.x,
@@ -362,6 +405,8 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
                     color=TOKEN_COLOR,
                 )
             )
+
+            # 4. Homophone underline segments — wired in a later commit.
 
     # --- Cursor ---
     # Paint-side blink gate: if blink_on is False, emit nothing so the

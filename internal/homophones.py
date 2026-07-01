@@ -12,7 +12,6 @@ structure (a tuple of tuples) rather than only producing a flat
 flagged set.
 """
 
-import os
 
 _CSV_PATH = (
     "/Users/trilliumsmith/.talon/user/trillium_talon/core/homophones/homophones.csv"

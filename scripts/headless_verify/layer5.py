@@ -21,10 +21,11 @@ import sys
 import types
 
 from .common import (
-    test, REPO, GREEN, RED, DIM, RESET,
-    _load_state_module,
+    DIM,
+    REPO,
+    RESET,
+    test,
 )
-
 
 # =============================================================================
 # Layer 5 — Resolver parity (Python ↔ JS, F9 migration)
@@ -825,7 +826,6 @@ def run_layer_5() -> None:
         # available outside Talon. We only need the pure-Python translator
         # function, not the bundle loader. Bypass via importlib + module
         # stub for talon.lib.js (matches the Layer-3 pattern).
-        import importlib.util
         if "talon" not in sys.modules:
             sys.modules["talon"] = types.ModuleType("talon")
         if "talon.lib" not in sys.modules:
@@ -843,10 +843,10 @@ def run_layer_5() -> None:
         # which is pure-Python and has no Talon dependencies.
         targets_js_path = REPO / "shim" / "targets_js.py"
         src = targets_js_path.read_text()
-        # Extract _PROSE_TO_BUNDLE_DELIMITER + _translate_modifier without
-        # running the module-level talon imports.
-        exec_ns: dict = {}
         # Re-derive minimal subset — match the implementation 1:1.
+        # (An earlier iteration exec'd the file into an isolated namespace
+        # for the check; switched to a source-string search because it's
+        # simpler and doesn't need the fragile package stubs above.)
         delim_map = {
             "round":   "parentheses",
             "box":     "squareBrackets",

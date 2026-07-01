@@ -8,7 +8,7 @@ Registers the win_focus event here.
 Never imports prose_overlay.py.
 """
 
-from talon import Module, actions, ui
+from talon import Module, ui
 
 from ..internal.instance import instance
 

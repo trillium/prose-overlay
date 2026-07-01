@@ -11,29 +11,24 @@ in one file. See docs/HEADLESS_VERIFY_PLAN.md for the test-ID scheme.
 
 import importlib.util
 import pathlib
-import sys
 import tempfile
 
 from .common import (
-    test, results, REPO, GREEN, RED, DIM, RESET,
-    STATE_PY, HAT_JS, TEST_DRIVER_PY,
-    _load_state_module, _load_instance_module,
+    DIM,
+    REPO,
+    RESET,
+    _load_instance_module,
+    _load_state_module,
+    test,
 )
-
 
 # =============================================================================
 # Layer 1 — pure Python
 # =============================================================================
 
-def _load_instance_module():
-    """Load prose_overlay_instance.py — ProseOverlayState is dependency-free."""
-    spec = importlib.util.spec_from_file_location(
-        "prose_overlay_instance",
-        REPO / "internal" / "instance.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+# _load_instance_module lives in .common — one source of truth used by
+# both Layer 1's reset-invariants tests and Layer 3's stubbed-Talon
+# fixture. Historical local copy removed 2026-07-01 during the split.
 
 
 def run_layer_1() -> None:
@@ -195,7 +190,6 @@ def run_layer_1() -> None:
     # -----------------------------------------------------------------
     # Load the module via spec_from_file_location so the test doesn't
     # depend on prose_overlay being on sys.path as a package.
-    import tempfile
     persist_spec = importlib.util.spec_from_file_location(
         "prose_overlay_history_persist_test",
         REPO / "internal" / "history_persist.py",
@@ -531,7 +525,8 @@ def run_layer_1() -> None:
         shapes_mod._clear_shape_cache()
         # Different groups so each gets its own shape (memoization is keyed
         # on inputs, not on group structure).
-        gid = lambda t: 0 if t == "there" else 1
+        def gid(t):
+            return 0 if t == "there" else 1
         r1 = shapes_mod.compute_shape_assignments(
             ["there", "their"], frozenset({0, 1}), rev=1,
             group_id_for_word_fn=gid,

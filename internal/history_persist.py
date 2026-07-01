@@ -72,7 +72,7 @@ def load_history(path: pathlib.Path | None = None) -> list[str]:
         return []
     entries = raw.get("entries")
     if not isinstance(entries, list):
-        print(f"prose_overlay: history 'entries' is not a list, starting empty")
+        print("prose_overlay: history 'entries' is not a list, starting empty")
         return []
     # Drop any non-string entries defensively.
     clean = [e for e in entries if isinstance(e, str)]

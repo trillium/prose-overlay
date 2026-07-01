@@ -9,7 +9,7 @@ identify words. Matches Cursorless collision resolution: same letter, different 
 """
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 import time

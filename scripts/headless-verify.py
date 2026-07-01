@@ -11,15 +11,15 @@ one import + one call below.
 Usage: python3 scripts/headless-verify.py
 """
 
-import sys
-
 # Make `scripts/headless_verify/` importable as a package regardless of
 # the cwd this script is launched from. Repo root is the parent of the
 # scripts dir; adding it to sys.path lets `headless_verify.*` resolve.
 import pathlib
+import sys
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from headless_verify.common import results, GREEN, RED, RESET
+from headless_verify.common import GREEN, RED, RESET, results
 from headless_verify.layer1 import run_layer_1
 from headless_verify.layer2 import run_layer_2
 from headless_verify.layer3 import run_layer_3

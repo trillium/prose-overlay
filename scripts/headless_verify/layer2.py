@@ -10,8 +10,7 @@ import json
 import pathlib
 import subprocess
 
-from .common import test, REPO, GREEN, RED, DIM, RESET, HAT_JS
-
+from .common import DIM, HAT_JS, RESET, test
 
 # =============================================================================
 # Layer 2 — JS bundle via bun

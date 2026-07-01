@@ -12,8 +12,7 @@ import pathlib
 import sys
 import types
 
-from .common import test, REPO, GREEN, RED, DIM, RESET, TEST_DRIVER_PY
-
+from .common import DIM, RESET, TEST_DRIVER_PY, test
 
 # =============================================================================
 # Layer 3 — Talon-stubbed (prose_overlay_test_driver.py)

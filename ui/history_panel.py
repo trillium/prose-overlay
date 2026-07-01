@@ -20,7 +20,6 @@ from ..internal.draw_constants import (
     PANEL_RADIUS, PANEL_PAD,
     BG_COLOR, BORDER_COLOR, TOKEN_COLOR,
     HINT_COLOR, HINT_CMD_COLOR, SEP_COLOR, HELP_TITLE_COLOR,
-    TOKEN_FONT_SIZE,
 )
 
 # HINT_FONT_SIZE is mutable state owned by prose_overlay_draw — use a local

@@ -6,7 +6,7 @@ Owns: _blink_tick, _set_cursor, _prose_overlay_set_cursor,
 Never imports prose_overlay.py.
 """
 
-from talon import Module, actions, cron, ui
+from talon import Module, cron, ui
 
 from ..internal.instance import instance
 from ..cursorless.resolve import _state as _resolve_state

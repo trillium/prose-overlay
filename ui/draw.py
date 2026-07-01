@@ -117,12 +117,10 @@ def draw_overlay(
     rows = _flow_layout(token_metrics, content_w - PANEL_PAD * 2)
     if len(rows) * LINE_HEIGHT <= usable_h - label_reserve:
         _hints_hidden_by_overflow = False
-        max_content_w = content_w - PANEL_PAD * 2
     else:
         # Reflow using full panel width (hints hidden)
         rows = _flow_layout(token_metrics, panel_w - PANEL_PAD * 2)
         _hints_hidden_by_overflow = True
-        max_content_w = panel_w - PANEL_PAD * 2
 
     # === Overflow step 2: terminal-pinned viewport if still overflowing ===
     # In overflow mode label is hidden, so full usable_h is available.

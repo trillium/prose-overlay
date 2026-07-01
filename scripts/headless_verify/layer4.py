@@ -10,7 +10,7 @@ new files land.
 import subprocess
 import sys
 
-from .common import test, REPO, GREEN, RED, DIM, RESET
+from .common import DIM, REPO, RESET, test
 
 
 def run_layer_4() -> None:
@@ -38,4 +38,47 @@ def run_layer_4() -> None:
             "Refactor the FAIL items into the correct layer, OR update the "
             "layer assignment in scripts/layer-audit.py if the categorization "
             "is wrong."
+        )
+
+    with test("L4", "L4.2", "ruff finds no real bugs (F/E/W minus stylistic E501/E731)"):
+        # Enforced code-quality gate. Rule selection:
+        #   F* — pyflakes: unused imports, redefinitions, unused locals,
+        #        f-strings without placeholders. All real bugs.
+        #   E*/W* — pycodestyle: syntax + whitespace correctness. Real.
+        #   E501 line-length + E731 lambda: ignored — stylistic only,
+        #        long asserts + one-off lambdas in tests are fine.
+        # Ruff is a soft dep — if it isn't installed the test skips with
+        # a hint rather than failing, so contributors without their
+        # env set up can still run the rest of the harness.
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "ruff", "check",
+                    "internal/", "shim/", "ui/", "cursorless/", "scripts/",
+                    "--select=F,E,W",
+                    "--ignore=E501,E731",
+                    "--output-format=concise",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                cwd=str(REPO),
+            )
+        except FileNotFoundError as e:
+            # `python -m ruff` bubbles a FileNotFoundError only if python
+            # itself is missing; ruff-missing shows as `No module named ruff`
+            # in stderr with a non-zero exit code. Handle both.
+            print(f"        {DIM}(ruff invocation failed: {e}; skipping){RESET}")
+            return
+        if result.returncode != 0 and "No module named ruff" in result.stderr:
+            print(f"        {DIM}(ruff not installed — pip install ruff to enable; skipping){RESET}")
+            return
+        if result.stdout.strip():
+            for line in result.stdout.splitlines():
+                if line.strip():
+                    print(f"        {line}")
+        assert result.returncode == 0, (
+            "ruff found real code-quality issues — see output above. "
+            "Fix by hand OR autofix most of them with: "
+            "python3 -m ruff check --select=F,E,W --ignore=E501,E731 --fix ."
         )

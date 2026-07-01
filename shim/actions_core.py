@@ -9,7 +9,10 @@ Contains:
   _hat_to_index     — convert (letter, color) hat reference to token index
 """
 
+import sys
+
 from ..internal.instance import instance
+from ..internal.viewport import Rect
 from .hats_js import compute_hat_assignments
 from . import hats_js as _hats_js_mod
 from .shape_bridge import compute_hat_assignments_with_group_shapes
@@ -22,6 +25,75 @@ from ..internal.homophones import (
     next_in_group,
     current_position_in_group,
 )
+
+
+def _get_setting(name: str):
+    """Read a Talon setting defensively — None when Talon isn't loaded.
+
+    Mirrors ``internal/debug.py:_get_setting``. Resolves ``talon`` through
+    ``sys.modules`` so this shim function does the right thing under both
+    live Talon (module is imported → settings work) and headless verify
+    (module absent → returns ``None`` cleanly). Every exception is
+    swallowed so a partially-stubbed ``talon`` module (e.g. one without
+    ``.settings``) falls through to ``None`` instead of crashing
+    ``_recompute_hats``.
+    """
+    try:
+        talon_mod = sys.modules.get("talon")
+        if talon_mod is None:
+            return None
+        settings = getattr(talon_mod, "settings", None)
+        if settings is None:
+            return None
+        return settings.get(name)
+    except Exception:
+        return None
+
+
+def _get_main_screen_rect() -> Rect | None:
+    """Return the current main screen's rect as an internal ``Rect``.
+
+    Reads ``talon.ui.main_screen().rect`` when talon is loaded, converts
+    to the internal (talon-free) ``Rect`` shape so downstream code —
+    including future pure-function draw tests — can consume without a
+    talon dependency. Returns ``None`` in headless verify (no talon
+    module) OR when the main_screen call fails for any reason (multiple
+    displays disconnecting mid-tick, etc.) — the draw path treats
+    ``None`` as "no screen; paint nothing."
+    """
+    try:
+        talon_mod = sys.modules.get("talon")
+        if talon_mod is None:
+            return None
+        ui = getattr(talon_mod, "ui", None)
+        if ui is None:
+            return None
+        rect = ui.main_screen().rect
+        return Rect(x=rect.x, y=rect.y, width=rect.width, height=rect.height)
+    except Exception:
+        return None
+
+
+def _populate_visual_state() -> None:
+    """Hoist talon-runtime reads (screen rect + settings) into ``instance.state``.
+
+    Move 3 of the pure-function refactor plan — ``ui/draw.py:draw_overlay``
+    used to read ``ui.main_screen()`` and three ``settings.get(...)``
+    values inline at paint time. Those reads now happen HERE at recompute
+    time and land on ``instance.state.*`` fields (added in step 1/3), so
+    ``draw_overlay`` (migrated in step 3/3) becomes a pure function of
+    its args + state.
+
+    Called at the top of ``_recompute_hats``. Idempotent — safe to call
+    twice per tick if a downstream helper triggers a re-recompute.
+    Setting reads that return ``None`` (headless) fall back to ``False``
+    for booleans, matching today's ``bool(settings.get(...))`` semantics
+    at the call sites in ``draw_overlay``.
+    """
+    instance.state.screen_rect = _get_main_screen_rect()
+    instance.state.window_scoped = bool(_get_setting("user.prose_overlay_window_scoped"))
+    instance.state.homophone_hint = bool(_get_setting("user.prose_overlay_homophone_hint"))
+    instance.state.homophone_shapes = bool(_get_setting("user.prose_overlay_homophone_shapes"))
 
 
 def _cursorless_shape_allocator_enabled() -> bool:
@@ -51,7 +123,14 @@ def _recompute_hats():
     ``instance.state.shape_assignments`` — the per-token shape mapping for
     flagged homophones. Stable across edits via prior-assignment carryover
     inside ``compute_shape_assignments``.
+
+    Move 3 addition: hoist talon-runtime reads (main screen rect + three
+    setting flags) into ``instance.state`` via ``_populate_visual_state``.
+    Runs FIRST so downstream steps (and the subsequent draw) see the
+    latest values. Called unconditionally — the populator is a no-op
+    under headless and idempotent otherwise.
     """
+    _populate_visual_state()
     tokens = instance.state.buffer.get_tokens()
     # When no cursor is set, default proximity to end of buffer (where writing happens).
     cursor_for_hats = instance.state.cursor if instance.state.cursor is not None else len(tokens)

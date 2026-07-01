@@ -49,7 +49,12 @@ overlay dump: user.prose_overlay_dump_state()
 # Hard reset — wipe all per-session state. Use when the overlay is stuck
 # in a bad state. Doesn't restart Talon or reload modules; just zeros
 # instance fields and hides the canvas. See prose_overlay_reset docstring.
+# Two aliases: `overlay reset` matches the existing `overlay <verb>` family
+# (hide, dismiss, undo, redo), and `prose reset` matches the `prose <verb>`
+# launch-phrase family (`prose overlay`, `prose history`, `prose undo`).
+# Same action on both — no state distinction.
 overlay reset: user.prose_overlay_reset()
+prose reset: user.prose_overlay_reset()
 
 # Headless test driver — enables file-driven dispatch from scripts/test-overlay.sh
 # without needing PROSE_OVERLAY_TEST=1 at Talon launch. Sticky across hot-reload

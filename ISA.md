@@ -3,10 +3,10 @@ task: Voice-first prose editor for Talon — Cursorless verbs on a floating buff
 slug: prose-overlay-v2
 effort: E4
 phase: build
-progress: 26/30
+progress: 44/48
 mode: build
 started: 2026-05-21T00:00:00Z
-updated: 2026-06-30T19:55:00Z
+updated: 2026-07-01T11:45:00Z
 project: prose_overlay
 ---
 
@@ -97,6 +97,54 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - [x] ISC-22: Viewport class owns scroll + anchor + recenter state — Helix `align(top/center/bottom)` + Emacs `recenter` cycling via voice — `prose_overlay_viewport.py`
 - [x] ISC-23: Undo/redo with CM6 two-deque + Helix `(forward, inverse)` delta pairs + Emacs `commit_start`/`commit_end` boundary (per `docs/UNDO_REDO_PLAN.md`) — Phases 1+2 shipped (commits `ec52d32`, `7eb3e56`) with bring/move bracket-fix (commit `1a618a3`). Two-deque + delta+inverse records + commit_start/commit_end + redo + voice command + coalescing toggle. Coalescing defaults OFF (toggle: `overlay undo group on/off`) — slice-discipline call per plan §9.Q1.
 - [ ] ISC-24: SkParagraph-based text measurement + per-line cache keyed by `buffer_rev` (per `docs/VIEWPORT_RESEARCH.md` §1; only if measurable layout wins emerge)
+
+### Phase 6 — Wishlist bundle expansion (2026-07-01)
+
+Cluster A/B/C/D of `docs/BUNDLE_REST_SCOPE.md` shipped in the 2026-07-01 session — 26 commits landing ~18 new capability slices on top of the JS resolver default-ON substrate. Cluster A adds three composable actions (swap/clone/reverse) via LIST+CAPTURE grammar rules that beat cursorless.talon on specificity while PO is active. Cluster B lights up the 12-delimiter wrap surface. Cluster C wires up ordinal/relative/every/leading/trailing modifiers through the composable `<user.cursorless_target>` capture — no new prose_overlay grammar rules, JS resolver handles semantics (Python-fallback is asymmetric, JS-only). Cluster D exposes interior/bounds of paired delimiters. Plus shape-allocator restoration (three slices), bundle-inventory ratchet, and two regression heals (dictation_insert kwarg parity, shapes runtime default flip).
+
+**Cluster A — Rearrange actions (composable target capture)**
+
+- [x] ISC-25: Wishlist #3 Swap — `swapTargets` exchanges two target texts atomically via one JS resolver call. Grammar rule `{user.cursorless_swap_action} <user.cursorless_swap_targets>` shape mirrors cursorless.talon C3 (LIST + CAPTURE). Rides cursorless-talon's existing `cursorless_swap_targets` two-target capture (`[<target>] with <target>`). Commits `c67da0326`+`129a636`, marked `dc3f985`. `shim/actions_cursorless.py:prose_overlay_swap`.
+- [x] ISC-26: Wishlist #12 Clone — `clone <hat>` (insertCopyAfter) / `clone up <hat>` (insertCopyBefore) duplicate target text. Rides the composable `<user.cursorless_simple_action> <user.cursorless_target>` dispatcher — no new grammar rule needed. Commit `ee1779e`.
+- [x] ISC-27: Wishlist #13 Reverse — `reverseTargets` reverses token order in a range or list of targets. Special-cased in `prose_overlay_run_action` to gather all indices, reverse text list, reassemble in ONE call (atomic swap semantics). Commit `129a636`.
+
+**Cluster B — Wrap with paired delimiter**
+
+- [x] ISC-28: Wishlist #5 Wrap — bundle rebuild + shim + grammar + L2.14 test. `<user.cursorless_wrapper_paired_delimiter> {user.cursorless_wrap_action} <user.cursorless_target>` grammar shape matches cursorless.talon C7. Reuses cursorless-talon's existing 12-entry paired-delimiter capture (`paired_delimiter.py:28-42`) so the full delimiter vocabulary flows through unchanged. VSCode-only `rewrap` action rejected in the shim. Commits `986554267`+`3a90365`+`a0fa574`. `shim/actions_cursorless.py:prose_overlay_wrap_with_paired_delimiter`.
+
+**Cluster C — Modifier grammar routing (JS-only, composable)**
+
+All Cluster C ISCs flow through cursorless-talon's own modifier vocabulary on top of `<user.cursorless_target>` — grammar-only, no new prose_overlay rules. Python-fallback (`user.prose_overlay_use_js_resolver = False`) does NOT cover these; JS resolver is the sole implementation. This is documented asymmetry per `docs/BUNDLE_REST_SCOPE.md §Cluster C`.
+
+- [x] ISC-29: Wishlist #7 OrdinalScope — `take first word` / `take last word` / `take second word this`. L5.20 headless parity test (start=0 for first, start=-1 for last). Commit `08288db`. OQ2 resolved in same commit.
+- [x] ISC-30: Wishlist #10 first/last — first-in-buffer / last-in-buffer variants of OrdinalScope. L5.21 test. Commit `19624f4`.
+- [x] ISC-31: Wishlist #9 EveryScope (partial) — `take every word in file` (multi-range). L5.22 test. Bundle iteration gap documented — best composed with an explicit document scope. Commit `fb09e26`.
+- [x] ISC-32: Wishlist #6 RelativeScope — `take next word <hat>` / `take past next word` (forward/backward relative to a mark). L5.23 test. Commit `f4912cc`.
+- [x] ISC-33: Wishlist #11 leading/trailing — `chuck leading <hat>` / `chuck trailing <hat>`. Degenerate on prose per OQ3: leading/trailing return whitespace char ranges rather than semantic head/tail (documented in `docs/BUNDLE_REST_SCOPE.md §7`). L5.24 test. Commit `ad0736b`.
+
+**Cluster D — Interior / bounds of paired delimiter**
+
+- [x] ISC-34: Wishlist #8 interior — `take inside round <hat>`. `interiorOnly` modifier trims delimiters, returning only the inside content. L5.25 test. Commit `4fdb6bd`.
+- [x] ISC-35: Wishlist #8 bounds — `take bounds round <hat>`. `excludeInterior` modifier returns the two delimiter tokens as bounds. L5.26 test. Same commit `4fdb6bd`, closing note `dd68006`.
+
+**Shape allocator restoration (3 slices)**
+
+- [x] ISC-36: Slice 1 — bundle un-strip + 5th-arg accept. Cursorless bundle rebuild with shape-enabled allocator: JS entry point accepts a 5th `hatShapes` argument for enabled hat-shape names. Commit `97215cd` (bundle rebuild) + `a590950f7` in cursorless.
+- [x] ISC-37: Slice 2 — shim projection wrapper + stability schema migration. `shim/hats_js.py` gains a projection wrapper preserving the per-group-shape invariant over the cursorless-native allocator's output. Commit `e7322f3` + `717a51282` in cursorless.
+- [x] ISC-38: Slice 3 — opt-in setting + Python allocator fallback. New setting `user.prose_overlay_use_cursorless_shape_allocator` (default OFF); Python allocator remains the primary path until the opt-in flip. Commits `c6c735c`, `b5e3c4c` (finalize decisions).
+
+**Bundle inventory ratchet**
+
+- [x] ISC-39: L2 grep-test covers must-have + planned actions and modifier handlers — full canonical bundle inventory. Commits `e29fc6a`, `b195562` (item #14 close + FEATURE_PARITY.md L2.6-L2.9 rows).
+
+**Regression heals**
+
+- [x] ISC-40: `dictation_insert` signature parity with community `auto_cap` kwarg. `shim/actions_dictation.py` accepts the kwarg so recent community-side signature changes don't blow up. Commit `e4841b5`.
+- [x] ISC-41: Shapes runtime-flag flip to match static setting default. `_shapes_enabled` runtime default flipped True → False so it matches the `mod.setting(..., default=False)` declaration. Commit `2afc173`.
+
+**Layer file rename**
+
+- [x] ISC-42: `layerN.py` → `layerN_scope.py` — test file rename for scope-tagged test layers. Import path fix in `scripts/headless-verify.py`. Commits `32c2a34`, `c722b1c`.
 
 ## Test Strategy
 
@@ -208,6 +256,8 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - **2026-06-30 — Loop turn 3 audit gap: Cato returned empty result.** E4 mandates Cato cross-vendor audit. The background agent spawned, ran for ~40s, then returned a transcript that ended mid-analysis ("Now I have enough context. Let me also check…") with no structured verdict. Proceeded without the Cato output rather than blocking the turn — smoke tests pass, implementation matches the plan §3 spec verbatim, the atomicity argument (tmp+os.replace + POSIX rename) is well-established. Audit re-spawn deferred to a later turn; if Cato keeps misfiring under E4 backgrounded calls, investigate the agent invocation pattern.
 
 ## Changelog
+
+- **2026-07-01** — Phase 6 opened: wishlist bundle expansion. 26 commits over Clusters A/B/C/D + shape-allocator restoration + bundle-inventory ratchet + regression heals + layer-file rename. 18 new ISCs (ISC-25 through ISC-42) all `[x]`. Progress 26/30 → 44/48. Headless verify: 141/141 (was 121/121 pre-session). Cluster A shipped `swap` / `clone` / `clone up` / `reverse`; Cluster B shipped 12-delimiter wrap surface via cursorless-talon's `cursorless_wrapper_paired_delimiter`; Cluster C wired ordinal / relative / every / leading / trailing modifiers through composable `<user.cursorless_target>` (JS-only, no Python fallback); Cluster D added `take inside <pair> <hat>` and `take bounds <pair> <hat>`. Shape allocator restoration lands opt-in setting `user.prose_overlay_use_cursorless_shape_allocator` (default OFF) with bundle un-strip + 5th-arg accept + projection wrapper. Regression heals: `dictation_insert` gains `auto_cap` kwarg parity; `_shapes_enabled` runtime default flipped True → False to match setting declaration. Bundle inventory grep-test now covers must-have + planned handlers. Test-file rename `layerN.py` → `layerN_scope.py` with import-path fix. See `docs/BUNDLE_REST_SCOPE.md` §Cluster A/B/C/D closes for per-item detail.
 
 - **2026-06-30** — ISC-14c shipped — same-group tokens share their group's shape (HOMOPHONE_SHAPES_PLAN Slice 3). Allocator rewritten per-token → per-group, new `internal.homophones.group_id_for_word` public helper, `compute_shape_assignments` gains a DI `group_id_for_word_fn` param. Tests L1.26/L1.27 rewritten for new semantics + L1.27a (intra-group sharing) + L1.27b (inter-group distinction) added. 106/106 → 108/108 green. Progress 24/30 → 25/30. Layer audit unchanged (0 fail, 2 pre-existing WARNs).
 

@@ -155,7 +155,7 @@ class Actions:
             mark = f"{h[2]}-{h[1]}" if h else "NO HAT"
             print(f"  [{i}] {t!r:30} → {mark}")
         print(f"  showing={instance.runtime.canvas.is_showing} cursor={instance.state.cursor} "
-              f"change_mode={getattr(instance, 'change_mode', False)} "
+              f"change_mode={instance.state.change_mode} "
               f"hat_js_fallback={instance.state.hat_js_fallback} unhatted={unhatted}")
 
     def prose_overlay_set_homophone_hint(enabled: int):

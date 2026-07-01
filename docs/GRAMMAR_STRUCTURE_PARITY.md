@@ -210,13 +210,86 @@ R1+R2 alone would drop rule count from ~105 → ~89 with zero behavior change. R
 
 ---
 
+## 5a. Refactor Status (audit 2026-07-01)
+
+Executed the audit against actual git history + on-disk file state late 2026-07-01.
+**TL;DR:** two of seven items shipped (R4 swap, R6 wrap). None of the four `.talon`
+deletion / capture-folding items (R1, R2, R3, R7) has been executed — the plan
+remains open. R5 (paste at destination) also not shipped. Rule count GREW from
+123 → 126 because R4 and R6 added rules without any of the offsetting
+deletions landing.
+
+### Current rule counts (regenerated 2026-07-01 via §2 one-liner)
+
+| File | Rules | Δ from baseline |
+|---|---:|---:|
+| `prose_overlay.talon` | 56 | 0 |
+| `prose_overlay_cursorless.talon` | 30 | +2 (swap rule + wrap rule) |
+| `prose_overlay_dictation.talon` | 10 | 0 |
+| `prose_overlay_bring_move.talon` | 9 | +1 (still present; a rule was tweaked but the file was not deleted) |
+| `prose_overlay_start.talon` | 5 | 0 |
+| `prose_overlay_ender.talon` | 4 | 0 |
+| `prose_overlay_history.talon` | 6 | 0 |
+| `prose_overlay_pre_post.talon` | 3 | 0 |
+| `prose_overlay_auto.talon` | 3 | 0 |
+| **Total** | **126** | **+3** |
+
+Delta from doc-drafting baseline (123): **+3 net**. Rules were added (R4, R6) but no rules were removed. All 9 `.talon` files still exist — file count unchanged from baseline.
+
+### R-item status
+
+| # | Item | Status | Evidence |
+|---|------|--------|----------|
+| R1 | Delete `prose_overlay_bring_move.talon` (§4a — verified duplicate) | ❌ NOT SHIPPED | File still on disk: `~/code/prose-overlay/prose_overlay_bring_move.talon` present, 9 rule bodies. Git log for the path shows only the initial commit `16aba79 feat: initial commit — prose overlay plugin` — no delete or refactor commit has ever touched it. Content unchanged: 8 bring/move rules identical to the duplicates in `prose_overlay_cursorless.talon:109-144`. |
+| R2 | Delete 16 hand-splayed bring/move rules at `prose_overlay_cursorless.talon:82-122` | ❌ NOT SHIPPED | Hand-splayed block still present, actual lines shifted to `prose_overlay_cursorless.talon:109-144` (offset by the swap+wrap rules that landed between the composable bring/move rule at line 54 and the hand-splayed block). All 8 bring permutations at lines 110-123 and 8 move permutations at lines 131-144 are unchanged. |
+| R3 | Introduce `<user.prose_overlay_hat>` capture that folds the color prefix (§4d) | ❌ NOT SHIPPED | No capture with that name exists. `grep -rn "prose_overlay_hat\b"` returns only doc mentions inside `docs/GRAMMAR_STRUCTURE_PARITY.md §4d, §5` and `docs/FEATURE_PARITY_REBUTTAL_COMMUNITY.md`. `prose_overlay.py:155` still only defines `prose_hat_color` (color-only capture). Every hat verb still ships as two rule bodies (with-color / without-color). |
+| R4 | Add **swap** verb (C3) — `swap air with bat` | ✅ SHIPPED | Commit `dc3f985 feat(swap): wishlist #3 Swap action — swapTargets exchanges two target texts` (Wed Jul 1 10:57:12 2026). Grammar rule at `prose_overlay_cursorless.talon:62-63`: `{user.cursorless_swap_action} <user.cursorless_swap_targets>: user.prose_overlay_swap(cursorless_swap_targets)`. Matches cursorless.talon C3 shape exactly. Also logged as shipped in `FEATURE_PARITY.md §3e:223` and `BUNDLE_REST_SCOPE.md §Cluster A`. |
+| R5 | Add **paste at destination** verb (C4) — `paste before air` | ❌ NOT SHIPPED | No paste rule in any `.talon` file — `grep -n "cursorless_paste_action" *.talon` returns empty. No `prose_overlay_paste` action defined in `.py` files. `FEATURE_PARITY.md §7:287` still marks "Cut/copy/paste through system clipboard" as `[ ]` (not started). Scoped in `BUNDLE_REST_SCOPE.md §#4:109` but never landed. |
+| R6 | Add **wrap with paired delimiter** verb (C7) — `round wrap air` | ✅ SHIPPED | Commit `3a90365 feat(wrap): wishlist #5 wrap-with-paired-delimiter — bundle rebuild + shim + grammar + L2.14` (Wed Jul 1 11:24:50 2026). Grammar rule at `prose_overlay_cursorless.talon:77-78`: `<user.cursorless_wrapper_paired_delimiter> {user.cursorless_wrap_action} <user.cursorless_target>: user.prose_overlay_wrap_with_paired_delimiter(...)`. Matches cursorless.talon C7 shape exactly. Also logged as shipped in `FEATURE_PARITY.md §3e:227` and `BUNDLE_REST_SCOPE.md §Cluster B`. |
+| R7 | Route `chuck head/tail/past` and `change head/tail` through composable `{simple_action} <cursorless_target>` (§4b) | ❌ NOT SHIPPED | Hand-splayed range verbs still present. `prose_overlay_cursorless.talon:84-102` still defines 8 rules (`chuck head`, `chuck tail`, `change head`, `change tail` × color-prefixed variants), each dispatching to bespoke action names (`prose_overlay_delete_head_hat`, `prose_overlay_change_tail_hat`, etc.) instead of routing through `{user.cursorless_simple_action} <user.cursorless_target>` with a RangeTarget shape. `prose_overlay.talon:19-20` also still hand-splays `chuck past`. ISC-8 (JS resolver holds ranges end-to-end) blocker referenced in the R7 row remains the gate; no evidence it fully closed. |
+
+### Rule-count delta explanation
+
+- R4 shipped: added 1 rule (swap) at `prose_overlay_cursorless.talon:62`.
+- R6 shipped: added 1 rule (wrap paired delimiter) at `prose_overlay_cursorless.talon:77`.
+- `prose_overlay_bring_move.talon` grew by 1 rule (8 → 9) via a minor edit — the delete-the-file decision (R1) was never made, so the file remains a live drift surface.
+- Net: +3 rules, 0 deletions, so the shape moved *away* from cursorless.talon's tight 22-rule shape rather than toward it.
+
+### Follow-up recommendation — highest-leverage next refactor
+
+**Land R1 + R2 together in one commit.** This drops rule count from 126 → 110 (net -16) with zero behavior change, because:
+
+- The composable `{user.cursorless_bring_move_action} <user.cursorless_target>` rule at `prose_overlay_cursorless.talon:54-55` already covers the entire bring/move surface via the cursorless target capture (which handles color-prefixed decorated marks natively).
+- All 24 hand-splayed rules (8 in `prose_overlay_bring_move.talon` + 16 at `prose_overlay_cursorless.talon:109-144`) route to the same underlying `prose_overlay_bring_hat_to_hat` / `prose_overlay_move_hat_to_hat` actions the composable rule already dispatches through.
+- Risk profile: `MANUAL_VERIFICATION.md` walkthrough of the bring/move rows would catch any missing spoken form; if a form regresses, the fix belongs inside the capture, not another `.talon` rule.
+
+Concrete commit sequence to land it:
+
+1. `git rm prose_overlay_bring_move.talon` (R1).
+2. In the same commit, delete `prose_overlay_cursorless.talon:104-144` (the two `# ==== Bring ====` / `# ==== Move ====` blocks — 16 rule bodies plus the header comments) (R2).
+3. Update this doc's §2 rule table and §5a Refactor Status row for R1/R2 to ✅ SHIPPED with the resulting commit SHA.
+4. Run headless `MANUAL_VERIFICATION.md` bring/move rows in Talon and confirm all spoken forms still route correctly.
+
+After R1+R2 land, R3 (`<user.prose_overlay_hat>` capture) becomes the next highest-leverage move: -~13 more rules for medium risk (needs a walkthrough of every chuck/pre/post/change/phones rule to confirm the capture reads letter+color correctly). R7 remains gated on the JS resolver work (ISC-8) and lands the biggest structural win once unblocked.
+
+### Surprises
+
+- **Rule count grew, not shrank.** The plan predicted R1+R2+R3 would land ~123 → ~86. Instead the file set grew to 126 because the "add a verb" R items (R4, R6) shipped before the "delete duplicates" R items (R1, R2, R3, R7). This is an inversion of the risk-vs-reduction ordering in §5, which suggested R1+R2 first because they're low-risk and reduce count with no behavior change.
+- **`prose_overlay_bring_move.talon` is unchanged since initial commit** — the file has literally never been touched by a refactor. This confirms it was scoped but forgotten, not partially attempted.
+- **R4 and R6 shipped within 30 minutes of each other on the same day** (2026-07-01 10:57 and 11:24 respectively), suggesting the "add cursorless verbs" work stream is active while the "delete duplicates" work stream has been dormant.
+
+---
+
 ## 6. Scoring — how close are we to cursorless.talon's shape?
 
-- **Core parity structural match:** 3 of 9 — 33%. The three matching are **simple-action** (C1: `chuck air`, `take blue bat`), **bring/move** (C2: `bring air to bat`), and **reformat-at** (C5: `format snake at fox past bat`).
-- **Core parity feature-shipped but not structurally matched:** 0. The six missing are **swap** (C3), **paste at destination** (C4), **call-on** (C6, OOS), **wrap with paired delimiter** (C7), **snippet insert** (C8, OOS), **snippet wrap** (C9, OOS).
+Refreshed 2026-07-01 after R4 (swap) and R6 (wrap) shipped — see §5a Refactor Status for the audit.
+
+- **Core parity structural match:** 5 of 9 — 56%. Matching: **simple-action** (C1: `chuck air`, `take blue bat`), **bring/move** (C2: `bring air to bat`), **swap** (C3: `swap air with bat`, shipped 2026-07-01 via commit `dc3f985`), **reformat-at** (C5: `format snake at fox past bat`), and **wrap with paired delimiter** (C7: `round wrap air`, shipped 2026-07-01 via commit `3a90365`).
+- **Core parity feature-shipped but not structurally matched:** 0. The four still-missing are **paste at destination** (C4), **call-on** (C6, OOS), **snippet insert** (C8, OOS), **snippet wrap** (C9, OOS). C4 (paste) is the only non-OOS gap left in the core parity table.
 - **Admin parity:** 0 of 13 (all admin rules OOS for prose-overlay).
-- **Rule-count ratio:** ~123 rules vs 22 in cursorless.talon. Excluding prose-overlay-specific ➕ surface (~60 rules — dictation intercept, homophone UI, viewport, history, symbol/letter routing, auto/anchor/debug/dump/reset/test/help/undo/redo/formatter passthroughs), the cursorless-shaped surface is ~63 rules — still ~2.9× cursorless.talon because of hand-splayed permutations (§4d) and duplicated bring/move (§4a).
-- **After R1+R2+R3:** projected ~86 rules total, ~26 cursorless-shaped — parity ratio approaches 1.2:1 on the shared surface.
+- **Rule-count ratio:** 126 rules vs 22 in cursorless.talon (baseline was 123 — the rules for R4 and R6 pushed the count up by 3 net; §5a). Excluding prose-overlay-specific ➕ surface (~60 rules — dictation intercept, homophone UI, viewport, history, symbol/letter routing, auto/anchor/debug/dump/reset/test/help/undo/redo/formatter passthroughs), the cursorless-shaped surface is ~66 rules — still ~3.0× cursorless.talon because R1/R2/R3/R7 have not shipped and hand-splayed permutations (§4d) + duplicated bring/move (§4a) remain live.
+- **After R1+R2 (recommended next):** projected 110 rules total (-16), zero behavior change. §5a expands on the specific commit sequence.
+- **After R1+R2+R3:** projected ~97 rules total, ~53 cursorless-shaped — parity ratio approaches 2.4:1 on the shared surface.
 
 ---
 

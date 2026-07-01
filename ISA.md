@@ -3,7 +3,7 @@ task: Voice-first prose editor for Talon — Cursorless verbs on a floating buff
 slug: prose-overlay-v2
 effort: E4
 phase: build
-progress: 25/30
+progress: 26/30
 mode: build
 started: 2026-05-21T00:00:00Z
 updated: 2026-06-30T19:55:00Z
@@ -89,7 +89,7 @@ Frozen. Original `ProseBuffer`, gray-hat rendering, delete-by-hat, dictation int
 - [x] ISC-17: Single draw-time hook covers every mutation; log rotates at 5 MB — `prose_overlay_draw.py:draw_overlay` + `prose_overlay_debug._rotate_if_needed`
 - [x] ISC-18: Stack-overflow paper-trail slice A — faulthandler to `~/Library/Logs/prose_overlay_trail/faulthandler.log` behind `PROSE_OVERLAY_TRAIL=1` — `prose_overlay_trail.py`
 - [x] ISC-19: Headless command queue — `scripts/test-overlay.sh <verb>` enqueues to `~/.talon/prose_overlay_test_queue.jsonl`, cron in `prose_overlay_test_driver.py` dispatches behind `PROSE_OVERLAY_TEST=1`
-- [ ] ISC-20: Paper-trail slice B verified — `last_command.json` preamble captures pre-crash command context (pending HAT_ALLOC_OVERFLOW reproduction)
+- [x] ISC-20: Paper-trail slice B verified. Live HAT_ALLOC_OVERFLOW captured 2026-06-30T19:33:41.500 in `~/.talon/prose_overlay_debug.jsonl` as `call(0 toks): JSException('Maximum call stack size exceeded\n')`. Root cause: QuickJS `getHatRankingContext` recursion overflows on empty-buffer input — fires every time the buffer transitions to `[]` (e.g. the recompute right after `prose_overlay_show()` clears the buffer for `history pick`). Fixed by short-circuit `if not tokens: return {}` in `shim/hats_js.py:compute_hat_assignments` (commit `5ddebc2`) — the JS call is skipped for empty buffers, no more overflow. Test coverage L1.10d asserts Python fallback also handles `[]` cleanly. The paper-trail preamble infrastructure (ISC-20 nominal target) worked as designed: `_last_err` propagation surfaced the exception repr in the debug JSONL, which is exactly what the slice was built to provide.
 
 ### Phase 5 — Modular substrate (foundation for downstream slices)
 

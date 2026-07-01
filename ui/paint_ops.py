@@ -855,6 +855,114 @@ def execute(ops: list[PaintOp], canvas) -> None:
             )
 
 
+# ---------------------------------------------------------------------------
+# Help-pager row emission — helper for ui/help.py:draw_help_panel.
+#
+# The paginated help pager is drawn as a SEPARATE panel BELOW the main
+# overlay (see ui/canvas.py:113 — canvas calls draw_help_panel(c,
+# panel_rect, help_page) after draw_overlay returns). Its rows are
+# computed by ui/layout_help_cursor.py:build_help_layout as a HelpLayout.
+#
+# This helper turns a HelpLayout + the pager panel's x + width into a
+# list of PaintOps for the rows (title + section headers + entry rows).
+# The rewritten draw_help_panel invokes this helper for row emission and
+# still handles pager panel frame + footer nav + embolden font state
+# directly — embolden isn't expressible on TextOp today; splitting it out
+# would be a schema change beyond the retirement's scope.
+#
+# Row content model:
+#   * Title row     → HelpRow(left=<title>, right="", y=<baseline>).
+#                     Paint with HELP_TITLE_COLOR + embolden. Because
+#                     embolden isn't on TextOp, the caller paints the
+#                     title directly and passes emit_title=False here.
+#   * Section header → HelpRow(left="── name ──", right="", y=<baseline>).
+#                     Same embolden concern — caller paints directly and
+#                     this helper skips them (they're detected by
+#                     `left.startswith("── ")`).
+#   * Entry row     → HelpRow(left=<cmd>, right=<desc>, y=<baseline>).
+#                     Paint via two TextOps: cmd at HINT_CMD_COLOR at
+#                     (pager_x + PANEL_PAD, y); desc at HINT_COLOR at
+#                     (pager_x + PANEL_PAD + cmd_col_w, y).
+#
+# ``help_layout.rows`` is in top-to-bottom paint order; we walk it in
+# order and skip title / section rows so the caller can paint them
+# directly with embolden. cmd_col_w mirrors draw_help_panel's math:
+# ``(panel_w - PANEL_PAD*2) * 0.55``.
+# ---------------------------------------------------------------------------
+
+
+def to_help_pager_entry_ops(help_layout, pager_x: float, pager_w: float) -> list[PaintOp]:
+    """Emit paint ops for the paginated pager's ENTRY rows (two-column).
+
+    Skips the title row and section header rows — those need embolden
+    which isn't on TextOp. The caller (rewritten ``ui/help.py:
+    draw_help_panel``) paints those directly and calls this helper for
+    the entry rows only. Section rows are detected via the
+    ``"── "`` prefix that ``build_help_layout`` bakes into the ``left``
+    field.
+
+    Args:
+        help_layout: A ``ui.layout.HelpLayout`` produced by
+            ``ui.layout_help_cursor.build_help_layout``.
+        pager_x: The pager panel's absolute x (matches ``main_rect.x`` in
+            today's ``draw_help_panel``).
+        pager_w: The pager panel's width (matches ``main_rect.width``).
+
+    Returns:
+        A list of ``TextOp`` — two per entry row (cmd + desc). Empty
+        when the layout has no entry rows.
+    """
+    from ..internal.draw_constants import (
+        HINT_CMD_COLOR,
+        HINT_COLOR,
+        PANEL_PAD,
+    )
+
+    cx = pager_x + PANEL_PAD
+    max_content_w = pager_w - PANEL_PAD * 2
+    cmd_col_w = max_content_w * 0.55
+
+    # HINT_FONT_SIZE is a mutable module-level global in ui/draw.py.
+    # For row emission we mirror the field via a local import so a live
+    # update flows through without a restart. Kept as a late import to
+    # avoid a circular dep (ui/draw.py → ui/paint_ops.py chain). Under
+    # headless L1 tests the ui/draw.py module isn't loaded — fall back
+    # to the default 12 so the helper stays usable in isolation.
+    try:
+        from . import draw as _draw_mod
+        hint_font_size = float(_draw_mod.HINT_FONT_SIZE)
+    except Exception:
+        hint_font_size = 12.0
+
+    ops: list[PaintOp] = []
+    for row in help_layout.rows:
+        # Skip title (first row) and section headers ("── name ──").
+        # Title is the FIRST row per build_help_layout; section headers
+        # have the "── " prefix. Both need embolden — caller paints.
+        if row.right == "":
+            continue
+        # Entry row: two TextOps at cx and cx + cmd_col_w.
+        ops.append(
+            TextOp(
+                x=cx,
+                y=row.y,
+                text=row.left,
+                font_size=hint_font_size,
+                color=HINT_CMD_COLOR,
+            )
+        )
+        ops.append(
+            TextOp(
+                x=cx + cmd_col_w,
+                y=row.y,
+                text=row.right,
+                font_size=hint_font_size,
+                color=HINT_COLOR,
+            )
+        )
+    return ops
+
+
 __all__ = [
     "RectOp",
     "RoundedRectOp",
@@ -864,5 +972,6 @@ __all__ = [
     "ShapeGlyphOp",
     "PaintOp",
     "to_paint_ops",
+    "to_help_pager_entry_ops",
     "execute",
 ]

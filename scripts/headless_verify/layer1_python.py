@@ -5294,3 +5294,51 @@ def run_layer_1() -> None:
         assert flash_ops[0].radius == 3.0
         # Geometry mirrors model rects verbatim.
         assert (flash_ops[0].x, flash_ops[0].y, flash_ops[0].w, flash_ops[0].h) == (10.0, 50.0, 40.0, 18.0)
+
+    # ----- L1.168 — help pager entry-row emission (Step 9 of paint retirement) --
+
+    _HelpLayout = _po_layout.HelpLayout
+    _HelpRow = _po_layout.HelpRow
+    _to_help_pager_entry_ops = po_mod.to_help_pager_entry_ops
+
+    with test(
+        "L1",
+        "L1.168",
+        "to_help_pager_entry_ops: entry rows → 2 TextOps per entry (cmd + desc); title/section skipped",
+    ):
+        # Compose a HelpLayout with title + section header + 2 entry rows.
+        # Title (right=="") should be SKIPPED — needs embolden, caller
+        # paints direct. Section header (left starts with "── ",
+        # right=="") also skipped for same reason. Entry rows emit as
+        # (cmd, desc) TextOp pairs.
+        rows = [
+            _HelpRow(left="Basics", right="", y=100.0),          # title
+            _HelpRow(left="── Delete ──", right="", y=120.0),   # section
+            _HelpRow(left='"chuck"', right="delete word", y=140.0),
+            _HelpRow(left='"pre <hat>"', right="cursor before", y=160.0),
+        ]
+        help_layout = _HelpLayout(rows=rows, page=1, total_pages=5)
+        # Pager x = 100, w = 400 → cmd_col_w = (400-24)*0.55 = 206.8
+        ops = _to_help_pager_entry_ops(help_layout, 100.0, 400.0)
+        # 2 entry rows × 2 ops = 4 TextOps.
+        assert len(ops) == 4, (
+            f"expected 4 TextOps (2 entry rows × 2 cols); got {len(ops)}: "
+            f"{[type(o).__name__ for o in ops]}"
+        )
+        for op in ops:
+            assert isinstance(op, _TextOp), f"unexpected op type: {type(op).__name__}"
+        # Row 1: cmd at (100+12, 140) with HINT_CMD_COLOR; desc at (100+12+cmd_col_w, 140) with HINT_COLOR.
+        assert ops[0].text == '"chuck"'
+        assert ops[0].x == 112.0 and ops[0].y == 140.0
+        assert ops[0].color == _DC_PO.HINT_CMD_COLOR
+        assert ops[1].text == "delete word"
+        assert ops[1].y == 140.0
+        assert ops[1].color == _DC_PO.HINT_COLOR
+        # Right column x = cx + cmd_col_w. cmd_col_w = (400 - 24) * 0.55 = 206.8
+        expected_right_x = 100.0 + _DC_PO.PANEL_PAD + (400.0 - _DC_PO.PANEL_PAD * 2) * 0.55
+        assert abs(ops[1].x - expected_right_x) < 1e-6, (
+            f"desc x should be {expected_right_x}; got {ops[1].x}"
+        )
+        # Row 2: same shape.
+        assert ops[2].text == '"pre <hat>"' and ops[2].color == _DC_PO.HINT_CMD_COLOR
+        assert ops[3].text == "cursor before" and ops[3].color == _DC_PO.HINT_COLOR

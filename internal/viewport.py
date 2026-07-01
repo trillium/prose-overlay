@@ -4,7 +4,7 @@ Owns the mutable viewport state previously held as module-level globals in
 prose_overlay_draw.py: scroll offset, anchor rect/position, the cached row
 layout from the last draw, and the recenter cycle state.
 
-Action modules access this via `instance.viewport.*`. The draw module reads
+Action modules access this via `instance.runtime.viewport.*`. The draw module reads
 the same instance at draw time.
 """
 

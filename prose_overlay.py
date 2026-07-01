@@ -162,19 +162,19 @@ def prose_hat_color(m) -> str:
 # ---------------------------------------------------------------------------
 # Initialize instance state
 # ---------------------------------------------------------------------------
-instance.buffer = ProseBuffer()
-_resolve_state.buffer = instance.buffer  # share the ProseBuffer instance with the resolve module
-instance.hat_assignments = {}
-instance.hat_to_token = {}
-instance.draw_mod = _draw_mod_ref
-instance.viewport = Viewport()
+instance.state.buffer = ProseBuffer()
+_resolve_state.buffer = instance.state.buffer  # share the ProseBuffer instance with the resolve module
+instance.state.hat_assignments = {}
+instance.state.hat_to_token = {}
+instance.runtime.draw_mod = _draw_mod_ref
+instance.runtime.viewport = Viewport()
 
 _ctx = Context()
 _ctx_auto = Context()  # owns the prose_overlay_auto tag
 
 # Expose contexts on instance so actions_core._sync_tags can access them.
-instance.ctx = _ctx
-instance.ctx_auto = _ctx_auto
+instance.runtime.ctx = _ctx
+instance.runtime.ctx_auto = _ctx_auto
 
 # Action-level shim: active when prose_overlay_auto tag is set.
 # Overrides user.dictation_insert so every dictation path (community enders,
@@ -186,25 +186,25 @@ tag: user.prose_overlay_auto
 """
 
 _ctx_history = Context()
-instance.ctx_history = _ctx_history
+instance.runtime.ctx_history = _ctx_history
 
 # ---------------------------------------------------------------------------
 # Canvas setup
 # ---------------------------------------------------------------------------
 
-instance.canvas = OverlayCanvas(instance.buffer)
+instance.runtime.canvas = OverlayCanvas(instance.state.buffer)
 
 # Wire canvas into flash module — flash needs canvas ref for refresh calls.
-# (flash module reads from instance.canvas directly)
+# (flash module reads from instance.runtime.canvas directly)
 
 # ---------------------------------------------------------------------------
 # History overlay setup
 # ---------------------------------------------------------------------------
-# Import helpers from history module now that instance.canvas and
-# instance.draw_mod are set.
+# Import helpers from history module now that instance.runtime.canvas and
+# instance.runtime.draw_mod are set.
 from .ui.actions_history import _on_draw_history, _on_history_overlay_hide  # noqa: E402
 
-instance.history_overlay = DismissibleOverlay(
+instance.runtime.history_overlay = DismissibleOverlay(
     on_draw=_on_draw_history,
     on_hide=_on_history_overlay_hide,
     close_hint_text='"overlay dismiss"',
@@ -252,7 +252,7 @@ class _ShimActions:
         the overlay buffer handles its own casing/formatting so we don't apply it
         here (see ISA/SCENARIOS.md S3 for the sentence-case-after-period spec).
         """
-        if instance.canvas.is_showing:
+        if instance.runtime.canvas.is_showing:
             actions.user.prose_overlay_add_text(text)
         else:
             actions.user.prose_overlay_show()
@@ -266,7 +266,7 @@ class _ShimActions:
         without re-importing format_phrase.
         """
         text = actions.user.formatted_text(phrase, formatters)
-        if instance.canvas.is_showing:
+        if instance.runtime.canvas.is_showing:
             actions.user.prose_overlay_add_text(text)
         else:
             actions.user.prose_overlay_show()

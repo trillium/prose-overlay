@@ -1031,3 +1031,197 @@ def run_layer_1() -> None:
         assert b.undo()
         assert b.get_tokens() == ["their"], b.get_tokens()
 
+    # -----------------------------------------------------------------------
+    # Slice 2 of docs/BUNDLE_SHAPE_SCOPE.md — projection wrapper preserves
+    # ISC-14c per-group-same-shape invariant when routing through the
+    # bundle. shim/shape_bridge.py owns the projection layer; we exercise
+    # it end-to-end via a stubbed bundle allocator so the tests are
+    # deterministic and Talon-free. See docs/BUNDLE_SHAPE_DECISIONS.md OQ3.
+    # -----------------------------------------------------------------------
+    shape_bridge_spec = importlib.util.spec_from_file_location(
+        "prose_overlay_shape_bridge",
+        REPO / "shim" / "shape_bridge.py",
+    )
+    # shape_bridge imports from .hats_js which imports talon.lib.js — that
+    # fails in the headless harness. Load hats_js manually WITHOUT calling
+    # talon.lib.js by injecting a stub before the from-import runs.
+    import sys as _sys
+    import types as _types
+    _talon_stub = _types.ModuleType("talon")
+    _talon_lib_stub = _types.ModuleType("talon.lib")
+    _talon_lib_js_stub = _types.ModuleType("talon.lib.js")
+    class _StubCtx:
+        def __init__(self): self.globals = _types.SimpleNamespace(proseAllocateHats=lambda *a: '{}')
+        def eval(self, _): pass
+    _talon_lib_js_stub.Context = _StubCtx
+    _sys.modules.setdefault("talon", _talon_stub)
+    _sys.modules.setdefault("talon.lib", _talon_lib_stub)
+    _sys.modules.setdefault("talon.lib.js", _talon_lib_js_stub)
+    # And the internal.trail module + state that hats_js pulls in.
+    # Provide minimal stubs so the module loads without a live prose-overlay
+    # package tree.
+    _trail_stub = _types.ModuleType("po_trail_stub")
+    _trail_stub.begin_command = lambda *a, **k: "cid"
+    _trail_stub.end_command = lambda *a, **k: None
+    _state_stub = _types.ModuleType("po_state_stub")
+    _state_stub.compute_hat_assignments = lambda *a, **k: {}
+
+    # Build a fake package structure so `from ..internal.trail import ...`
+    # inside hats_js resolves without picking up the real internal/ files.
+    _pkg = _types.ModuleType("po_shim_pkg")
+    _pkg.__path__ = []  # package
+    _internal_pkg = _types.ModuleType("po_shim_pkg.internal")
+    _internal_pkg.__path__ = []
+    _internal_pkg.trail = _trail_stub
+    _internal_pkg.state = _state_stub
+    _shim_pkg = _types.ModuleType("po_shim_pkg.shim")
+    _shim_pkg.__path__ = []
+    _sys.modules["po_shim_pkg"] = _pkg
+    _sys.modules["po_shim_pkg.internal"] = _internal_pkg
+    _sys.modules["po_shim_pkg.internal.trail"] = _trail_stub
+    _sys.modules["po_shim_pkg.internal.state"] = _state_stub
+    _sys.modules["po_shim_pkg.shim"] = _shim_pkg
+
+    hats_js_spec = importlib.util.spec_from_file_location(
+        "po_shim_pkg.shim.hats_js",
+        REPO / "shim" / "hats_js.py",
+    )
+    hats_js_mod = importlib.util.module_from_spec(hats_js_spec)
+    _sys.modules["po_shim_pkg.shim.hats_js"] = hats_js_mod
+    hats_js_spec.loader.exec_module(hats_js_mod)
+
+    shape_bridge_spec = importlib.util.spec_from_file_location(
+        "po_shim_pkg.shim.shape_bridge",
+        REPO / "shim" / "shape_bridge.py",
+    )
+    shape_bridge = importlib.util.module_from_spec(shape_bridge_spec)
+    _sys.modules["po_shim_pkg.shim.shape_bridge"] = shape_bridge
+    shape_bridge_spec.loader.exec_module(shape_bridge)
+
+    with test(
+        "L1",
+        "L1.58",
+        "hats_js.build_enabled_hat_styles returns 9 colors (default) or 99 with shapes",
+    ):
+        # Contract with cursorless proseStandalone.ts:
+        # - 9-entry colors-only when include_shapes=False (backcompat)
+        # - 99-entry color x (no-shape + 10 shapes) when include_shapes=True
+        default = hats_js_mod.build_enabled_hat_styles(False)
+        full = hats_js_mod.build_enabled_hat_styles(True)
+        assert len(default) == 9, f"expected 9 colors, got {len(default)}: {list(default)!r}"
+        assert len(full) == 99, f"expected 99 entries, got {len(full)}"
+        assert "gray" in default and "gray-frame" not in default
+        assert "gray-frame" in full and "blue-bolt" in full
+        # Penalty invariant: shape adds +1 to color's penalty
+        assert full["gray"]["penalty"] == 0
+        assert full["gray-frame"]["penalty"] == 1
+        assert full["blue"]["penalty"] == 1
+        assert full["blue-bolt"]["penalty"] == 2
+
+    with test(
+        "L1",
+        "L1.59",
+        "shape_bridge: build_group_shape_enabled_styles pairs one color with used shapes",
+    ):
+        # 3 flagged tokens across 2 groups (there=frame, their=frame, whether=bolt)
+        # Only 2 unique shapes used → expect 9 colors + 2 shape-suffixed entries.
+        shape_assignments = {0: "frame", 1: "frame", 5: "bolt"}
+        styles = shape_bridge.build_group_shape_enabled_styles(
+            shape_assignments, color_for_shape="gray",
+        )
+        assert "gray" in styles, "plain colors must survive"
+        assert "gray-frame" in styles, "used shape gray-frame must be present"
+        assert "gray-bolt" in styles, "used shape gray-bolt must be present"
+        # UNUSED shapes must NOT appear — the pool for the bundle stays tight.
+        assert "gray-play" not in styles, "unused shape MUST NOT enter pool"
+        assert len(styles) == 9 + 2, f"expected 11 entries; got {len(styles)}: {list(styles)!r}"
+
+    with test(
+        "L1",
+        "L1.60",
+        "shape_bridge: same-group tokens all get same shape-suffixed style (ISC-14c preserved)",
+    ):
+        # Stub bundle allocator: assigns the FIRST style-name matching each
+        # token's grapheme count from the enabled pool. Deterministic; lets
+        # us verify that the projection wrapper wires the right pool through
+        # to the bundle, which is the load-bearing check for the wrapper.
+        def _stub_allocator(tokens, old_assignments=None, stability="balanced",
+                            cursor_pos=None, enabled_styles=None):
+            # Assign to each token the style name that matches its shape_assignment
+            # (received via the projected old_assignments) OR bare gray otherwise.
+            # This mirrors what the real bundle does under the projection layer:
+            # each shape-flagged token wears its group's shape.
+            out = {}
+            oa = old_assignments or {}
+            for i, tok in enumerate(tokens):
+                style = oa.get(i, (0, tok[0].lower() if tok else "a", "gray"))[2]
+                letter = tok[0].lower() if tok else "a"
+                out[i] = (0, letter, style)
+            return out
+
+        # Three tokens in group A (gid 42) share shape "frame"; two in group B
+        # (gid 99) share shape "bolt". Verify the projected old_assignments
+        # carries the shape-suffixed styles into the allocator, and the
+        # returned dict has fully-qualified styles.
+        tokens = ["there", "their", "whether", "than", "there"]
+        shape_assignments = {0: "frame", 1: "frame", 2: "bolt", 4: "frame"}
+        prior_old = {
+            0: (0, "t", "gray-frame"),
+            1: (0, "t", "gray-frame"),
+            2: (0, "w", "gray-bolt"),
+            4: (0, "t", "gray-frame"),
+        }
+        result = shape_bridge.compute_hat_assignments_with_group_shapes(
+            tokens=tokens,
+            shape_assignments=shape_assignments,
+            old_assignments=prior_old,
+            color_for_shape="gray",
+            _allocator=_stub_allocator,
+        )
+        # ISC-14c: same-group tokens wear the same shape.
+        assert result[0][2] == "gray-frame", f"idx 0 got {result[0]!r}"
+        assert result[1][2] == "gray-frame", f"idx 1 got {result[1]!r}"
+        assert result[2][2] == "gray-bolt", f"idx 2 got {result[2]!r}"
+        assert result[4][2] == "gray-frame", f"idx 4 got {result[4]!r}"
+        # Non-flagged token stays with a bare style (or whatever the allocator
+        # returned) — no accidental shape suffix.
+        assert "-" not in result[3][2], f"unflagged idx 3 should have no shape suffix, got {result[3]!r}"
+
+    with test(
+        "L1",
+        "L1.61",
+        "shape_bridge: empty shape_assignments falls through to colors-only path",
+    ):
+        # No flagged tokens → wrapper must skip the projection and call the
+        # allocator with NO enabled_styles arg (so backcompat pool applies).
+        seen_kwargs = {}
+        def _spy_allocator(tokens, old_assignments=None, stability="balanced",
+                           cursor_pos=None, enabled_styles=None):
+            seen_kwargs["enabled_styles"] = enabled_styles
+            return {i: (0, t[0].lower(), "gray") for i, t in enumerate(tokens) if t}
+        shape_bridge.compute_hat_assignments_with_group_shapes(
+            tokens=["hello", "world"],
+            shape_assignments={},
+            old_assignments=None,
+            _allocator=_spy_allocator,
+        )
+        assert seen_kwargs["enabled_styles"] is None, (
+            "empty shape assignments must not project any enabled_styles map; "
+            f"got {seen_kwargs['enabled_styles']!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.62",
+        "shape_bridge: bad color_for_shape falls back to colors-only pool",
+    ):
+        # Defensive: a nonsense color name shouldn't crash — just skip the
+        # shape-suffix pool augmentation. The wrapper still calls the
+        # allocator, so the return doesn't lose the tokens.
+        styles = shape_bridge.build_group_shape_enabled_styles(
+            {0: "frame"}, color_for_shape="chartreuse",
+        )
+        # No shape-suffixed entries — nonsense color rejected upstream.
+        assert not any("-" in k for k in styles), f"bad color leaked shape entries: {list(styles)!r}"
+        assert "gray" in styles, "plain colors must still be there"
+

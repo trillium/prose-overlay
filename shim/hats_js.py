@@ -58,6 +58,7 @@ def compute_hat_assignments(
     old_assignments: dict[int, tuple[int, str, str]] | None = None,
     stability: str = "balanced",
     cursor_pos: int | None = None,
+    enabled_styles: dict[str, dict] | None = None,
 ) -> dict[int, tuple[int, str, str]]:
     """Assign a unique (letter, color) pair to each token using the Cursorless
     hat allocation algorithm.
@@ -66,10 +67,31 @@ def compute_hat_assignments(
         tokens: List of word strings from the prose buffer.
         old_assignments: Previous result (token_idx -> (char_idx, letter, color))
                          passed back for hat stability. None on first call.
+                         The `color` slot now carries a fully-qualified
+                         style name such as ``"blue"`` or ``"blue-frame"``;
+                         the bundle receives it as `styleName` so the
+                         stability comparator sees the schema change once
+                         (on the first call after the Slice 1 bundle bump)
+                         and no more. See docs/BUNDLE_SHAPE_SCOPE.md §6 risk 3.
         stability: "greedy" | "balanced" | "stable". Default "balanced".
+        cursor_pos: gap index for cursor proximity ranking, or None.
+        enabled_styles: opt-in shape-enabled `HatStyleMap`. When ``None``
+                        (default), the bundle uses its built-in colors-only
+                        default and returns bare color names — matches the
+                        pre-2026-07-01 behavior exactly. When set, the map
+                        MUST be JSON-serializable and its keys become the
+                        legal style names the allocator can hand out.
+                        Callers wanting the full 99-entry (color x shape)
+                        pool can use `build_enabled_hat_styles(True)` or
+                        pass their own subset.
 
     Returns:
         dict mapping token_index -> (char_index_within_word, letter, color)
+        where the third slot carries the fully-qualified style name
+        (e.g. ``"blue"`` for a color-only pool, ``"blue-frame"`` for a
+        shape-enabled pool). Kept named ``color`` in the tuple for
+        compatibility with the many existing readers; when Slice 3 flips
+        the default the field will be renamed.
     """
     global _using_fallback, _last_err
     # Empty buffer short-circuit — the JS bundle recursion in
@@ -96,16 +118,38 @@ def compute_hat_assignments(
             old_assignments=old_assignments,
         )
 
-    # Convert old_assignments to the JSON shape the JS function expects
+    # Convert old_assignments to the JSON shape the JS function expects.
+    # Slice 2 migration: emit both `color` (legacy field, bare color) AND
+    # `styleName` (fully-qualified) so a pre-2026-07-01 bundle survives
+    # (reads `color`), and the post-2026-07-01 bundle preserves the shape
+    # suffix on stability round-trips (reads `styleName`). See
+    # docs/BUNDLE_SHAPE_SCOPE.md §6 risk 3 and docs/BUNDLE_SHAPE_DECISIONS.md
+    # OQ4 for why this dual-write matters — without it the first run after
+    # the bundle bump thrashes every hat because the comparator sees a
+    # schema change on `oldAssignments[…].styleName`.
     old_list = []
     if old_assignments:
-        for token_idx, (char_idx, letter, color) in old_assignments.items():
+        for token_idx, (char_idx, letter, style) in old_assignments.items():
+            # `style` in the tuple may already be a fully-qualified name
+            # ("blue-frame") once callers migrate through Slice 3, or
+            # the bare color today. Split for the color slot; pass the
+            # whole thing as styleName.
+            dash = style.find("-")
+            color_bare = style if dash < 0 else style[:dash]
             old_list.append({
                 "tokenIdx": token_idx,
                 "charIdx": char_idx,
                 "letter": letter,
-                "color": color,
+                "color": color_bare,
+                "styleName": style,
             })
+
+    # Serialize the optional enabled-styles map once. `None` and `{}` both
+    # tell the bundle to fall back to its own colors-only default (the
+    # Slice-1 backcompat path). A concrete map opts into that pool.
+    enabled_styles_json = (
+        json.dumps(enabled_styles) if enabled_styles else "null"
+    )
 
     # Call JS — pass everything as JSON strings to avoid Python→JS coercion issues.
     # proseAllocateHats returns the result JSON string directly (no callback / NewProxy):
@@ -119,6 +163,7 @@ def compute_hat_assignments(
             json.dumps(old_list),
             stability,
             json.dumps(cursor_pos if cursor_pos is not None else -1),
+            enabled_styles_json,
         ))
         raw: dict[str, dict] = json.loads(result_json)
         # Convert {"0": {charIdx, letter, color}, ...} -> {0: (charIdx, letter, color), ...}
@@ -137,7 +182,14 @@ def compute_hat_assignments(
             tok_idx = int(k)
             char_idx = int(v["charIdx"])
             letter = str(v["letter"]).lower()
-            color = str(v["color"])
+            # Slice 2 migration: prefer `styleName` (fully-qualified,
+            # possibly shape-suffixed) over `color` (legacy, bare-color).
+            # Bundles built before 2026-07-01 don't emit styleName so
+            # this falls through to the legacy field. Downstream tuple
+            # slot is named `color` for backward compat with the many
+            # existing readers.
+            style_name = v.get("styleName")
+            color = str(style_name) if style_name else str(v["color"])
             if tok_idx >= len(tokens):
                 continue
             token = tokens[tok_idx]
@@ -171,3 +223,61 @@ def compute_hat_assignments(
             cursor_pos=len(tokens) if cursor_pos is None else cursor_pos,
             old_assignments=old_assignments,
         )
+
+
+# ---------------------------------------------------------------------------
+# Enabled-styles map builder — Slice 2 helper
+# ---------------------------------------------------------------------------
+# The bundle exports `proseBuildEnabledHatStyles(includeShapes: bool)` on
+# globalThis (see cursorless proseStandalone.ts). Calling it from Python
+# would require an additional QuickJS round trip; since the palette is
+# stable and small we mirror the vocabulary here so callers can build
+# maps without invoking the bundle. Kept as a pure Python function for
+# headless-test friendliness — the projection wrapper (shape_bridge.py)
+# uses this to build the shape-enabled map that gets passed through
+# `compute_hat_assignments(enabled_styles=...)`.
+
+_PROSE_COLORS: tuple[str, ...] = (
+    "gray", "blue", "green", "red", "pink",
+    "yellow", "purple", "black", "white",
+)
+_PROSE_COLOR_PENALTIES: dict[str, int] = {
+    "gray": 0, "blue": 1, "green": 1, "red": 1,
+    "pink": 2, "yellow": 2, "purple": 2,
+    "black": 3, "white": 3,
+}
+
+# Mirrors packages/common/src/types/command/legacy/targetDescriptorV2.types.ts
+# HAT_NON_DEFAULT_SHAPES verbatim and cursorless proseStandalone.ts's
+# PROSE_SHAPES. Kept in sync manually — a mismatch would only surface if
+# someone renames a shape upstream, at which point the L2 grep test would
+# fail on the new shape name.
+_PROSE_SHAPES: tuple[str, ...] = (
+    "ex", "fox", "wing", "hole", "frame",
+    "curve", "eye", "play", "bolt", "crosshairs",
+)
+
+
+def build_enabled_hat_styles(include_shapes: bool = False) -> dict[str, dict]:
+    """Build a `HatStyleMap`-shaped dict for `compute_hat_assignments`.
+
+    Args:
+        include_shapes: When True, returns the full 99-entry (color x
+            [no-shape + 10 shapes]) map; when False, returns the 9-entry
+            color-only default that matches the pre-2026-07-01 bundle
+            behavior exactly.
+
+    The shape penalty adds +1 to the color penalty (matches Cursorless
+    upstream convention where each style component contributes to the
+    total penalty). Callers that want a narrower pool (e.g. one color
+    x all shapes for the homophone use case) can construct the subset
+    directly — this is a convenience for the two most common cases.
+    """
+    out: dict[str, dict] = {}
+    for color in _PROSE_COLORS:
+        color_penalty = _PROSE_COLOR_PENALTIES[color]
+        out[color] = {"penalty": color_penalty}
+        if include_shapes:
+            for shape in _PROSE_SHAPES:
+                out[f"{color}-{shape}"] = {"penalty": color_penalty + 1}
+    return out

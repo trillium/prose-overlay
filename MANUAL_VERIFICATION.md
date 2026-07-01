@@ -58,6 +58,8 @@ showing the overlay (5 tokens, hats t/a/b/d/e on each token respectively).
 | 20 | — | format: `format snake air past drum` | std | tokens 1..3 → `air_ball_drum` | | f9-20.png | |
 | 21 | #7 | `take first word` | std | "the" highlighted (token 0) | | f9-21.png | |
 | 22 | #10 | `take last word` | std, cursor at end | "echo" highlighted (token 4) | | f9-22.png | |
+| 23 | #9 | `take every word` (bare) | std | Known partial: current bundle returns 1 range (containing word), not 5. See `docs/BUNDLE_REST_SCOPE.md §7 #9`. | | f9-23.png | |
+| 24 | #9 | `take every word` composed w/ file scope | std | 5 ranges, one per token | | f9-24.png | |
 
 (Buffer key: `std` = `the air ball drum echo` with default-color hats.)
 

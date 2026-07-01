@@ -485,7 +485,7 @@ decisions blocking the modifier cluster.
   cursor → token 0). MANUAL_VERIFICATION row 21 added
   (`take first word` → "the"). FEATURE_PARITY §3c row added.
 
-- **#10 first/last** — ✅ shipped 2026-07-01 (SHA recorded when #9 commits).
+- **#10 first/last** — ✅ shipped commit `19624f4` (2026-07-01).
   Semantically covered by OrdinalScopeStage — cursorless-talon's
   `cursorless_first_last` capture returns `{type:"ordinalScope",
   start:-N|0, length:N}`. Same bundle line 18899 + zero-grammar routing
@@ -493,6 +493,26 @@ decisions blocking the modifier cluster.
   from cursor-at-end → token 4). MANUAL_VERIFICATION row 22 added.
   FEATURE_PARITY §3c row added.
 
-- **Next up per §7 order:** #9 every, then #6 RelativeScope, #11
-  leading/trailing (semantics degenerate on prose per OQ3 —
-  see item shipping notes).
+- **#9 every scope** — ⚠️ **partial** shipped 2026-07-01 (SHA recorded
+  when #6 commits). L5.22 added asserting the composed shape
+  `[everyScope word, containingScope document]` returns 5 ranges per
+  the multi-range semantics. **Bundle gap uncovered**: the bare shape
+  `[everyScope word]` that cursorless-talon's
+  `cursorless_simple_scope_modifier` emits returns only 1 range in our
+  bundle (the current containing word), not the 5 ranges cursorless
+  proper delivers. Root cause: our `EveryScopeStage` (bundle line
+  15505) falls back through `getDefaultIterationRange` when
+  `hasExplicitRange=false`, but the iteration-scope-handler default
+  for our synthetic prose-document isn't returning the whole
+  buffer as the iteration scope. Consequence: `take every word` alone
+  is user-visible-partial; `take every word file`-style composed shapes
+  work. Two future paths to fully close: (a) a shim capture that
+  composes `everyScope` with an implicit `containingScope document` (or
+  `line` on multi-line), or (b) live-verify the bundle's iteration-
+  scope handler and patch the `getDefaultIterationRange` fallback.
+  Row #9 in `docs/FEATURE_PARITY.md §3c` flipped `[x]` → `[~]` with
+  gap docs. MANUAL_VERIFICATION rows 23 (bare — known partial) and 24
+  (composed — 5 ranges) added.
+
+- **Next up per §7 order:** #6 RelativeScope, then #11 leading/trailing
+  (semantics degenerate on prose per OQ3 — see item shipping notes).

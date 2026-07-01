@@ -935,3 +935,34 @@ def run_layer_5() -> None:
             f"L5.21 (#10): ordinalScope last word — got {js_result!r}, "
             f"expected {expected!r}"
         )
+
+    # Wishlist #9 — everyScope. The bundle's EveryScopeStage (line 15505)
+    # requires an explicit iteration scope to expand a bare `everyScope`
+    # into multi-range. Cursorless-talon's `cursorless_simple_scope_modifier`
+    # returns just `{type:"everyScope", scopeType:"word"}` — that shape,
+    # on our bundle, returns ONLY the current containing word (1 range).
+    # The bundle-known working shape is `everyScope + containingScope
+    # document` (composed modifier list) → returns 5 ranges, one per
+    # word. This row asserts the composed shape works — it's what a
+    # future grammar shim could emit to make `chuck every word` do the
+    # user-expected thing. The bare shape (single-modifier list) is a
+    # documented bundle gap tracked in `docs/BUNDLE_REST_SCOPE.md §7`
+    # #9 status; user-facing `chuck every word` remains partial until
+    # either (a) the shim composes the doc-scope wrap or (b) the bundle
+    # picks up cursorless's iteration-scope default handling.
+    with test("L5", "L5.22", "wishlist #9 — every word within document (multi-range)"):
+        target = {
+            "type": "primitive",
+            "mark": {"type": "cursor"},
+            "modifiers": [
+                {"type": "everyScope", "scopeType": {"type": "word"}},
+                {"type": "containingScope", "scopeType": {"type": "document"}},
+            ],
+        }
+        hat_entries = _build_hat_map_for_js(_STD_TOKENS, _STD_LETTERS, color="default")
+        js_result = _run_js_resolver(target, _STD_TOKENS, hat_entries, cursor_char=0)
+        expected = [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)]
+        assert js_result == expected, (
+            f"L5.22 (#9): every word within document — got {js_result!r}, "
+            f"expected {expected!r}"
+        )

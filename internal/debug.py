@@ -173,7 +173,7 @@ def _snapshot() -> dict:
         "hat_js_fallback": instance.state.hat_js_fallback,
         "hat_js_last_err": instance.state.hat_js_last_err,
         "buffer_rev":     instance.state.buffer.rev,
-        "scroll_offset":  instance.runtime.viewport.get_scroll_offset(),
+        "scroll_offset":  viewport.get_scroll_offset(),
         "hints_hidden":   dm._hints_hidden_by_overflow,
         "target_window":  instance.state.target_window_title,
         "flash":          list(instance.state.flash_state.get("indices", [])),

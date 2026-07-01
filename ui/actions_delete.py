@@ -26,20 +26,20 @@ class Actions:
         index = _hat_to_index(letter, color)
         if index >= 0:
             def _do():
-                instance.buffer.delete_token(index)
+                instance.state.buffer.delete_token(index)
                 _recompute_hats()
-                instance.canvas.refresh()
+                instance.runtime.canvas.refresh()
             _flash_tokens([index], _action_color("remove"), _do)
 
     def prose_overlay_delete_past_hat(letter: str, color: str = "gray"):
         """Delete from the hat through the end of the buffer (chuck past <hat>)."""
         index = _hat_to_index(letter, color)
         if index >= 0:
-            flash_indices = list(range(index, len(instance.buffer.get_tokens())))
+            flash_indices = list(range(index, len(instance.state.buffer.get_tokens())))
             def _do():
-                instance.buffer.delete_through(index)
+                instance.state.buffer.delete_through(index)
                 _recompute_hats()
-                instance.canvas.refresh()
+                instance.runtime.canvas.refresh()
             _flash_tokens(flash_indices, _action_color("remove"), _do)
 
     def prose_overlay_delete_head_hat(letter: str, color: str = "gray"):
@@ -48,9 +48,9 @@ class Actions:
         if index >= 0:
             flash_indices = list(range(0, index + 1))
             def _do():
-                instance.buffer.delete_head(index)
+                instance.state.buffer.delete_head(index)
                 _recompute_hats()
-                instance.canvas.refresh()
+                instance.runtime.canvas.refresh()
             _flash_tokens(flash_indices, _action_color("remove"), _do)
 
     def prose_overlay_delete_tail_hat(letter: str, color: str = "gray"):

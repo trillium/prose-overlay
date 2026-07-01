@@ -25,27 +25,27 @@ def _on_win_focus(win):
     """Track active window — updates target label while overlay is open.
     Ignored when a recall window has been explicitly set as target.
     """
-    if not instance.canvas.is_showing:
+    if not instance.runtime.canvas.is_showing:
         return
-    if instance.target_recall_name is not None:
+    if instance.state.target_recall_name is not None:
         return  # explicit recall target — don't override
     try:
-        instance.target_window_title = win.title or ""
+        instance.state.target_window_title = win.title or ""
     except Exception:
         pass
-    instance.canvas.refresh()
+    instance.runtime.canvas.refresh()
 
 
 def _on_win_move(win):
-    if not instance.canvas.is_showing:
+    if not instance.runtime.canvas.is_showing:
         return
     if _anchor_win is None:
         return
     try:
         if win.id != _anchor_win.id:
             return
-        instance.viewport.set_anchor_rect(win.rect)
-        instance.canvas.refresh()
+        instance.runtime.viewport.set_anchor_rect(win.rect)
+        instance.runtime.canvas.refresh()
     except Exception:
         pass
 
@@ -72,13 +72,13 @@ class Actions:
         Updates the layout anchor immediately if the overlay is showing.
         """
         global _anchor_win
-        viewport = instance.viewport
+        viewport = instance.runtime.viewport
         try:
             win = ui.active_window()
             _anchor_win = win
             viewport.set_anchor_rect(win.rect)
-            if instance.canvas.is_showing:
-                instance.canvas.refresh()
+            if instance.runtime.canvas.is_showing:
+                instance.runtime.canvas.refresh()
         except Exception:
             pass
 
@@ -86,13 +86,13 @@ class Actions:
         """Remove the window anchor — overlay reverts to full-screen width."""
         global _anchor_win
         _anchor_win = None
-        instance.viewport.set_anchor_rect(None)
-        if instance.canvas.is_showing:
-            instance.canvas.refresh()
+        instance.runtime.viewport.set_anchor_rect(None)
+        if instance.runtime.canvas.is_showing:
+            instance.runtime.canvas.refresh()
 
     def prose_overlay_set_anchor_position(position: str):
         """Set the vertical attachment point: 'top' or 'bottom'. Persisted to prefs."""
-        viewport = instance.viewport
+        viewport = instance.runtime.viewport
         try:
             win = ui.active_window()
             viewport.set_anchor_rect(win.rect)
@@ -100,5 +100,5 @@ class Actions:
             pass
         viewport.set_anchor_position(position)
         _save_prefs_from_layout()
-        if instance.canvas.is_showing:
-            instance.canvas.refresh()
+        if instance.runtime.canvas.is_showing:
+            instance.runtime.canvas.refresh()

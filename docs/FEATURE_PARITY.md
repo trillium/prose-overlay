@@ -192,8 +192,8 @@ Items 2 ✅ + 3 are the meaningful coverage leaps. Items 1, 4, 5 are quick wins.
 | `[x]` | nonWhitespaceSequence | "take funk" | ISC-4 |
 | `[x]` | document / line / paragraph | "chuck file" | ISC-4 |
 | `[x]` | token / word / identifier / character (at the TOKEN level) | "take word" | ISC-4 |
-| `[ ]` | **word scope splits formatted tokens into sub-words** | inside "one_two_three", "take second word this" → selects "two" | **the user's stated requirement** — needs sub-word resolver |
-| `[ ]` | sub-word identity preserves joiner under replace | "word changed" on selection {two} in "one_{two}_three" → "one_changed_three" | depends on sub-word selection |
+| `[~]` | **word scope splits formatted tokens into sub-words** | inside "one_two_three", "take second word this" → selects "two" | **JS resolver ships it** (`js/prose_resolve_targets.js:14342-14380` — `WordScopeHandler` + `WordTokenizer.splitIdentifier` + `CAMEL_REGEX`; default since 2026-06-30 F9 flip). **Python fallback does NOT split** (`cursorless/resolve.py:108-115` returns `(base_idx, base_idx)`). Headless coverage pending (L5.20). See `docs/SUBWORD_INVESTIGATION.md` for the full audit. |
+| `[~]` | sub-word identity preserves joiner under replace | "word changed" on selection {two} in "one_{two}_three" → "one_changed_three" | Same status as row above: JS resolver preserves joiners inherently (engine-side behavior of `WordScopeHandler`); Python fallback can't reach because it doesn't split. Live-verify pending. |
 
 ### 3d. Surrounding pairs
 
@@ -311,6 +311,11 @@ Items 2 ✅ + 3 are the meaningful coverage leaps. Items 1, 4, 5 are quick wins.
 - `[—]` Autocomplete / IntelliSense — LLM-assisted typing is explicit Out of Scope
 - `[—]` Browser-DOM rendering — Talon canvas only (Out of Scope in ISA)
 - `[—]` Mobile / non-macOS targets — Out of Scope in ISA
+- `[—]` Cursorless C6 `{call_action} <target> on <target>` — code-editor refactor primitive (wrap a target in a function-call at another target); no prose analogue. Decided 2026-07-01 via `docs/GRAMMAR_STRUCTURE_PARITY.md §3`.
+- `[—]` Cursorless C8 `{insert_snippet_action} {snippet} <destination>` — language-scoped templates with variable interpolation; no analogue for a prose buffer whose confirm-to-host lands raw text. Decided 2026-07-01.
+- `[—]` Cursorless C9 `{snippet_wrapper} {wrap_action} <target>` — same snippet-subsystem bucket as C8. If a prose-side wrap is later wanted, it lives under C7 (paired-delimiter wrap), not snippets. Decided 2026-07-01.
+- `[—]` Cursorless C10/C11 scope visualizer — VS Code extension surface; prose-overlay renders on its own Talon canvas.
+- `[—]` Cursorless C12–C22 admin (settings, sidebar, stats, tutorial, snippet migration) — all IDE/tutorial subsystem calls with no prose-overlay counterpart. Cursorless owns them outside PO's active context.
 
 ## 11. The user's three named requirements — explicit mapping
 

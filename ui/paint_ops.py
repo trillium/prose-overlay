@@ -397,6 +397,36 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
                 )
             )
 
+    # --- Flash overlay (paints BEHIND token text) ---
+    # Mirrors ui/draw_tokens.py:_draw_token_rows lines 260-261, 265-274.
+    # Same paint slot as selection — batched before the token loop so
+    # token text sits on top. ui/layout.py:FlashOverlay carries the
+    # rewritten paint color ("<hex>4d" — 30% alpha) baked in by
+    # ui/layout_overlays.py:build_flash_overlay, so this walker just
+    # forwards the color.
+    #
+    # Rounded corners at radius 3.0 mirror draw_tokens.py's
+    # `draw_rounded_rect(c, Rect(...), 3)` on the highlight rect.
+    #
+    # Note: draw_tokens.py's paint code selects between flash and
+    # selection with an `if/elif` (mutually exclusive per token). The
+    # model can carry BOTH — we emit both here without dedup because the
+    # ORCHESTRATOR is responsible for the per-token exclusivity if it
+    # matters; here we paint what the model describes.
+    if layout.flash is not None:
+        for r in layout.flash.rects:
+            ops.append(
+                RoundedRectOp(
+                    x=r.x,
+                    y=r.y,
+                    w=r.w,
+                    h=r.h,
+                    radius=3.0,
+                    color=layout.flash.color,
+                    stroke=False,
+                )
+            )
+
     # --- Listening placeholder OR per-token text ---
     if not layout.tokens:
         # Empty buffer: paint the "listening..." affordance at the

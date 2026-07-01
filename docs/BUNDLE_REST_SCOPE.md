@@ -625,3 +625,58 @@ decisions blocking the modifier cluster.
   - #8 inside/outside modifier (Cluster D — small independent PR).
   - #4 Paste at destination (§7 deferred — depends on clipboard
     plumbing verification).
+
+- **2026-07-01 — Cluster D closed — wishlist item #8 inside/outside
+  (interior) modifier shipped.** Composable-dispatch route confirmed —
+  ZERO new prose-overlay grammar rules, ZERO bundle rebuild.
+
+  **Grammar-audit finding (composable dispatch YES):**
+  Static reading of cursorless-talon confirms the interior modifier
+  flows through `<user.cursorless_target>` at
+  `prose_overlay_cursorless.talon:50` for free — both variants:
+    - `inside` → `interiorOnly` is a `cursorless_interior_modifier`
+      (`~/.talon/user/cursorless-talon/src/modifiers/interior.py:11-16`),
+      which is explicitly listed in `cursorless_modifier` at
+      `~/.talon/user/cursorless-talon/src/modifiers/modifiers.py:33`.
+    - `bounds` → `excludeInterior` is a `cursorless_simple_modifier`
+      (spoken-forms map at
+      `~/.talon/user/cursorless-talon/src/spoken_forms.json:86`),
+      which is likewise a `cursorless_modifier` variant per
+      `modifiers.py:26` → `head_tail_swallowed_modifiers` list.
+  Same OQ2=YES pattern as Cluster C. This is the second wishlist item
+  after Cluster C to close via composable-dispatch route with zero
+  grammar work.
+
+  **Bundle-side (verified, no rebuild):** `InteriorOnlyStage` at
+  `js/prose_resolve_targets.js:15819`, `ExcludeInteriorStage` at
+  `:15828`. Both are already in L2.8's fail-closed must-have inventory
+  (`scripts/headless_verify/layer2_bundle.py:189-190`) — no L2 update
+  needed. Bundle behavior confirmed via bun spike on
+  `the ( air ball ) drum` with mark 'a' on token 2:
+    - `interiorOnly + SP round` → chars [6,14) → tokens (2,3) = `air ball`
+    - `excludeInterior + SP round` → chars [4,5) + [15,16) → TWO ranges
+      (1,1) + (4,4) = the delimiter tokens themselves — matches
+      cursorless's "Bounding paired delimiters" semantics per
+      `~/.talon/user/cursorless-talon/src/cheatsheet/sections/modifiers.py:57`.
+
+  **Python-fallback stance:** Asymmetric-gap documented, no impl.
+  `cursorless/resolve.py:174-180` has no `interiorOnly` or
+  `excludeInterior` handler. Per §Cluster D directive, Python stays
+  token-level; JS handles the interior split. Matches sub-word
+  precedent per `docs/SUBWORD_INVESTIGATION.md §3` and Cluster C
+  Python-fallback stance. Retire-Python (ISC-9) makes the split moot.
+
+  **Tests + docs:** L5.25 (interiorOnly → tokens (2,3)), L5.26
+  (excludeInterior → [(1,1),(4,4)]). MANUAL_VERIFICATION rows 37
+  (`take inside round air`) and 38 (`take bounds round air`).
+  FEATURE_PARITY §3d gains one row marked `[x]` JS-path only.
+
+  **Commits:**
+  - `4fdb6bd` (feat) — L5.25/L5.26 + MANUAL rows 37,38 +
+    FEATURE_PARITY row.
+  - this commit (docs) — §7 status log entry.
+  Headless: 139 → 141 green.
+
+  **What's next in §7 order after Cluster D:**
+  - #4 Paste at destination (§7 deferred — depends on clipboard
+    plumbing verification per `docs/REBUTTAL_ASSERTIONS.md #3`).

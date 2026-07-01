@@ -21,7 +21,18 @@ pure-function tests (Move 4/5) will consume ``instance.state`` as an
 opaque dict-like bundle.
 """
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover — only for static analysis
+    # Move 3 — ``Rect`` used as the type of ``screen_rect`` below. Guarded
+    # by TYPE_CHECKING because ``internal/instance.py`` is loaded
+    # standalone via ``spec_from_file_location`` in the headless harness
+    # (no parent package) — a runtime relative import would break the
+    # loader. The ``screen_rect`` annotation is stringified in-place
+    # (``Optional["Rect"]``) so the dataclass decorator doesn't try to
+    # resolve the name at class-creation time; type checkers still see
+    # the real class via this TYPE_CHECKING import.
+    from .viewport import Rect
 
 
 @dataclass
@@ -91,6 +102,26 @@ class _State:
     # to decide whether to EXTEND the last token (consecutive letter
     # utterances) or APPEND a new one (letters after dictation).
     _last_input_source: str = "init"
+    # Move 3 of the pure-function refactor plan — visual-dependency state
+    # populated at recompute time so ``ui/draw.py:draw_overlay`` becomes a
+    # pure function of its args + ``instance.state`` (no ``settings.get``
+    # or ``ui.main_screen()`` reads at paint time).
+    #
+    # ``screen_rect`` mirrors what ``ui.main_screen().rect`` returned at the
+    # last recompute. ``None`` in headless (no talon runtime) and before the
+    # first recompute — the draw path treats ``None`` as "no screen; paint
+    # nothing" per the guard in ``draw_overlay``.
+    #
+    # ``window_scoped`` / ``homophone_hint`` / ``homophone_shapes`` mirror
+    # the three ``settings.get(...)`` values ``draw_overlay`` used to read
+    # inline. Populated via ``shim/actions_core.py:_populate_visual_state``
+    # which resolves ``talon`` through ``sys.modules`` (same pattern as
+    # ``internal/debug.py:_get_setting``) — no direct talon import here,
+    # so the INTERNAL layer contract holds.
+    screen_rect: Optional["Rect"] = None
+    window_scoped: bool = False
+    homophone_hint: bool = False
+    homophone_shapes: bool = False
 
 
 @dataclass
@@ -175,6 +206,12 @@ class ProseOverlayState:
         self.state.hat_js_fallback = False
         self.state.hat_js_last_err = ""
         self.state._last_input_source = "init"
+        # Move 3 — visual-dependency state resets to defaults; the next
+        # recompute repopulates from talon.settings / ui.main_screen().
+        self.state.screen_rect = None
+        self.state.window_scoped = False
+        self.state.homophone_hint = False
+        self.state.homophone_shapes = False
         if self.runtime.viewport is not None:
             self.runtime.viewport.set_scroll_offset(0)
 

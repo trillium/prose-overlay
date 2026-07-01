@@ -54,6 +54,43 @@ const COMMANDS: Row[] = [
   { genre: "Move",     command: "`bring <hat> to <hat>`", hint: "Copy word at src to dst position" },
   { genre: "Move",     command: "`move <hat> to <hat>`",  hint: "Cut word at src, replace dst" },
 
+  // ── Cluster A — swap / clone / reverse (composable target capture) ──────
+  { genre: "Rearrange", command: "`swap <hat> with <hat>`", hint: "Swap two target texts (wishlist #3)" },
+  { genre: "Rearrange", command: "`clone <hat>`",           hint: "Duplicate target after itself (wishlist #12)" },
+  { genre: "Rearrange", command: "`clone up <hat>`",        hint: "Duplicate target before itself" },
+  { genre: "Rearrange", command: "`reverse <hat> past <hat>`", hint: "Reverse token order in range (wishlist #13)" },
+  { genre: "Rearrange", command: "`reverse <hat> and <hat>`",  hint: "Reverse two targets (list form)" },
+
+  // ── Cluster B — wrap with paired delimiter (12 delimiters) ──────────────
+  { genre: "Wrap",     command: "`round wrap <hat>`",       hint: "Wrap target in ( ) — wishlist #5" },
+  { genre: "Wrap",     command: "`curly wrap <hat>`",       hint: "Wrap target in { }" },
+  { genre: "Wrap",     command: "`box wrap <hat>`",         hint: "Wrap target in [ ]" },
+  { genre: "Wrap",     command: "`quad wrap <hat>`",        hint: "Wrap target in double quotes" },
+  { genre: "Wrap",     command: "`twin wrap <hat>`",        hint: "Wrap target in single quotes" },
+  { genre: "Wrap",     command: "`diamond wrap <hat>`",     hint: "Wrap target in < >" },
+  { genre: "Wrap",     command: "`skis wrap <hat>`",        hint: "Wrap target in backticks" },
+  { genre: "Wrap",     command: "`void wrap <hat>`",        hint: "Wrap target in spaces (whitespace)" },
+  { genre: "Wrap",     command: "`escaped round wrap <hat>`", hint: "Wrap target in \\( \\)" },
+  { genre: "Wrap",     command: "`escaped curly wrap <hat>`", hint: "(reserved — escaped variant families)" },
+  { genre: "Wrap",     command: "`escaped quad wrap <hat>`",  hint: "Wrap target in \\\" \\\"" },
+  { genre: "Wrap",     command: "`escaped twin wrap <hat>`",  hint: "Wrap target in \\' \\'" },
+  { genre: "Wrap",     command: "`escaped box wrap <hat>`",   hint: "Wrap target in \\[ \\]" },
+
+  // ── Cluster C — modifier grammar (JS resolver, composable target) ───────
+  // Ride the composable <user.cursorless_target> capture via cursorless-talon's
+  // own modifier vocabulary. Grammar-only — no new prose_overlay rule; the JS
+  // resolver handles the semantics. Python-fallback is asymmetric (JS-only).
+  { genre: "Modifier", command: "`take first word`",           hint: "OrdinalScope — first word in buffer (wishlist #7)" },
+  { genre: "Modifier", command: "`take last word`",            hint: "OrdinalScope — last word" },
+  { genre: "Modifier", command: "`take next word <hat>`",      hint: "RelativeScope — word after hat (wishlist #6)" },
+  { genre: "Modifier", command: "`take every word in file`",   hint: "EveryScope — all words in buffer (wishlist #9, partial)" },
+  { genre: "Modifier", command: "`chuck leading <hat>`",       hint: "Leading modifier — degenerate on prose (wishlist #11)" },
+  { genre: "Modifier", command: "`chuck trailing <hat>`",      hint: "Trailing modifier — degenerate on prose" },
+
+  // ── Cluster D — inside / bounds of surrounding pair ─────────────────────
+  { genre: "Pair",     command: "`take inside round <hat>`",   hint: "Interior of paired delimiter (wishlist #8)" },
+  { genre: "Pair",     command: "`take bounds round <hat>`",   hint: "The two delimiter tokens as bounds" },
+
   // ── Hat colors ───────────────────────────────────────────────────────────
   { genre: "Colors",   command: "`chuck <color> <hat>`",  hint: "Target a colored hat (collision avoidance)" },
   { genre: "Colors",   command: "`pre <color> <hat>`",    hint: "Cursor before colored hat" },

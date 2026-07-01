@@ -4045,3 +4045,548 @@ def run_layer_1() -> None:
                 )
         finally:
             _restore_viewport()
+
+    # -----------------------------------------------------------------------
+    # Move 5 (PaintOp union + pure builder + Skia sink) — ui/paint_ops.py
+    #
+    # PaintOp is a flat, immutable description of one paint step. Sits
+    # between LayoutModel (Move 4e) and the Skia sink (draw_from_model).
+    #
+    #     to_paint_ops(model) -> list[PaintOp]  # pure
+    #     execute(ops, canvas)                  # side-effecting sink
+    #
+    # L1 scope covers:
+    # * Frozen-dataclass contract on all four op types.
+    # * to_paint_ops scope for what draw_from_model.py currently handles:
+    #   listening placeholder, per-token text, cursor rect (with change
+    #   mode). Bubbles / help / hats / underlines are OUT of scope for
+    #   this move — those fields on LayoutModel are ignored by
+    #   to_paint_ops.
+    # * execute() dispatch via a fake canvas.
+    # -----------------------------------------------------------------------
+
+    # Load ui/paint_ops.py under po_lt_pkg.ui.paint_ops. The module has a
+    # top-level `from .layout import LayoutModel` (already registered
+    # earlier as po_lt_pkg.ui.layout) and lazy imports of
+    # ..internal.draw_constants and talon.ui inside to_paint_ops /
+    # execute respectively. draw_constants is already registered under
+    # po_lt_pkg.internal.draw_constants; talon.ui needs a lightweight
+    # stub before execute() is called (see below).
+    po_spec = importlib.util.spec_from_file_location(
+        "po_lt_pkg.ui.paint_ops",
+        REPO / "ui" / "paint_ops.py",
+    )
+    po_mod = importlib.util.module_from_spec(po_spec)
+    _sys.modules["po_lt_pkg.ui.paint_ops"] = po_mod
+    po_spec.loader.exec_module(po_mod)
+
+    _RectOp = po_mod.RectOp
+    _TextOp = po_mod.TextOp
+    _LineOp = po_mod.LineOp
+    _EllipseOp = po_mod.EllipseOp
+    _to_paint_ops = po_mod.to_paint_ops
+    _execute = po_mod.execute
+
+    # ui.layout dataclasses — reuse the already-loaded module.
+    _po_layout = _sys.modules["po_lt_pkg.ui.layout"]
+    _Rect_layout = _po_layout.Rect  # frozen geometry Rect (Move 4)
+    _LayoutModelPO = _po_layout.LayoutModel
+    _TokenLayout = _po_layout.TokenLayout
+    _CursorLayout = _po_layout.CursorLayout
+
+    # draw_constants — read the exact constants to_paint_ops uses so
+    # each expected coordinate lines up numerically with the emitted op.
+    _DC_PO = _sys.modules["po_lt_pkg.internal.draw_constants"]
+
+    def _mk_empty_model_po(
+        *,
+        tokens=(),
+        cursor=None,
+        content_area=None,
+    ):
+        """Build a LayoutModel with the minimum fields to_paint_ops reads.
+
+        Fields to_paint_ops actually consumes: tokens, content_area
+        (only when tokens is empty), cursor. Everything else is passed
+        as innocuous defaults so the model constructs.
+        """
+        panel = _Rect_layout(x=0.0, y=0.0, w=100.0, h=100.0)
+        ca = content_area or _Rect_layout(x=10.0, y=20.0, w=80.0, h=80.0)
+        return _LayoutModelPO(
+            panel=panel,
+            content_area=ca,
+            help_area=None,
+            tokens=list(tokens),
+            selection=None,
+            flash=None,
+            bubbles=[],
+            help=None,
+            cursor=cursor,
+            target_label="",
+            using_fallback=False,
+            hints_hidden_by_overflow=False,
+        )
+
+    def _mk_token_po(index, text, x, y, w=30.0, h=20.0):
+        return _TokenLayout(
+            index=index,
+            text=text,
+            rect=_Rect_layout(x=x, y=y, w=w, h=h),
+            hat=None,
+            shape=None,
+            underline_segments=[],
+            flagged=False,
+            on_visible_row=True,
+        )
+
+    def _mk_cursor_po(x, y, h, *, change_mode=False, blink_on=True, w=1.0):
+        return _CursorLayout(
+            rect=_Rect_layout(x=x, y=y, w=w, h=h),
+            change_mode=change_mode,
+            blink_on=blink_on,
+        )
+
+    with test(
+        "L1",
+        "L1.136",
+        "paint_ops: RectOp constructs with defaults and is frozen",
+    ):
+        import dataclasses as _dc_po
+        op = _RectOp(x=1.0, y=2.0, w=3.0, h=4.0, color="ff0000ff")
+        assert op.stroke is False, f"stroke should default False; got {op.stroke!r}"
+        assert op.stroke_width == 1.0
+        try:
+            op.color = "00ff00ff"
+        except _dc_po.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError("RectOp accepted mutation — should be frozen")
+
+    with test(
+        "L1",
+        "L1.137",
+        "paint_ops: TextOp constructs and is frozen",
+    ):
+        import dataclasses as _dc_po
+        op = _TextOp(x=1.0, y=2.0, text="hi", font_size=14.0, color="ffffffff")
+        try:
+            op.text = "bye"
+        except _dc_po.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError("TextOp accepted mutation — should be frozen")
+
+    with test(
+        "L1",
+        "L1.138",
+        "paint_ops: LineOp constructs with default width and is frozen",
+    ):
+        import dataclasses as _dc_po
+        op = _LineOp(x0=0.0, y0=0.0, x1=10.0, y1=10.0, color="ffffffff")
+        assert op.width == 1.0
+        try:
+            op.x1 = 99.0
+        except _dc_po.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError("LineOp accepted mutation — should be frozen")
+
+    with test(
+        "L1",
+        "L1.139",
+        "paint_ops: EllipseOp constructs with defaults and is frozen",
+    ):
+        import dataclasses as _dc_po
+        op = _EllipseOp(cx=5.0, cy=5.0, rx=3.0, ry=3.0, color="ffffffff")
+        assert op.stroke is False
+        try:
+            op.cx = 99.0
+        except _dc_po.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError("EllipseOp accepted mutation — should be frozen")
+
+    with test(
+        "L1",
+        "L1.140",
+        "to_paint_ops: empty tokens + no cursor → one listening TextOp",
+    ):
+        model = _mk_empty_model_po(tokens=(), cursor=None)
+        ops = _to_paint_ops(model)
+        assert isinstance(ops, list), f"expected list; got {type(ops).__name__}"
+        assert len(ops) == 1, f"expected exactly 1 op (listening text); got {len(ops)}"
+        assert isinstance(ops[0], _TextOp), (
+            f"expected TextOp for listening placeholder; got {type(ops[0]).__name__}"
+        )
+        assert ops[0].text == "listening...", (
+            f"expected 'listening...' text; got {ops[0].text!r}"
+        )
+        # Coord check against draw_constants: x = content_area.x,
+        # y baseline = content_area.y + DOT_RADIUS*2 + DOT_GAP_Y + TOKEN_FONT_SIZE.
+        assert ops[0].x == 10.0, f"listening x should be content_area.x; got {ops[0].x}"
+        expected_y = (
+            20.0
+            + (_DC_PO.DOT_RADIUS * 2)
+            + _DC_PO.DOT_GAP_Y
+            + _DC_PO.TOKEN_FONT_SIZE
+        )
+        assert ops[0].y == expected_y, (
+            f"listening baseline y mismatch: got {ops[0].y}, expected {expected_y}"
+        )
+        assert ops[0].color == _DC_PO.LISTENING_COLOR
+        assert ops[0].font_size == _DC_PO.TOKEN_FONT_SIZE
+
+    with test(
+        "L1",
+        "L1.141",
+        "to_paint_ops: N tokens → N TextOps in token order, no cursor when cursor=None",
+    ):
+        toks = [
+            _mk_token_po(0, "hello", x=10.0, y=30.0),
+            _mk_token_po(1, "world", x=50.0, y=30.0),
+            _mk_token_po(2, "again", x=90.0, y=30.0),
+        ]
+        model = _mk_empty_model_po(tokens=toks, cursor=None)
+        ops = _to_paint_ops(model)
+        assert len(ops) == 3, f"expected 3 TextOps; got {len(ops)}"
+        for i, (op, tok) in enumerate(zip(ops, toks)):
+            assert isinstance(op, _TextOp), (
+                f"op[{i}] should be TextOp; got {type(op).__name__}"
+            )
+            assert op.text == tok.text, f"op[{i}].text mismatch"
+            assert op.x == tok.rect.x, f"op[{i}].x mismatch"
+            expected_y = (
+                tok.rect.y
+                + (_DC_PO.DOT_RADIUS * 2)
+                + _DC_PO.DOT_GAP_Y
+                + _DC_PO.TOKEN_FONT_SIZE
+            )
+            assert op.y == expected_y, (
+                f"op[{i}].y baseline mismatch: got {op.y}, expected {expected_y}"
+            )
+            assert op.color == _DC_PO.TOKEN_COLOR
+            assert op.font_size == _DC_PO.TOKEN_FONT_SIZE
+
+    with test(
+        "L1",
+        "L1.142",
+        "to_paint_ops: navigate-mode cursor (blink_on=True) → one cursor RectOp",
+    ):
+        cur = _mk_cursor_po(
+            x=100.0, y=40.0, h=25.0, change_mode=False, blink_on=True
+        )
+        model = _mk_empty_model_po(
+            tokens=[_mk_token_po(0, "a", x=10.0, y=30.0)], cursor=cur
+        )
+        ops = _to_paint_ops(model)
+        # 1 token TextOp + 1 cursor RectOp = 2 ops.
+        assert len(ops) == 2, f"expected 2 ops (1 text + 1 cursor); got {len(ops)}"
+        assert isinstance(ops[0], _TextOp)
+        cursor_op = ops[1]
+        assert isinstance(cursor_op, _RectOp), (
+            f"cursor should be RectOp; got {type(cursor_op).__name__}"
+        )
+        assert cursor_op.stroke is False, "cursor rect should be filled"
+        assert cursor_op.color == _DC_PO.CURSOR_COLOR_NAVIGATE, (
+            f"navigate cursor color mismatch: got {cursor_op.color!r}"
+        )
+        assert cursor_op.x == 100.0 and cursor_op.y == 40.0
+        assert cursor_op.w == _DC_PO.CURSOR_WIDTH
+        assert cursor_op.h == 25.0
+
+    with test(
+        "L1",
+        "L1.143",
+        "to_paint_ops: cursor blink_on=False → NO cursor op emitted (paint-side blink gate)",
+    ):
+        cur = _mk_cursor_po(
+            x=100.0, y=40.0, h=25.0, change_mode=False, blink_on=False
+        )
+        model = _mk_empty_model_po(
+            tokens=[_mk_token_po(0, "a", x=10.0, y=30.0)], cursor=cur
+        )
+        ops = _to_paint_ops(model)
+        # Only the token TextOp — no cursor ops when blink_on=False.
+        assert len(ops) == 1, (
+            f"blink_off should suppress cursor; expected 1 op, got {len(ops)}"
+        )
+        assert isinstance(ops[0], _TextOp)
+
+    with test(
+        "L1",
+        "L1.144",
+        "to_paint_ops: change-mode cursor → change-zone RectOp + cursor RectOp",
+    ):
+        cur = _mk_cursor_po(
+            x=100.0, y=40.0, h=25.0, change_mode=True, blink_on=True
+        )
+        model = _mk_empty_model_po(tokens=(), cursor=cur)
+        # Empty tokens → 1 listening TextOp + 2 cursor ops = 3 ops total.
+        ops = _to_paint_ops(model)
+        assert len(ops) == 3, (
+            f"expected 3 ops (listening + change-zone + cursor); got {len(ops)}"
+        )
+        assert isinstance(ops[0], _TextOp)
+        zone_op = ops[1]
+        cursor_op = ops[2]
+        assert isinstance(zone_op, _RectOp), "change-zone should be RectOp"
+        assert isinstance(cursor_op, _RectOp), "cursor should be RectOp"
+
+        # Zone op: color = CURSOR_COLOR_CHANGE[:6] + CURSOR_CHANGE_ZONE_ALPHA
+        expected_zone_color = (
+            _DC_PO.CURSOR_COLOR_CHANGE[:6] + _DC_PO.CURSOR_CHANGE_ZONE_ALPHA
+        )
+        assert zone_op.color == expected_zone_color, (
+            f"change-zone color mismatch: got {zone_op.color!r}, expected {expected_zone_color!r}"
+        )
+        # Zone geometry: x = cursor.rect.x + 1 - CURSOR_CHANGE_ZONE_WIDTH/2
+        expected_zone_x = 100.0 + 1 - _DC_PO.CURSOR_CHANGE_ZONE_WIDTH / 2
+        assert zone_op.x == expected_zone_x, (
+            f"change-zone x mismatch: got {zone_op.x}, expected {expected_zone_x}"
+        )
+        assert zone_op.w == _DC_PO.CURSOR_CHANGE_ZONE_WIDTH
+        assert zone_op.h == 25.0
+
+        # Cursor op: color = CURSOR_COLOR_CHANGE, x = cursor.rect.x
+        assert cursor_op.color == _DC_PO.CURSOR_COLOR_CHANGE
+        assert cursor_op.x == 100.0
+        assert cursor_op.w == _DC_PO.CURSOR_WIDTH
+
+    with test(
+        "L1",
+        "L1.145",
+        "to_paint_ops: determinism — same LayoutModel → structurally-equal ops",
+    ):
+        toks = [_mk_token_po(0, "hi", x=10.0, y=30.0)]
+        cur = _mk_cursor_po(x=50.0, y=40.0, h=25.0)
+        m1 = _mk_empty_model_po(tokens=toks, cursor=cur)
+        m2 = _mk_empty_model_po(tokens=list(toks), cursor=cur)
+        ops1 = _to_paint_ops(m1)
+        ops2 = _to_paint_ops(m2)
+        assert ops1 == ops2, (
+            "to_paint_ops should be deterministic — same input should "
+            f"produce equal ops. Got:\n  ops1={ops1}\n  ops2={ops2}"
+        )
+        assert ops1 is not ops2, "must return a fresh list per call"
+
+    with test(
+        "L1",
+        "L1.146",
+        "to_paint_ops: no mutation of LayoutModel or its token list",
+    ):
+        toks = [
+            _mk_token_po(0, "a", x=10.0, y=30.0),
+            _mk_token_po(1, "b", x=50.0, y=30.0),
+        ]
+        cur = _mk_cursor_po(x=90.0, y=40.0, h=25.0)
+        model = _mk_empty_model_po(tokens=toks, cursor=cur)
+
+        # Snapshot pre-call. The list identity + contents should be
+        # unchanged after to_paint_ops.
+        pre_len = len(model.tokens)
+        pre_ids = [id(t) for t in model.tokens]
+
+        _to_paint_ops(model)
+
+        assert len(model.tokens) == pre_len, "token list length changed"
+        assert [id(t) for t in model.tokens] == pre_ids, (
+            "token list identity changed (list was mutated)"
+        )
+        # The caller-provided list should also be untouched (we passed
+        # `toks` by reference through _mk_empty_model_po which called
+        # `list(tokens)` — this asserts the copy path doesn't leak).
+        assert toks == [
+            _mk_token_po(0, "a", x=10.0, y=30.0),
+            _mk_token_po(1, "b", x=50.0, y=30.0),
+        ]
+
+    # -----------------------------------------------------------------------
+    # execute() sink — needs a fake canvas + a talon.ui.Rect stub because
+    # execute() imports it lazily inside the function body.
+    # -----------------------------------------------------------------------
+
+    # talon.ui stub: execute() calls `from talon.ui import Rect`. Provide
+    # a lightweight Rect record that matches (x, y, w, h). Register the
+    # module before execute() is called.
+    _talon_stub_po = _sys.modules.get("talon")
+    if _talon_stub_po is None:
+        _talon_stub_po = _types_lt.ModuleType("talon")
+        _sys.modules["talon"] = _talon_stub_po
+    _talon_ui_stub = _sys.modules.get("talon.ui")
+    if _talon_ui_stub is None:
+        _talon_ui_stub = _types_lt.ModuleType("talon.ui")
+        _sys.modules["talon.ui"] = _talon_ui_stub
+
+    class _StubTalonRect:
+        __slots__ = ("x", "y", "w", "h", "width", "height")
+        def __init__(self, x, y, w, h):
+            self.x = x
+            self.y = y
+            self.w = w
+            self.h = h
+            self.width = w
+            self.height = h
+        def __eq__(self, other):
+            return (
+                isinstance(other, _StubTalonRect)
+                and self.x == other.x
+                and self.y == other.y
+                and self.w == other.w
+                and self.h == other.h
+            )
+        def __repr__(self):
+            return f"_StubTalonRect({self.x},{self.y},{self.w},{self.h})"
+
+    _talon_ui_stub.Rect = _StubTalonRect
+
+    # Fake canvas that records every mutation and draw call in order.
+    class _RecordingPaint:
+        FILL = "FILL"
+        STROKE = "STROKE"
+
+        class Style:
+            FILL = "FILL"
+            STROKE = "STROKE"
+
+        def __init__(self, log):
+            self._log = log
+            self._color = None
+            self._style = None
+            self._textsize = None
+            self._stroke_width = None
+
+        @property
+        def color(self):
+            return self._color
+
+        @color.setter
+        def color(self, v):
+            self._color = v
+            self._log.append(("set_color", v))
+
+        @property
+        def style(self):
+            return self._style
+
+        @style.setter
+        def style(self, v):
+            self._style = v
+            self._log.append(("set_style", v))
+
+        @property
+        def textsize(self):
+            return self._textsize
+
+        @textsize.setter
+        def textsize(self, v):
+            self._textsize = v
+            self._log.append(("set_textsize", v))
+
+        @property
+        def stroke_width(self):
+            return self._stroke_width
+
+        @stroke_width.setter
+        def stroke_width(self, v):
+            self._stroke_width = v
+            self._log.append(("set_stroke_width", v))
+
+    class _RecordingCanvas:
+        def __init__(self):
+            self.log = []
+            self.paint = _RecordingPaint(self.log)
+
+        def draw_rect(self, rect):
+            self.log.append(("draw_rect", rect.x, rect.y, rect.w, rect.h))
+
+        def draw_text(self, text, x, y):
+            self.log.append(("draw_text", text, x, y))
+
+        def draw_line(self, x0, y0, x1, y1):
+            self.log.append(("draw_line", x0, y0, x1, y1))
+
+        def draw_circle(self, cx, cy, r):
+            self.log.append(("draw_circle", cx, cy, r))
+
+    with test(
+        "L1",
+        "L1.147",
+        "execute: RectOp(stroke=False) → FILL style + color set + draw_rect",
+    ):
+        canvas = _RecordingCanvas()
+        _execute(
+            [_RectOp(x=1.0, y=2.0, w=3.0, h=4.0, color="ff00ffaa")],
+            canvas,
+        )
+        # Expected log: set style=FILL, set color, draw_rect
+        assert ("set_style", "FILL") in canvas.log, (
+            f"expected FILL style set; log={canvas.log}"
+        )
+        assert ("set_color", "ff00ffaa") in canvas.log, (
+            f"expected color set; log={canvas.log}"
+        )
+        # draw_rect gets a Rect with the op's coords.
+        assert ("draw_rect", 1.0, 2.0, 3.0, 4.0) in canvas.log, (
+            f"expected draw_rect(1,2,3,4); log={canvas.log}"
+        )
+
+    with test(
+        "L1",
+        "L1.148",
+        "execute: RectOp(stroke=True) → STROKE + stroke_width set, then FILL restored",
+    ):
+        canvas = _RecordingCanvas()
+        _execute(
+            [_RectOp(
+                x=0.0, y=0.0, w=10.0, h=10.0, color="ffffffff",
+                stroke=True, stroke_width=2.5,
+            )],
+            canvas,
+        )
+        log = canvas.log
+        # Sequence check: STROKE set, stroke_width set, color set,
+        # draw_rect, FILL restored.
+        style_events = [e for e in log if e[0] == "set_style"]
+        assert style_events[0] == ("set_style", "STROKE"), (
+            f"first style set should be STROKE; got {style_events!r}"
+        )
+        assert ("set_stroke_width", 2.5) in log
+        assert ("draw_rect", 0.0, 0.0, 10.0, 10.0) in log
+        assert style_events[-1] == ("set_style", "FILL"), (
+            f"last style set should restore FILL; got {style_events!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.149",
+        "execute: TextOp → color + textsize set + draw_text with coords",
+    ):
+        canvas = _RecordingCanvas()
+        _execute(
+            [_TextOp(x=5.0, y=15.0, text="hello", font_size=14.0, color="00ff00ff")],
+            canvas,
+        )
+        assert ("set_color", "00ff00ff") in canvas.log
+        assert ("set_textsize", 14.0) in canvas.log
+        assert ("draw_text", "hello", 5.0, 15.0) in canvas.log, (
+            f"expected draw_text('hello', 5.0, 15.0); log={canvas.log}"
+        )
+
+    with test(
+        "L1",
+        "L1.150",
+        "execute: unknown op type raises TypeError",
+    ):
+        class _FakeOp:
+            pass
+        canvas = _RecordingCanvas()
+        try:
+            _execute([_FakeOp()], canvas)
+        except TypeError as e:
+            assert "unknown" in str(e).lower() or "PaintOp" in str(e), (
+                f"TypeError message should mention unknown op or PaintOp; got {e!r}"
+            )
+        else:
+            raise AssertionError(
+                "execute() should raise TypeError on unknown op type"
+            )

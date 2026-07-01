@@ -108,10 +108,10 @@ def _snapshot() -> dict:
     from ..ui import draw as dm
     from . import homophones as _h
 
-    tokens = instance.buffer.get_tokens()
+    tokens = instance.state.buffer.get_tokens()
     # Per-token hat mark: "color-letter" if hatted, "-" if not. Flat dict
     # keyed by str(idx) so JSON-friendly + greppable.
-    hats = instance.hat_assignments or {}
+    hats = instance.state.hat_assignments or {}
     per_token_hat = {
         str(i): (f"{hats[i][2]}-{hats[i][1]}" if i in hats else "-")
         for i in range(len(tokens))
@@ -125,7 +125,7 @@ def _snapshot() -> dict:
     # Selection lives on the buffer as an internal tuple[int, int] or None;
     # accessed via get_selection() (the public accessor). Convert tuple → list
     # so json.dumps stays trivial and jq sees an array not a stringified tuple.
-    sel = instance.buffer.get_selection()
+    sel = instance.state.buffer.get_selection()
     selection_field = list(sel) if sel is not None else None
 
     # position_assignments values are tuple[int, int] (active_idx, group_size).
@@ -134,7 +134,7 @@ def _snapshot() -> dict:
     # lists explicitly. Keys stringified because Python's json emits int keys
     # as numeric strings anyway; making that explicit prevents jq consumers
     # from having to guard for two shapes across versions.
-    pos_assignments_raw = instance.position_assignments or {}
+    pos_assignments_raw = instance.state.position_assignments or {}
     position_assignments_field = {
         str(k): list(v) for k, v in pos_assignments_raw.items()
     }
@@ -142,42 +142,42 @@ def _snapshot() -> dict:
     # shape / next_alt / panel dicts already carry JSON-friendly values
     # (str / dict[str,str]); stringify keys for the same jq-consistency reason.
     shape_assignments_field = {
-        str(k): v for k, v in (instance.shape_assignments or {}).items()
+        str(k): v for k, v in (instance.state.shape_assignments or {}).items()
     }
     next_alt_assignments_field = {
-        str(k): v for k, v in (instance.next_alt_assignments or {}).items()
+        str(k): v for k, v in (instance.state.next_alt_assignments or {}).items()
     }
     homophone_panel_alts_field = {
-        str(k): dict(v) for k, v in (instance.homophone_panel_alts or {}).items()
+        str(k): dict(v) for k, v in (instance.state.homophone_panel_alts or {}).items()
     }
 
     # Viewport anchor state — captured alongside scroll_offset so a JSONL
     # line fully reproduces where the panel sits on screen without needing
     # to replay the window-scope handshake.
-    viewport = instance.viewport
+    viewport = instance.runtime.viewport
     anchor_position_field = getattr(viewport, "_anchor_position", None)
     anchor_rect_field = _rect_summary(getattr(viewport, "_anchor_rect", None))
 
     return {
-        "showing":        instance.canvas.is_showing,
-        "cursor":         instance.cursor,
-        "change_mode":    getattr(instance, "change_mode", False),
-        "auto_dictation": instance.auto_dictation,
-        "help_visible":   instance.help_visible,
+        "showing":        instance.runtime.canvas.is_showing,
+        "cursor":         instance.state.cursor,
+        "change_mode":    getattr(instance.state, "change_mode", False),
+        "auto_dictation": instance.state.auto_dictation,
+        "help_visible":   instance.state.help_visible,
         "token_count":    len(tokens),
         "tokens":         tokens,
         "hats":           per_token_hat,
         "unhatted":       unhatted_indices,
         "flagged":        flagged,
         "hat_count":      len(hats),
-        "hat_js_fallback": instance.hat_js_fallback,
-        "hat_js_last_err": instance.hat_js_last_err,
-        "buffer_rev":     instance.buffer.rev,
-        "scroll_offset":  instance.viewport.get_scroll_offset(),
+        "hat_js_fallback": instance.state.hat_js_fallback,
+        "hat_js_last_err": instance.state.hat_js_last_err,
+        "buffer_rev":     instance.state.buffer.rev,
+        "scroll_offset":  instance.runtime.viewport.get_scroll_offset(),
         "hints_hidden":   dm._hints_hidden_by_overflow,
-        "target_window":  instance.target_window_title,
-        "flash":          list(instance.flash_state.get("indices", [])),
-        "flash_color":    instance.flash_state.get("color", ""),
+        "target_window":  instance.state.target_window_title,
+        "flash":          list(instance.state.flash_state.get("indices", [])),
+        "flash_color":    instance.state.flash_state.get("color", ""),
         # ------------------------------------------------------------------
         # Lossless-snapshot additions (2026-07-01, S9-motivated).
         # Field ORDER: strictly appended after the historical keys above so
@@ -189,7 +189,7 @@ def _snapshot() -> dict:
         "homophone_panel_alts":         homophone_panel_alts_field,
         "next_alt_assignments":         next_alt_assignments_field,
         "position_assignments":         position_assignments_field,
-        "help_page":                    instance.help_page,
+        "help_page":                    instance.state.help_page,
         "viewport_anchor_position":     anchor_position_field,
         "viewport_anchor_rect_summary": anchor_rect_field,
         "homophone_shapes_setting":     _get_setting("user.prose_overlay_homophone_shapes"),

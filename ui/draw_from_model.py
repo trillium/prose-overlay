@@ -1,6 +1,13 @@
 """LayoutModel-consuming paint path — Move 4e Commit 2 (side-by-side).
 
-This module ships a NEW paint entrypoint ``draw_from_model(canvas,
+Move 5 update: the token/cursor portion of this module now routes
+through ``ui/paint_ops.py``. ``draw_from_model`` builds a
+``list[PaintOp]`` via ``to_paint_ops(model)`` and hands it to
+``execute(ops, canvas)``. Panel frame + overlay close hint stay direct
+(rounded rects + helper-composed hint — see ``paint_ops.py`` module
+docstring "Scope for Move 5" for rationale).
+
+This module ships a paint entrypoint ``draw_from_model(canvas,
 overlay, model)`` that reads a fully-baked ``LayoutModel`` and paints
 from it. It exists side-by-side with the existing paint code
 (``ui/draw_tokens.py:_draw_token_rows``, ``ui/draw_panels.py:
@@ -33,15 +40,20 @@ What this paint path draws
 
 The minimal-parity path draws:
 
-1. Panel frame (fallback-color-aware).
-2. Overlay close hint (via ``overlay.draw_close_hint``).
-3. When ``model.tokens`` is empty AND ``model.cursor`` is set: the
-   "listening..." placeholder text.
-4. Per-token text (no hats, no shapes, no underlines — those live in
-   ``TokenLayout.hat`` / ``.shape`` / ``.underline_segments`` and can
-   be wired in a follow-up sub-move by walking each ``TokenLayout``
-   field).
-5. Cursor line (from ``model.cursor``).
+1. Panel frame (fallback-color-aware) — direct via ``draw_panel_frame``
+   because rounded corners are not modelable via ``RectOp``.
+2. Overlay close hint (via ``overlay.draw_close_hint``) — direct
+   because the helper composes text + X-mark lines internally.
+3. Routed through the PaintOp pipeline (``to_paint_ops`` +
+   ``execute``, Move 5):
+     a. When ``model.tokens`` is empty AND ``model.cursor`` is set: the
+        "listening..." placeholder text.
+     b. Per-token text (no hats, no shapes, no underlines — those live
+        in ``TokenLayout.hat`` / ``.shape`` / ``.underline_segments`` and
+        can be wired in a follow-up sub-move by walking each
+        ``TokenLayout`` field and emitting the corresponding ops).
+     c. Cursor line and (in change-mode) the amber insertion zone
+        (from ``model.cursor``).
 
 Deliberately NOT drawn in this minimal path:
 
@@ -81,20 +93,11 @@ from ..internal.draw_constants import (
     BG_COLOR_FALLBACK,
     BORDER_COLOR,
     BORDER_COLOR_FALLBACK,
-    CURSOR_CHANGE_ZONE_ALPHA,
-    CURSOR_CHANGE_ZONE_WIDTH,
-    CURSOR_COLOR_CHANGE,
-    CURSOR_COLOR_NAVIGATE,
-    CURSOR_WIDTH,
-    DOT_GAP_Y,
-    DOT_RADIUS,
-    LISTENING_COLOR,
     PANEL_PAD,
     PANEL_RADIUS,
-    TOKEN_COLOR,
-    TOKEN_FONT_SIZE,
 )
 from .layout import LayoutModel
+from .paint_ops import execute, to_paint_ops
 
 
 def draw_from_model(
@@ -120,73 +123,29 @@ def draw_from_model(
     if panel_rect.width <= 0 or panel_rect.height <= 0:
         return panel_rect
 
-    # --- Panel frame ---
+    # --- Panel frame (direct — rounded corners stay outside PaintOps) ---
+    # Rounded rects require a Skia Path. Introducing a RoundedRectOp is
+    # scope creep for Move 5; the frame stays through draw_panel_frame.
+    # See ui/paint_ops.py module docstring "Scope for Move 5".
     c.paint.typeface = "Menlo"
     bg = BG_COLOR_FALLBACK if model.using_fallback else BG_COLOR
     border = BORDER_COLOR_FALLBACK if model.using_fallback else BORDER_COLOR
     draw_panel_frame(c, panel_rect, PANEL_RADIUS, bg, border)
+
+    # --- Close hint (direct — helper composes text + X-mark lines) ---
+    # overlay.draw_close_hint calls Skia internally to paint text plus
+    # two line segments in one call. Expressing that as PaintOps would
+    # require pulling overlay_kit internals into the pure builder; the
+    # hint stays direct.
     overlay.draw_close_hint(
         c, panel_rect.x, panel_rect.y, panel_rect.width, PANEL_PAD
     )
 
-    # --- Listening placeholder for the empty-buffer case ---
-    # Matches ui/draw.py lines 149-166: when the buffer is empty AND a
-    # cursor is set at 0, paint the "listening..." text plus the cursor.
-    if not model.tokens:
-        c.paint.textsize = TOKEN_FONT_SIZE
-        c.paint.color = LISTENING_COLOR
-        # Same y anchor draw_overlay uses: content_area.y + hat band +
-        # font size. The model's content_area already carries the padded
-        # origin; text baseline sits at content_area.y + (DOT_RADIUS *
-        # 2) + DOT_GAP_Y + TOKEN_FONT_SIZE.
-        text_y = model.content_area.y + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE
-        c.draw_text("listening...", model.content_area.x, text_y)
-    else:
-        # --- Token text ---
-        # Walk model.tokens and paint text at each token's rect. Hats /
-        # shapes / underlines / highlights are deliberately deferred to
-        # a follow-up sub-move (see module docstring).
-        c.paint.textsize = TOKEN_FONT_SIZE
-        c.paint.color = TOKEN_COLOR
-        for tok in model.tokens:
-            # Token text baseline in the paint code (see
-            # ui/draw_tokens.py:279) sits at y_base + (DOT_RADIUS*2) +
-            # DOT_GAP_Y + TOKEN_FONT_SIZE where y_base is the row's top
-            # (= TokenLayout.rect.y). The rect itself has that height
-            # baked in (see ui/layout_tokens.py:588-593).
-            baseline_y = tok.rect.y + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE
-            c.draw_text(tok.text, tok.rect.x, baseline_y)
-
-    # --- Cursor ---
-    # Model.cursor is None when the paint code should skip. blink_on is
-    # kept on the model rather than gated at composition (see
-    # ui/layout.py CursorLayout docstring); paint layer gates.
-    if model.cursor is not None and model.cursor.blink_on:
-        cursor = model.cursor
-        c.paint.style = c.paint.Style.FILL
-        if cursor.change_mode:
-            # Amber insertion-zone behind the cursor line, then the
-            # cursor line proper. Matches ui/draw_tokens.py:draw_cursor.
-            c.paint.color = CURSOR_COLOR_CHANGE[:6] + CURSOR_CHANGE_ZONE_ALPHA
-            c.draw_rect(
-                _TalonRect(
-                    cursor.rect.x + 1 - CURSOR_CHANGE_ZONE_WIDTH / 2,
-                    cursor.rect.y,
-                    CURSOR_CHANGE_ZONE_WIDTH,
-                    cursor.rect.h,
-                )
-            )
-            c.paint.color = CURSOR_COLOR_CHANGE
-        else:
-            c.paint.color = CURSOR_COLOR_NAVIGATE
-        c.draw_rect(
-            _TalonRect(
-                cursor.rect.x,
-                cursor.rect.y,
-                CURSOR_WIDTH,
-                cursor.rect.h,
-            )
-        )
+    # --- Everything else routes through the PaintOp pipeline ---
+    # Listening placeholder text, per-token text, cursor change-zone,
+    # cursor line — all emitted by to_paint_ops(model) and dispatched
+    # by execute(ops, canvas). Paint order is preserved exactly.
+    execute(to_paint_ops(model), c)
 
     return panel_rect
 

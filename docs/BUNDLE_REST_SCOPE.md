@@ -449,3 +449,21 @@ value).
 **Best single first-item to ship:** #14. Green-red diff that protects
 everything else you build on top of it, one short PR, no semantic
 decisions blocking the modifier cluster.
+
+---
+
+### §7 status log
+
+- **#14 L2 inventory grep test** — ✅ shipped commit `e29fc6a` (2026-07-01).
+  L2.6/L2.7 kept as-is (hats-bundle shape probes + 5th-arg round-trip).
+  Added L2.8 (resolver bundle: 13 must-have identifiers fail-closed) and
+  L2.9 (actions bundle: 7 shipped actions fail-closed, 6 planned actions
+  fail-informational). Ratchet: when a wishlist action ships, move its
+  entry from `ACTIONS_PLANNED` into `ACTIONS_MUST_HAVE` in the SAME PR.
+  Headless: 127 → 129 green.
+- **Next up per §7 order:** #7 OrdinalScope. Blocked on OQ2 (grammar
+  routing verification against Talon log) — needs a live Talon session
+  to confirm `<user.cursorless_target>` at
+  `prose_overlay_cursorless.talon:47` flows ordinalScope modifiers
+  through. Answering OQ2 unblocks the full modifier cluster
+  (#6, #7, #9, #10, #11).

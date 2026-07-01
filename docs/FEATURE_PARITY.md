@@ -54,6 +54,10 @@ When a row has a commit SHA or ISC reference, that's the durable record.
 | `L2.3` | bun | `proseAllocateHats(["123"])` returns hat | §2 digits get hats (JS path) |
 | `L2.4` | bun | `proseAllocateHats(["!"])` returns hat | §2 punct get hats (JS path) |
 | `L2.5` | bun | end-to-end `["testing","testing","123"]` all hatted (JS path) | §2 digit hats (full repro, JS path) |
+| `L2.6` | grep | hats bundle: shape identifiers (`frame`, `crosshairs`) + `styleName` + `proseBuildEnabledHatStyles` survive tree-shake; targets bundle: `WordScopeHandler` present | §5 shape hats (JS un-strip contract, Slice 1) |
+| `L2.7` | bun | `proseAllocateHats` accepts 5th `enabledStylesJson` arg + returns `styleName` (backward-compat + shape-enabled paths) | §5 shape hats (Slice 1 5th-arg round-trip) |
+| `L2.8` | grep | resolver bundle canonical inventory — 13 must-have identifiers (10 wishlist stages + sub-word substrate) fail-closed | wishlist item #14 (regression guard for silent tree-shake) |
+| `L2.9` | grep | actions bundle canonical inventory — 7 shipped actions fail-closed, 6 planned actions (swap / pasteAtDestination / wrap / insertCopyBefore / insertCopyAfter / reverseTargets) fail-informational | wishlist item #14 (ratchet — planned → must-have per shipping PR) |
 | `L3.1`–`L3.10` | stubbed-talon | test-driver dispatch routes commands to actions correctly | §8 test driver (all cmds: add, show, hide, dump, delete_hat, add_letters, add_chars, insert_format_code, reset, clear_buffer, bogus, malformed JSON, _pos advance, set on/off) |
 | `L4.1` | meta-audit | INTERNAL + CURSORLESS Python layers carry zero talon imports (top-level or lazy) | §3 cursorless portability (substrate ports to non-Talon environments) |
 | `L5.1`–`L5.10` | parity | `MANUAL_VERIFICATION.md` rows 1–10 Python ↔ JS resolver agree on token range output for primitive / colored-mark / extendThroughStartOf / extendThroughEndOf / bring-source / move-source target shapes | §3a, §3b, §3e, §3f (F9 default-on parity contract for actions, ranges, lists, bring/move) |

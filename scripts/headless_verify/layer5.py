@@ -966,3 +966,28 @@ def run_layer_5() -> None:
             f"L5.22 (#9): every word within document — got {js_result!r}, "
             f"expected {expected!r}"
         )
+
+    # Wishlist #6 — RelativeScope. `next word` from mark 'a' (token 1
+    # "air") with relativeScope offset=1 length=1 forward → the word
+    # after "air" = "ball" (token 2). This drives the
+    # RelativeScopeStage at bundle line 19103 through its offset-forward
+    # branch. Grammar shape from cursorless-talon's
+    # `cursorless_relative_scope_singular` capture
+    # (`~/.talon/user/cursorless-talon/src/modifiers/relative_scope.py:19-30`).
+    with test("L5", "L5.23", "wishlist #6 — `next word` from mark 'a' (relativeScope forward)"):
+        target = {
+            "type": "primitive",
+            "mark": {"type": "decoratedSymbol", "symbolColor": "default",
+                     "character": "a"},
+            "modifiers": [
+                {"type": "relativeScope", "scopeType": {"type": "word"},
+                 "offset": 1, "length": 1, "direction": "forward"},
+            ],
+        }
+        hat_entries = _build_hat_map_for_js(_STD_TOKENS, _STD_LETTERS, color="default")
+        js_result = _run_js_resolver(target, _STD_TOKENS, hat_entries, cursor_char=0)
+        expected = [(2, 2)]
+        assert js_result == expected, (
+            f"L5.23 (#6): relativeScope next word from 'a' — got "
+            f"{js_result!r}, expected {expected!r}"
+        )

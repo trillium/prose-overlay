@@ -60,6 +60,7 @@ showing the overlay (5 tokens, hats t/a/b/d/e on each token respectively).
 | 22 | #10 | `take last word` | std, cursor at end | "echo" highlighted (token 4) | | f9-22.png | |
 | 23 | #9 | `take every word` (bare) | std | Known partial: current bundle returns 1 range (containing word), not 5. See `docs/BUNDLE_REST_SCOPE.md §7 #9`. | | f9-23.png | |
 | 24 | #9 | `take every word` composed w/ file scope | std | 5 ranges, one per token | | f9-24.png | |
+| 25 | #6 | `take next word air` | std | "ball" highlighted (token 2 — the word after 'a' mark) | | f9-25.png | |
 
 (Buffer key: `std` = `the air ball drum echo` with default-color hats.)
 

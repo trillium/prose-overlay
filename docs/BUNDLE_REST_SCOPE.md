@@ -493,8 +493,8 @@ decisions blocking the modifier cluster.
   from cursor-at-end → token 4). MANUAL_VERIFICATION row 22 added.
   FEATURE_PARITY §3c row added.
 
-- **#9 every scope** — ⚠️ **partial** shipped 2026-07-01 (SHA recorded
-  when #6 commits). L5.22 added asserting the composed shape
+- **#9 every scope** — ⚠️ **partial** shipped commit `fb09e26`
+  (2026-07-01). L5.22 added asserting the composed shape
   `[everyScope word, containingScope document]` returns 5 ranges per
   the multi-range semantics. **Bundle gap uncovered**: the bare shape
   `[everyScope word]` that cursorless-talon's
@@ -514,5 +514,14 @@ decisions blocking the modifier cluster.
   gap docs. MANUAL_VERIFICATION rows 23 (bare — known partial) and 24
   (composed — 5 ranges) added.
 
-- **Next up per §7 order:** #6 RelativeScope, then #11 leading/trailing
-  (semantics degenerate on prose per OQ3 — see item shipping notes).
+- **#6 RelativeScope** — ✅ shipped 2026-07-01 (SHA recorded when #11
+  commits). Zero-grammar rebuild per OQ2=YES; `RelativeScopeStage`
+  shipped at bundle line 19103; grammar routing free because
+  `cursorless_relative_scope` is a `cursorless_modifier` variant.
+  L5.23 added (JS-only: `relativeScope offset=1 length=1 forward` from
+  mark 'a' → token 2). MANUAL_VERIFICATION row 25 added
+  (`take next word air` → "ball"). FEATURE_PARITY §3c row added.
+  Python fallback: JS-only per §Cluster C.
+
+- **Next up per §7 order:** #11 leading/trailing (semantics degenerate on
+  prose per OQ3 — see item shipping notes).

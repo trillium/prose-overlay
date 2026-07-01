@@ -1062,112 +1062,25 @@ def run_layer_1() -> None:
 
     # -----------------------------------------------------------------------
     # Slice C redesign (2026-06-30) — bubble panel placement math
-    # internal/panel_layout.py is talon-free; load it via
-    # spec_from_file_location like the other layer-1 modules.
+    # ------------------------------------------------------------------
+    # RETIRED (Step 13 of paint-pipeline retirement, 2026-07-01):
+    #   internal/panel_layout.py has been deleted; the placement math it
+    #   contained (BubbleLayout + place_bubbles) is now inline inside
+    #   ui/layout_bubbles.py (_PendingBubble + _place_bubbles). The
+    #   L1.52-L1.57 tests below have been removed because their subject
+    #   (internal.panel_layout.place_bubbles) no longer exists.
+    #   Equivalent coverage of the same placement algorithm lives in the
+    #   L1.87-L1.89 build_bubble_layouts tests which drive the same
+    #   right-shift + clamp math through the frozen ui.layout.BubbleLayout
+    #   output.
     # -----------------------------------------------------------------------
 
-    panel_layout_spec = importlib.util.spec_from_file_location(
-        "prose_overlay_panel_layout",
-        REPO / "internal" / "panel_layout.py",
-    )
-    panel_layout = importlib.util.module_from_spec(panel_layout_spec)
-    panel_layout_spec.loader.exec_module(panel_layout)
-    BubbleLayout = panel_layout.BubbleLayout
-    place_bubbles = panel_layout.place_bubbles
-
-    with test("L1", "L1.52", "place_bubbles: non-colliding bubbles keep their ideal_x (horizontal-only)"):
-        # Three bubbles spaced wider than BUBBLE_OUTER_GAP apart → all
-        # sit at their requested ideal_x with no shift. v2 contract:
-        # single horizontal row; no vertical band wrap.
-        bs = [
-            BubbleLayout(ideal_x=100.0, bubble_w=50.0),
-            BubbleLayout(ideal_x=180.0, bubble_w=50.0),
-            BubbleLayout(ideal_x=260.0, bubble_w=50.0),
-        ]
-        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
-        assert [b.band for b in bs] == [0, 0, 0], (
-            f"v2 always band 0; got {[b.band for b in bs]}"
-        )
-        assert bs[0].x == 100.0 and bs[1].x == 180.0 and bs[2].x == 260.0, (
-            f"expected ideal_x preserved; got {[b.x for b in bs]}"
-        )
-
-    with test("L1", "L1.53", "place_bubbles: overlapping pair shifts the second RIGHT (no vertical wrap)"):
-        # Two bubbles whose ideal x positions sit within OUTER_GAP of
-        # each other. v2 contract: the second shifts RIGHT to
-        # `prev_right + outer_gap`, not down a band. Preserves
-        # horizontal order at the cost of moving the bubble away from
-        # its token's center.
-        bs = [
-            BubbleLayout(ideal_x=100.0, bubble_w=50.0),  # right edge 150
-            BubbleLayout(ideal_x=110.0, bubble_w=50.0),  # collides → shift to 158
-        ]
-        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
-        assert bs[0].band == 0 and bs[1].band == 0, (
-            f"v2 single band; got {[b.band for b in bs]}"
-        )
-        assert bs[0].x == 100.0, f"first bubble untouched; got {bs[0].x}"
-        # Second sits at first.right + outer_gap = 150 + 8 = 158.
-        assert bs[1].x == 158.0, f"expected shift to 158; got {bs[1].x}"
-
-    with test("L1", "L1.54", "place_bubbles: ideal_x below x_origin soft-clamps to x_origin"):
-        # A bubble whose ideal_x would underflow the panel margin sticks
-        # at x_origin. Prevents a wide bubble centered on a token near
-        # the panel's left edge from disappearing past the margin.
-        bs = [BubbleLayout(ideal_x=80.0, bubble_w=50.0)]
-        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
-        assert bs[0].x == 100.0, f"expected clamp to 100; got {bs[0].x}"
-        assert bs[0].band == 0
-
-    with test("L1", "L1.55", "place_bubbles: triple-collision ratchets right (no vertical wrap)"):
-        # Three bubbles whose ideal positions all sit within OUTER_GAP
-        # of each other. v2 contract: each successive bubble shifts to
-        # the previous one's right edge + outer_gap. The third may end
-        # up far past its token's center but is still on the single
-        # horizontal row.
-        bs = [
-            BubbleLayout(ideal_x=100.0, bubble_w=50.0),  # right edge 150
-            BubbleLayout(ideal_x=105.0, bubble_w=50.0),  # → 158, right edge 208
-            BubbleLayout(ideal_x=110.0, bubble_w=50.0),  # → 216, right edge 266
-        ]
-        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
-        assert [b.band for b in bs] == [0, 0, 0], (
-            f"v2 single band; got {[b.band for b in bs]}"
-        )
-        assert [b.x for b in bs] == [100.0, 158.0, 216.0], (
-            f"expected right-shift cascade; got {[b.x for b in bs]}"
-        )
-
-    with test("L1", "L1.56", "place_bubbles: separated bubble after shift keeps its ideal_x"):
-        # b0 sits at x=100 (right edge 150), b1 collides with b0 and
-        # shifts right to 158 (right edge 188), b2 sits at 200 which
-        # is past b1.right + outer_gap (188 + 8 = 196), so b2 stays
-        # at its ideal_x. Verifies the placer doesn't over-shift once
-        # the path is clear.
-        bs = [
-            BubbleLayout(ideal_x=100.0, bubble_w=50.0),  # untouched
-            BubbleLayout(ideal_x=110.0, bubble_w=30.0),  # shift to 158
-            BubbleLayout(ideal_x=200.0, bubble_w=50.0),  # past 196, keep
-        ]
-        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
-        assert [b.band for b in bs] == [0, 0, 0], (
-            f"v2 single band; got {[b.band for b in bs]}"
-        )
-        assert bs[0].x == 100.0
-        assert bs[1].x == 158.0, f"expected shift to 158; got {bs[1].x}"
-        assert bs[2].x == 200.0, f"expected ideal_x preserved; got {bs[2].x}"
-
-    with test("L1", "L1.57", "place_bubbles: clamp-then-shift composes correctly"):
-        # b0's ideal_x underflows x_origin AND b1 collides with the
-        # clamped b0. Verifies that the right-shift uses the CLAMPED
-        # position as the basis, not the raw ideal_x.
-        bs = [
-            BubbleLayout(ideal_x=80.0, bubble_w=50.0),   # clamped to 100, right 150
-            BubbleLayout(ideal_x=120.0, bubble_w=30.0),  # collides → shift to 158
-        ]
-        place_bubbles(bs, x_origin=100.0, outer_gap=8.0)
-        assert bs[0].x == 100.0
-        assert bs[1].x == 158.0, f"expected shift to 158 (post-clamp basis); got {bs[1].x}"
+    with test("L1", "L1.52", "place_bubbles: RETIRED (Step 13) — coverage in L1.87-L1.89 build_bubble_layouts"):
+        # Placeholder — retired with internal/panel_layout.py in Step 13
+        # of the paint-pipeline retirement. Equivalent placement-algebra
+        # coverage lives in L1.87-L1.89 which drive the same right-shift +
+        # clamp math via ui/layout_bubbles.py:build_bubble_layouts.
+        pass
 
     with test("L1", "L1.49", "compute_panel_alts: unflagged or no-shape tokens are skipped"):
         # An unflagged token (not in `flagged`) MUST NOT appear in the
@@ -2528,30 +2441,20 @@ def run_layer_1() -> None:
     with test(
         "L1",
         "L1.89",
-        "build_bubble_layouts: returns frozen ui.layout.BubbleLayout (not internal.panel_layout.BubbleLayout)",
+        "build_bubble_layouts: returns frozen ui.layout.BubbleLayout",
     ):
         # Type-identity contract: the builder's output MUST be instances
-        # of ui.layout.BubbleLayout. internal/panel_layout.py has its own
-        # class of the same NAME but different shape (mutable __slots__).
-        # A downstream renderer relies on the ui.layout paint-record
-        # fields (token_idx, x, y, w, h, shape_scale, band, ...);
-        # accidentally returning the placement-scratchpad type would
-        # AttributeError at paint time. Lock that in here.
+        # of ui.layout.BubbleLayout — a frozen dataclass. Downstream
+        # renderers rely on the paint-record fields (token_idx, x, y, w,
+        # h, shape_scale, band, ...); accidentally returning the
+        # placement-scratchpad type would AttributeError at paint time.
+        #
+        # Step 13 of paint retirement: internal/panel_layout.py has been
+        # deleted. The scratchpad type (_PendingBubble in
+        # ui/layout_bubbles.py) is now private to the builder and never
+        # leaks out. The type-identity check reduces to a frozen-check
+        # + module-name assertion — no need to load a separate module.
         import dataclasses as _dc2
-        # Also load the internal.panel_layout module and verify the two
-        # classes are DIFFERENT identities (regression guard against a
-        # future consolidation move accidentally colliding them).
-        pl_spec = importlib.util.spec_from_file_location(
-            "prose_overlay_panel_layout_types",
-            REPO / "internal" / "panel_layout.py",
-        )
-        pl_mod = importlib.util.module_from_spec(pl_spec)
-        pl_spec.loader.exec_module(pl_mod)
-        assert layout_mod_lt.BubbleLayout is not pl_mod.BubbleLayout, (
-            "ui.layout.BubbleLayout and internal.panel_layout.BubbleLayout "
-            "are still separate types — a consolidation move landed but "
-            "this test wasn't updated. Update this test after consolidation."
-        )
         st = _BubbleStateStub(
             panel_alts={0: {"yellow": "their"}},
             shape={0: "wing"},

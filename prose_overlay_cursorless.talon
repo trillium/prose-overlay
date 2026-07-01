@@ -101,47 +101,6 @@ change tail <user.letter>: user.prose_overlay_change_tail_hat(letter)
 change tail <user.prose_hat_color> <user.letter>:
     user.prose_overlay_change_tail_hat(letter, prose_hat_color)
 
-# ===========================================================================
-# Bring -- copy src token to dst position (replace dst with src value)
-# All four permutations of optional color prefix on src and dst.
-# ===========================================================================
-
-# Neither hat has a color prefix (both default to gray)
-bring <user.letter> to <user.letter>:
-    user.prose_overlay_bring_hat_to_hat(letter_1, "gray", letter_2, "gray")
-
-# Only source has a color prefix
-bring <user.prose_hat_color> <user.letter> to <user.letter>:
-    user.prose_overlay_bring_hat_to_hat(letter_1, prose_hat_color, letter_2, "gray")
-
-# Only destination has a color prefix
-bring <user.letter> to <user.prose_hat_color> <user.letter>:
-    user.prose_overlay_bring_hat_to_hat(letter_1, "gray", letter_2, prose_hat_color)
-
-# Both hats have color prefixes
-bring <user.prose_hat_color> <user.letter> to <user.prose_hat_color> <user.letter>:
-    user.prose_overlay_bring_hat_to_hat(letter_1, prose_hat_color_1, letter_2, prose_hat_color_2)
-
-# ===========================================================================
-# Move -- cut src token and replace dst with it
-# All four permutations of optional color prefix on src and dst.
-# ===========================================================================
-
-# Neither hat has a color prefix (both default to gray)
-move <user.letter> to <user.letter>:
-    user.prose_overlay_move_hat_to_hat(letter_1, "gray", letter_2, "gray")
-
-# Only source has a color prefix
-move <user.prose_hat_color> <user.letter> to <user.letter>:
-    user.prose_overlay_move_hat_to_hat(letter_1, prose_hat_color, letter_2, "gray")
-
-# Only destination has a color prefix
-move <user.letter> to <user.prose_hat_color> <user.letter>:
-    user.prose_overlay_move_hat_to_hat(letter_1, "gray", letter_2, prose_hat_color)
-
-# Both hats have color prefixes
-move <user.prose_hat_color> <user.letter> to <user.prose_hat_color> <user.letter>:
-    user.prose_overlay_move_hat_to_hat(letter_1, prose_hat_color_1, letter_2, prose_hat_color_2)
 
 # ===========================================================================
 # Cursor jumps -- beginning / end of buffer

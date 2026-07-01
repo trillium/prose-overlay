@@ -109,4 +109,4 @@ Buffer: their                   [single undo step]
 - Panel render: `ui/draw_panels.py:draw_homophone_panels`
 - Spec: `docs/PHONES_SPEC.md`
 - ISCs: ISC-14d (PHONES_SPEC slices A, B, C all shipped)
-- Related: [`homophone_shapes.md`](homophone_shapes.md), [`undo_redo.md`](undo_redo.md)
+- Related: [`homophone_shapes.md`](homophone_shapes.md), [`homophone_underline.md`](homophone_underline.md). (An `undo_redo.md` page is planned but not yet written — the undo commands themselves are described here and in `overlay undo` docstrings.)

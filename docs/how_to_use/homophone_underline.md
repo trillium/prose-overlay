@@ -67,8 +67,8 @@ You: overlay hints homo on
 
 - Constants: `internal/draw_constants.py` — `HOMOPHONE_UNDERLINE_*`
 - Render: `ui/draw_tokens.py` (underline paint block)
-- Setting: `user.prose_overlay_homophone_hint` (default `True`); runtime flag in `prose_overlay.py`
+- Setting: `user.prose_overlay_homophone_hint` (default `True`); runtime flag lives on the `internal.homophones` module (see `set_hint_enabled` / `hint_enabled`); the voice toggle handler is `ui/actions_visibility.py:prose_overlay_set_homophone_hint`
 - Position lookup: `internal/homophones.py:current_position_in_group`
 - Plan: `docs/HOMOPHONE_UI_PLAN.md` (Slice A — kept after first-paint user verdict)
-- ISCs: ISC-11 (underline shipped), ISC-12 (segmented variant — PHONES_SPEC Slice A / ISC-14d-A)
+- ISCs: ISC-11 (underline shipped), ISC-12 (`overlay hints homo on/off` voice toggle). The segmented variant is under ISC-14d-A (PHONES_SPEC Slice A) — NOT ISC-12.
 - Related: [`homophone_shapes.md`](homophone_shapes.md), [`phones.md`](phones.md)

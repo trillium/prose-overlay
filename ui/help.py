@@ -139,6 +139,24 @@ def draw_help_panel(
 
     Returns the help panel Rect for click-outside detection, or None if
     page_index is out of range.
+
+    Step 9 of the paint-pipeline retirement — entry rows are now emitted
+    via ``ui/paint_ops.py:to_help_pager_entry_ops`` and dispatched
+    through ``paint_ops.execute``. The pager panel frame, title row,
+    section headers, footer separator, and footer nav still paint
+    directly because:
+
+      * Panel frame — ``draw_panel_frame`` composes bg + border in one
+        Skia Path helper.
+      * Title + section headers — need ``c.paint.font.embolden = True``
+        which isn't expressible on ``TextOp`` today.
+      * Footer nav — needs runtime ``c.paint.measure_text`` for each
+        segment's x placement.
+
+    Row-body content (two-column entry rows) IS emitted via ops. Title,
+    section headers, and footer stay direct until (a) TextOp grows an
+    ``embolden`` field and (b) the ops pipeline supports
+    measurement-dependent x placement. Both are follow-up moves.
     """
     if page_index < 0 or page_index >= len(HELP_PAGES):
         return None
@@ -170,7 +188,9 @@ def draw_help_panel(
     draw_panel_frame(c, panel_rect, PANEL_RADIUS, BG_COLOR, BORDER_COLOR)
 
     max_content_w = panel_w - PANEL_PAD * 2
-    cmd_col_w = max_content_w * 0.55
+    # cmd_col_w now lives inside ui/paint_ops.py:to_help_pager_entry_ops
+    # (same 0.55 factor). Kept here only in the mental model — the ops
+    # helper computes it from pager_x / pager_w.
     cx = panel_x + PANEL_PAD
     cy = panel_y + PANEL_PAD
 
@@ -194,13 +214,36 @@ def draw_help_panel(
             c.paint.font.embolden = False
             cy += HINT_FONT_SIZE + 4
         else:
-            cmd, desc = entry
+            # Advance cy in sync with hint_row_h so subsequent section
+            # headers land at the same y they would under the sequential
+            # paint. Entry rows are emitted from ops below.
             cy += hint_row_h
-            c.paint.textsize = HINT_FONT_SIZE
-            c.paint.color = HINT_CMD_COLOR
-            c.draw_text(cmd, cx, cy)
-            c.paint.color = HINT_COLOR
-            c.draw_text(desc, cx + cmd_col_w, cy)
+
+    # Entry rows via ops pipeline (Step 9 of paint-pipeline retirement).
+    # ``build_help_layout`` walks HELP_PAGES with the same row-height
+    # math used above (via ``_row_heights`` inside the builder), so
+    # entry-row y coords match the sequential-paint version to the
+    # pixel. Hand the resulting HelpLayout to
+    # ``to_help_pager_entry_ops`` for TextOp emission and dispatch via
+    # ``paint_ops.execute``.
+    from types import SimpleNamespace
+    from .layout import Rect as _LayoutRect
+    from .layout_help_cursor import build_help_layout
+    from .paint_ops import execute as _execute
+    from .paint_ops import to_help_pager_entry_ops
+    help_state = SimpleNamespace(help_visible=True, help_page=page_index)
+    help_layout = build_help_layout(
+        help_state,
+        panel_rect=_LayoutRect(
+            x=main_rect.x, y=main_rect.y,
+            w=main_rect.width, h=main_rect.height,
+        ),
+        hint_font_size=HINT_FONT_SIZE,
+        help_panel_gap=float(HELP_PANEL_GAP),
+    )
+    if help_layout is not None:
+        entry_ops = to_help_pager_entry_ops(help_layout, panel_x, panel_w)
+        _execute(entry_ops, c)
 
     # Separator above navigation footer
     sep_y = panel_y + panel_h - PANEL_PAD - footer_h - sep_gap / 2

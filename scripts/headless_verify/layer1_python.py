@@ -1727,3 +1727,356 @@ def run_layer_1() -> None:
             f"left_chip wire form should be a JSON array; got "
             f"{actual['bubbles'][0]['left_chip']!r}"
         )
+
+    # -----------------------------------------------------------------------
+    # Move 4a (per-token layout builder) — ui/layout_tokens.py
+    # Pure builder that turns a state snapshot + measured widths into a
+    # list of TokenLayout records. No consumers yet (Move 4e wires it into
+    # a full layout(state, canvas) composition). These tests lock in the
+    # extraction: row wrap, hat/shape/underline geometry, determinism,
+    # and the max_visible_rows viewport trim.
+    # -----------------------------------------------------------------------
+
+    # Load ui/layout_tokens.py under a synthetic package tree so its
+    # relative imports (`from ..internal.draw_constants import ...` and
+    # `from .layout import ...`) resolve without pulling talon in.
+    # Same trick the shape_bridge and debug L1 tests use above.
+    import types as _types_lt
+    _lt_pkg = _types_lt.ModuleType("po_lt_pkg")
+    _lt_pkg.__path__ = []
+    _lt_internal_pkg = _types_lt.ModuleType("po_lt_pkg.internal")
+    _lt_internal_pkg.__path__ = []
+    _lt_ui_pkg = _types_lt.ModuleType("po_lt_pkg.ui")
+    _lt_ui_pkg.__path__ = []
+    _sys.modules["po_lt_pkg"] = _lt_pkg
+    _sys.modules["po_lt_pkg.internal"] = _lt_internal_pkg
+    _sys.modules["po_lt_pkg.ui"] = _lt_ui_pkg
+
+    # Constants module — used by layout_tokens for the geometry constants.
+    dc_spec_lt = importlib.util.spec_from_file_location(
+        "po_lt_pkg.internal.draw_constants",
+        REPO / "internal" / "draw_constants.py",
+    )
+    dc_mod_lt = importlib.util.module_from_spec(dc_spec_lt)
+    _sys.modules["po_lt_pkg.internal.draw_constants"] = dc_mod_lt
+    dc_spec_lt.loader.exec_module(dc_mod_lt)
+
+    # ui/layout.py — the dataclass tree, imported by layout_tokens.
+    layout_spec_lt = importlib.util.spec_from_file_location(
+        "po_lt_pkg.ui.layout",
+        REPO / "ui" / "layout.py",
+    )
+    layout_mod_lt = importlib.util.module_from_spec(layout_spec_lt)
+    _sys.modules["po_lt_pkg.ui.layout"] = layout_mod_lt
+    layout_spec_lt.loader.exec_module(layout_mod_lt)
+
+    # ui/layout_tokens.py — the builder under test.
+    lt_spec = importlib.util.spec_from_file_location(
+        "po_lt_pkg.ui.layout_tokens",
+        REPO / "ui" / "layout_tokens.py",
+    )
+    lt_mod = importlib.util.module_from_spec(lt_spec)
+    _sys.modules["po_lt_pkg.ui.layout_tokens"] = lt_mod
+    lt_spec.loader.exec_module(lt_mod)
+
+    # Alias for concision — L1 test bodies below use `_build` heavily.
+    _build = lt_mod.build_token_layouts
+    _DC = dc_mod_lt
+    _LTL = layout_mod_lt
+
+    # Tiny state stub — layout_tokens only reads .shape_assignments and
+    # .position_assignments. A dataclass-equal-ish object suffices.
+    class _StateStub:
+        def __init__(self, shape=None, position=None):
+            self.shape_assignments = shape or {}
+            self.position_assignments = position or {}
+
+    with test("L1", "L1.67", "build_token_layouts([]) → []"):
+        # Empty tokens list returns empty list, no rows, no exceptions.
+        # Locks the fast-path guard at the top of the builder.
+        out = _build(
+            _StateStub(),
+            tokens=[],
+            token_widths=[],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=100.0,
+        )
+        assert out == [], f"expected [] for no tokens; got {out!r}"
+
+    with test("L1", "L1.68", "single unflagged token, no hat_assignments → default alphabetic hat"):
+        # draw_tokens.py's `has_hat` fallback: when hat_assignments is None,
+        # idx < len(HAT_ALPHABET) gets a hat with letter=HAT_ALPHABET[idx]
+        # on char 0. Builder must mirror that so drop-in replacement is
+        # faithful. Token 0 = "foo" with no state → gray hat on 'a' (the
+        # HAT_ALPHABET[0]), because that's what today's paint code does.
+        out = _build(
+            _StateStub(),
+            tokens=["foo"],
+            token_widths=[24.0],
+            x_origin=10.0,
+            y_start=20.0,
+            max_row_w=1000.0,
+        )
+        assert len(out) == 1, f"expected 1 layout, got {len(out)}"
+        tok = out[0]
+        assert tok.index == 0 and tok.text == "foo"
+        assert tok.flagged is False and tok.underline_segments == []
+        assert tok.shape is None, "shape_enabled defaulted off"
+        assert tok.hat is not None, "default alphabetic hat should fire when hat_assignments is None"
+        assert tok.hat.letter == "a", f"HAT_ALPHABET[0]='a' expected; got {tok.hat.letter!r}"
+        assert tok.hat.char_index == 0
+        assert tok.hat.color == "gray"
+
+    with test("L1", "L1.69", "hat_assignments explicit → HatMark reflects it"):
+        # When the caller passes an explicit hat_assignments dict, the
+        # HatMark must use its (char_index, letter, color) directly.
+        # Absent entry → no hat, even if idx < len(HAT_ALPHABET). This
+        # mirrors draw_tokens.py's `assignment is not None` branch.
+        out = _build(
+            _StateStub(),
+            tokens=["there", "foo"],
+            token_widths=[30.0, 20.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            hat_assignments={0: (1, "h", "blue")},
+        )
+        assert len(out) == 2
+        assert out[0].hat is not None
+        assert out[0].hat.char_index == 1
+        assert out[0].hat.letter == "h"
+        assert out[0].hat.color == "blue"
+        assert out[1].hat is None, (
+            "token 1 has no entry in hat_assignments; expected no hat "
+            f"(got {out[1].hat!r})"
+        )
+
+    with test("L1", "L1.70", "two tokens on one row: x advances by tw + TOKEN_GAP_X"):
+        # Row wrap sanity — when both tokens fit under max_row_w they land
+        # on the same row and the second one's x is
+        # x_origin + tw0 + TOKEN_GAP_X. y stays at y_start for row 0.
+        out = _build(
+            _StateStub(),
+            tokens=["a", "b"],
+            token_widths=[10.0, 15.0],
+            x_origin=100.0,
+            y_start=200.0,
+            max_row_w=1000.0,
+        )
+        assert len(out) == 2
+        assert out[0].rect.x == 100.0 and out[0].rect.y == 200.0
+        expected_x1 = 100.0 + 10.0 + _DC.TOKEN_GAP_X
+        assert out[1].rect.x == expected_x1, (
+            f"row-2 x should be x_origin+tw0+TOKEN_GAP_X={expected_x1}; "
+            f"got {out[1].rect.x}"
+        )
+        assert out[1].rect.y == 200.0, "still on row 0; y unchanged"
+
+    with test("L1", "L1.71", "wrap: three tokens into two rows; row-2 y advances by LINE_HEIGHT"):
+        # Row wrap under a narrow max_row_w. Tokens with tw=40 each and
+        # TOKEN_GAP_X between: 40 + 5 + 40 = 85 fits in max_row_w=100 for
+        # row 1; a third token pushes over. Row-2 token gets y = y_start
+        # + LINE_HEIGHT.
+        out = _build(
+            _StateStub(),
+            tokens=["aa", "bb", "cc"],
+            token_widths=[40.0, 40.0, 40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=100.0,
+        )
+        assert len(out) == 3
+        # Row 0: tokens 0 and 1 sit on y = 0
+        assert out[0].rect.y == 0.0 and out[1].rect.y == 0.0
+        # Row 1: token 2 sits on y = LINE_HEIGHT and starts back at x_origin
+        assert out[2].rect.y == float(_DC.LINE_HEIGHT), (
+            f"row-2 y should be LINE_HEIGHT={_DC.LINE_HEIGHT}; got {out[2].rect.y}"
+        )
+        assert out[2].rect.x == 0.0, "row-2 first token restarts at x_origin"
+
+    with test("L1", "L1.72", "flagged token, group_size 3 → 3 underline segments; active at pos"):
+        # position_assignments = {0: (2, 3)} → 3 segments, active is idx 2
+        # (the last). tw large enough that each segment stays >= MIN.
+        st = _StateStub(position={0: (2, 3)})
+        out = _build(
+            st,
+            tokens=["their"],
+            token_widths=[60.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            flagged_indices={0},
+        )
+        assert len(out) == 1
+        segs = out[0].underline_segments
+        assert len(segs) == 3, f"expected 3 segments; got {len(segs)}"
+        # Segment 2 must be the active one; segments 0 and 1 inactive.
+        assert segs[0].active is False
+        assert segs[1].active is False
+        assert segs[2].active is True
+        # Active alpha vs inactive alpha suffix
+        assert segs[2].color.endswith(_DC.HOMOPHONE_UNDERLINE_ACTIVE_ALPHA)
+        assert segs[0].color.endswith(_DC.HOMOPHONE_UNDERLINE_INACTIVE_ALPHA)
+        assert out[0].flagged is True
+
+    with test("L1", "L1.73", "flagged token with too-narrow segments → solid fallback"):
+        # A very narrow token where each segment would be
+        # < HOMOPHONE_UNDERLINE_MIN_SEGMENT_W. Builder must fall back to
+        # a single solid underline (matching draw_tokens.py's fallback).
+        # With group_size=5 and tw=2 the segment width is negative — well
+        # under MIN. Result: one segment spanning full tw at the solid
+        # HOMOPHONE_UNDERLINE_COLOR (no alpha rewrite).
+        st = _StateStub(position={0: (0, 5)})
+        out = _build(
+            st,
+            tokens=["x"],
+            token_widths=[2.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            flagged_indices={0},
+        )
+        assert len(out) == 1
+        segs = out[0].underline_segments
+        assert len(segs) == 1, f"expected solid fallback (1 segment); got {len(segs)}"
+        assert segs[0].color == _DC.HOMOPHONE_UNDERLINE_COLOR
+        assert segs[0].x0 == 0.0 and segs[0].x1 == 2.0
+
+    with test("L1", "L1.74", "flagged token, group_size 1 → solid, not segmented"):
+        # Degenerate 1-member row: draw_tokens.py's use_segmented gate is
+        # `pos[1] > 1`. Builder must emit ONE solid segment, no
+        # segmentation logic. Mirror the OQ4 degeneracy handling.
+        st = _StateStub(position={0: (0, 1)})
+        out = _build(
+            st,
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            flagged_indices={0},
+        )
+        assert len(out) == 1
+        segs = out[0].underline_segments
+        assert len(segs) == 1
+        assert segs[0].color == _DC.HOMOPHONE_UNDERLINE_COLOR
+        assert segs[0].active is False
+
+    with test("L1", "L1.75", "shape_enabled + assignment + hat → ShapeMark on DIFFERENT char than hat"):
+        # Per shim.shapes.shape_char_position: letter_char_idx=1,
+        # token_len=5 → shape_char_idx = (1+1) % 5 = 2. So for "there"
+        # with hat on idx 1, the shape lands on idx 2. HatMark and
+        # ShapeMark must carry those distinct char indexes.
+        st = _StateStub(shape={0: "wing"})
+        # per_char_widths keeps hat & shape centers deterministic and
+        # exact (avoids the proportional-fallback estimate).
+        # token "there" = 5 chars, 40 px total; 8 px per char.
+        pcw = {0: [0.0, 8.0, 16.0, 24.0, 32.0, 40.0]}
+        out = _build(
+            st,
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=100.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            shape_enabled=True,
+            hat_assignments={0: (1, "h", "gray")},
+            per_char_widths=pcw,
+        )
+        assert len(out) == 1
+        tok = out[0]
+        assert tok.hat is not None and tok.hat.char_index == 1
+        assert tok.shape is not None, "shape_enabled + assignment → ShapeMark expected"
+        # The shape SVG anchors at (cx, cy); the position rect wraps it in
+        # a 2*DOT_RADIUS square centered on the anchor. So cx = x + prefix
+        # + char_w/2. For char_idx=2 the prefix width is 16, char width 8:
+        # cx = 100 + 16 + 4 = 120.
+        assert tok.shape.position.x == 120.0 - _DC.DOT_RADIUS, (
+            f"shape rect x should center at cx=120; got x={tok.shape.position.x}"
+        )
+        assert tok.shape.scale == _DC.HOMOPHONE_SHAPE_SCALE
+        assert tok.shape.color == _DC.HOMOPHONE_SHAPE_COLOR_HEX
+        # Hat cx for char_idx=1: prefix=8, char_w=8, cx = 100 + 8 + 4 = 112.
+        assert tok.hat.position.x == 112.0 - _DC.DOT_RADIUS
+
+    with test("L1", "L1.76", "determinism: identical inputs → dataclass-equal output"):
+        # Frozen dataclasses compare structurally. Two calls with byte-equal
+        # inputs must produce byte-equal outputs. Guards against accidental
+        # dict-iteration order dependence or per-call state creep.
+        st = _StateStub(
+            shape={0: "wing", 1: "frame"},
+            position={0: (0, 2), 1: (1, 2)},
+        )
+        args = dict(
+            tokens=["there", "their"],
+            token_widths=[40.0, 40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            flagged_indices={0, 1},
+            shape_enabled=True,
+            hat_assignments={0: (0, "t", "gray"), 1: (0, "t", "blue")},
+        )
+        out1 = _build(st, **args)
+        out2 = _build(st, **args)
+        assert out1 == out2, "identical inputs produced non-equal outputs — builder is not deterministic"
+
+    with test("L1", "L1.77", "max_visible_rows trims from the TOP; only last N rows survive"):
+        # Terminal-pinned viewport trim — matches draw_overlay's
+        # `rows = rows[len(rows) - max_visible_rows:]`. With 3 tokens
+        # each on its own row (very narrow max_row_w) and
+        # max_visible_rows=2, the FIRST token/row is trimmed. Returned
+        # list is 2 layouts (indexes 1 and 2), row-2 y is y_start (the
+        # first surviving row), row-3 y is y_start + LINE_HEIGHT.
+        out = _build(
+            _StateStub(),
+            tokens=["aa", "bb", "cc"],
+            token_widths=[40.0, 40.0, 40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=50.0,   # each token on its own row
+            max_visible_rows=2,
+        )
+        assert len(out) == 2, f"trim should leave 2 tokens; got {len(out)}"
+        # Trimmed from the top: token 0 dropped, tokens 1 and 2 remain.
+        assert out[0].index == 1 and out[1].index == 2
+        # First surviving row anchors at y_start (the trim doesn't shift
+        # coordinates upward; the top row IS y_start after trim).
+        assert out[0].rect.y == 0.0
+        assert out[1].rect.y == float(_DC.LINE_HEIGHT)
+
+    with test("L1", "L1.78", "no state mutation: state dicts unchanged after build"):
+        # Purity contract — the builder MUST NOT mutate state, tokens,
+        # token_widths, flagged_indices, hat_assignments, or
+        # per_char_widths. Snapshot copies before and compare after.
+        st = _StateStub(
+            shape={0: "wing"},
+            position={0: (0, 2)},
+        )
+        shape_before = dict(st.shape_assignments)
+        pos_before = dict(st.position_assignments)
+        tokens_arg = ["there"]
+        widths_arg = [40.0]
+        flagged_arg = {0}
+        hats_arg = {0: (1, "h", "gray")}
+        pcw_arg = {0: [0.0, 8.0, 16.0, 24.0, 32.0, 40.0]}
+        _build(
+            st,
+            tokens=tokens_arg,
+            token_widths=widths_arg,
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            flagged_indices=flagged_arg,
+            shape_enabled=True,
+            hat_assignments=hats_arg,
+            per_char_widths=pcw_arg,
+        )
+        assert st.shape_assignments == shape_before
+        assert st.position_assignments == pos_before
+        assert tokens_arg == ["there"]
+        assert widths_arg == [40.0]
+        assert flagged_arg == {0}
+        assert hats_arg == {0: (1, "h", "gray")}
+        assert pcw_arg == {0: [0.0, 8.0, 16.0, 24.0, 32.0, 40.0]}

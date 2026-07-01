@@ -234,6 +234,10 @@ class Actions:
             the Talon-side handles).
           - Doesn't clear saved preferences (~/.talon/prose_overlay_prefs.json).
           - Doesn't re-load any imported modules.
+          - Doesn't wipe persisted history at ~/.talon/prose_overlay_history.json.
+            instance.reset() re-loads the on-disk store immediately after
+            clearing in-memory, so the runtime cache stays in sync with
+            disk. To nuke persisted history, delete the file manually.
         """
         from .actions_cursor import _prose_overlay_clear_cursor
         from .actions_flash import _clear_flash

@@ -219,6 +219,93 @@ def run_layer_1() -> None:
             f"expected one token 'bubble_top'; got {b.get_tokens()!r}"
         )
 
+    # -----------------------------------------------------------------
+    # L1.12c-h — persisted history store (internal/history_persist.py)
+    # -----------------------------------------------------------------
+    # Load the module via spec_from_file_location so the test doesn't
+    # depend on prose_overlay being on sys.path as a package.
+    import tempfile
+    persist_spec = importlib.util.spec_from_file_location(
+        "prose_overlay_history_persist_test",
+        REPO / "internal" / "history_persist.py",
+    )
+    persist_mod = importlib.util.module_from_spec(persist_spec)
+    persist_spec.loader.exec_module(persist_mod)
+
+    with test("L1", "L1.12c", "history_persist.load returns [] when file missing"):
+        with tempfile.TemporaryDirectory() as td:
+            missing = pathlib.Path(td) / "does_not_exist.json"
+            assert persist_mod.load_history(missing) == []
+
+    with test("L1", "L1.12d", "history_persist round-trip preserves order + content"):
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "hist.json"
+            entries = ["one two", "three four", "five", ""]
+            # Include empty string — legitimate history entry (confirm allows
+            # empty strings? Actually no — confirm early-returns on empty text.
+            # But defensively the persist layer accepts them.)
+            persist_mod.save_history(entries, p)
+            assert p.exists(), "save should create the file"
+            back = persist_mod.load_history(p)
+            assert back == entries, f"round-trip mismatch: {back!r} != {entries!r}"
+
+    with test("L1", "L1.12e", "history_persist.save caps at HISTORY_MAX"):
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "hist.json"
+            entries = [f"entry {i}" for i in range(persist_mod.HISTORY_MAX + 20)]
+            persist_mod.save_history(entries, p)
+            back = persist_mod.load_history(p)
+            assert len(back) == persist_mod.HISTORY_MAX, (
+                f"cap not enforced: got {len(back)} entries"
+            )
+            # HEAD-cap — keep the newest entries (which are the ones at the
+            # front of the list because confirm inserts at position 0).
+            assert back == entries[:persist_mod.HISTORY_MAX], (
+                "cap should trim the tail, not the head"
+            )
+
+    with test("L1", "L1.12f", "history_persist.load handles corrupt JSON cleanly"):
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "hist.json"
+            p.write_text("{not valid json at all")
+            assert persist_mod.load_history(p) == [], (
+                "corrupt file must return [] without raising"
+            )
+
+    with test("L1", "L1.12g", "history_persist.load handles wrong schema cleanly"):
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "hist.json"
+            # Wrong shape 1 — bare list at top level.
+            p.write_text('["a", "b", "c"]')
+            assert persist_mod.load_history(p) == []
+            # Wrong shape 2 — dict without version.
+            p.write_text('{"entries": ["a", "b"]}')
+            assert persist_mod.load_history(p) == []
+            # Wrong shape 3 — future schema version.
+            p.write_text('{"version": 99, "entries": ["a"]}')
+            assert persist_mod.load_history(p) == []
+            # Wrong shape 4 — entries not a list.
+            p.write_text('{"version": 1, "entries": "oops"}')
+            assert persist_mod.load_history(p) == []
+
+    with test("L1", "L1.12h", "history_persist.load drops non-string entries defensively"):
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "hist.json"
+            p.write_text('{"version": 1, "entries": ["a", 42, "b", null, "c"]}')
+            assert persist_mod.load_history(p) == ["a", "b", "c"], (
+                "non-string entries must be dropped without failing the whole load"
+            )
+
+    with test("L1", "L1.12i", "history_persist.save is atomic — no leftover tmp on success"):
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "hist.json"
+            persist_mod.save_history(["x", "y"], p)
+            assert p.exists(), "target file should exist"
+            tmp = p.with_suffix(p.suffix + ".tmp")
+            assert not tmp.exists(), (
+                f"tmp file should have been renamed away; found {tmp}"
+            )
+
     inst_mod = _load_instance_module()
     ProseOverlayState = inst_mod.ProseOverlayState
 
@@ -251,6 +338,13 @@ def run_layer_1() -> None:
         inst.history = ["old", "stuff"]
         inst.history_page = 3
         inst._last_input_source = "letters"
+        # reset() tries `from .history_persist import load_history` which
+        # ImportErrors under this test's spec_from_file_location load (no
+        # parent package). reset()'s try/except catches it and leaves
+        # self.history = []. Same outcome as the pre-persistence build —
+        # ideal for verifying the OTHER reset fields here. The wiring
+        # itself (that reset() DOES call load_history in prod) is
+        # verified by L1.13b at the source level.
         inst.reset()
         assert inst.buffer.get_tokens() == [], "buffer not cleared"
         assert inst.cursor is None
@@ -285,6 +379,31 @@ def run_layer_1() -> None:
         assert inst.history == []
         assert inst.history_page == 0
         assert inst._last_input_source == "init"
+
+    with test("L1", "L1.13b", "reset() wiring: instance.py imports+calls history_persist.load_history"):
+        # Runtime coupling: reset() runs under a proper package in prod
+        # but under spec_from_file_location (no parent package) in this
+        # test — so the relative `from .history_persist import load_history`
+        # ImportErrors in headless mode. Rather than build a fragile
+        # sys.modules alias that only works for one test, verify the
+        # wiring at the source-code level: reset() must (a) import
+        # load_history from history_persist and (b) actually call it.
+        # This catches refactors that would silently drop the reload
+        # (e.g. removing the try/except block or renaming the fn).
+        inst_src = (REPO / "internal" / "instance.py").read_text()
+        assert "from .history_persist import load_history" in inst_src, (
+            "instance.reset() must import load_history from history_persist"
+        )
+        assert "self.history = load_history()" in inst_src, (
+            "instance.reset() must assign self.history from load_history()"
+        )
+        # Also verify the persistence file name matches the docstring
+        # promise made in visibility's reset() docstring.
+        vis_src = (REPO / "ui" / "actions_visibility.py").read_text()
+        assert "~/.talon/prose_overlay_history.json" in vis_src, (
+            "reset() docstring must name the on-disk path so users can "
+            "find + manually nuke it"
+        )
 
     with test("L1", "L1.14", "reset() preserves object identity of buffer/canvas/etc."):
         # Object refs created at module init should NOT be reassigned.

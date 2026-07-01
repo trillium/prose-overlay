@@ -11,11 +11,34 @@ import subprocess
 from talon import Module, actions
 
 from ..internal.instance import instance
+from ..internal.history_persist import (
+    HISTORY_MAX as _HISTORY_MAX,
+    load_history as _load_history,
+    save_history as _save_history,
+)
 from ..shim.actions_core import _recompute_hats
 
 mod = Module()
 
-_HISTORY_MAX = 50
+# Cap bumped from 50 → 100 alongside the persistence layer (2026-07-01).
+# 100 keeps a full day of dictation for high-throughput sessions AND fits
+# comfortably in a single JSON write. The value lives in internal.history_persist
+# as the source of truth so the on-disk cap and the runtime cap can't drift.
+
+# Load the persisted history from disk at module-import time so the
+# overlay starts a fresh Talon session with the prior session's entries
+# already in place. Only populates when instance.history is empty (which
+# is the case at fresh init) so a hot-reload of this module doesn't
+# stomp on entries added during the current session.
+def _load_history_on_startup() -> None:
+    if instance.history:
+        return
+    persisted = _load_history()
+    if persisted:
+        instance.history.extend(persisted)
+
+
+_load_history_on_startup()
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +261,12 @@ class Actions:
         instance.history.insert(0, text)
         if len(instance.history) > _HISTORY_MAX:
             instance.history.pop()
+
+        # Persist so the entry survives a Talon restart. save_history is
+        # atomic (tmp + os.replace) and never raises — a disk full or
+        # permission error logs + eats the exception, leaving the on-disk
+        # copy stale rather than blocking the paste-to-target below.
+        _save_history(instance.history)
 
         if instance.target_recall_name:
             actions.user.recall_window(instance.target_recall_name)

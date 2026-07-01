@@ -104,7 +104,24 @@ class ProseOverlayState:
         self.blink_on = True
         self.flash_state = {}
         self.flash_callback = None
+        # Reset clears runtime history but IMMEDIATELY reloads the
+        # persisted entries from disk. Semantics: 'overlay reset' is a
+        # runtime-state escape hatch, not a data-loss command. If the user
+        # wants to nuke on-disk history they delete the file explicitly
+        # (~/.talon/prose_overlay_history.json). Without this reload,
+        # reset would leave in-memory empty and the very next confirm
+        # would write `[new_entry]` — silently truncating the on-disk
+        # store to a single entry. Import is lazy so tests loading
+        # instance.py stand-alone don't need the persist module on path.
         self.history = []
+        try:
+            from .history_persist import load_history
+            self.history = load_history()
+        except Exception:
+            # A load failure inside reset() must not brick reset() —
+            # history_persist.load_history is already defensive but
+            # this belt+braces defends against import failures too.
+            self.history = []
         self.history_page = 0
         self.hat_js_fallback = False
         self.hat_js_last_err = ""

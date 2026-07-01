@@ -240,12 +240,17 @@ class _OverlayActiveActions:
 
 @_ctx_shim.action_class("user")
 class _ShimActions:
-    def dictation_insert(text: str):
+    def dictation_insert(text: str, auto_cap: bool = True):
         """Shim: route dictated text to the prose overlay instead of inserting directly.
 
         Intercepts every path that ends in dictation_insert — community enders,
         punctuation enders, window-switch rules, etc. — so the overlay is the
         single destination for all spoken prose when auto mode is active.
+
+        The ``auto_cap`` kwarg mirrors the community/trillium_talon prototype at
+        ``core/text/text_and_dictation.py`` and is accepted for signature parity —
+        the overlay buffer handles its own casing/formatting so we don't apply it
+        here (see ISA/SCENARIOS.md S3 for the sentence-case-after-period spec).
         """
         if instance.canvas.is_showing:
             actions.user.prose_overlay_add_text(text)

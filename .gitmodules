@@ -1,0 +1,3 @@
+[submodule "tests/cursorless-upstream"]
+	path = tests/cursorless-upstream
+	url = https://github.com/trilliumsmith/cursorless

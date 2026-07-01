@@ -2989,3 +2989,575 @@ def run_layer_1() -> None:
             raise AssertionError(
                 "FlashOverlay accepted mutation — should be frozen"
             )
+
+    # -----------------------------------------------------------------------
+    # Move 4d (help pager + cursor layout builders) — ui/layout_help_cursor.py
+    # Two pure builders that turn a state snapshot + panel geometry into
+    # HelpLayout | None and CursorLayout | None. No consumers yet — Move 4e
+    # wires draw_overlay onto them. Tests lock in the extraction:
+    #   - hidden/no-cursor short-circuits
+    #   - HELP_PAGES rows produced with correct row-baseline y coordinates
+    #   - section-header + title row shapes
+    #   - out-of-range page → None
+    #   - empty-tokens listening… cursor branch
+    #   - cursor before token / cursor after last-token branches
+    #   - viewport trim drops off-screen cursor
+    #   - change_mode + blink phase propagated (not gated) in model
+    #   - determinism, no mutation, frozen output
+    # -----------------------------------------------------------------------
+
+    lhc_spec = importlib.util.spec_from_file_location(
+        "po_lt_pkg.ui.layout_help_cursor",
+        REPO / "ui" / "layout_help_cursor.py",
+    )
+    lhc_mod = importlib.util.module_from_spec(lhc_spec)
+    _sys.modules["po_lt_pkg.ui.layout_help_cursor"] = lhc_mod
+    lhc_spec.loader.exec_module(lhc_mod)
+
+    _build_help = lhc_mod.build_help_layout
+    _build_cursor = lhc_mod.build_cursor_layout
+    _HELP_PAGES = lhc_mod.HELP_PAGES
+
+    # State stub — layout_help_cursor only reads .help_visible / .help_page
+    # (help builder) and .cursor / .change_mode / .blink_on (cursor builder).
+    class _HelpCursorStateStub:
+        def __init__(
+            self,
+            *,
+            help_visible=False,
+            help_page=0,
+            cursor=None,
+            change_mode=False,
+            blink_on=True,
+        ):
+            self.help_visible = help_visible
+            self.help_page = help_page
+            self.cursor = cursor
+            self.change_mode = change_mode
+            self.blink_on = blink_on
+
+    # Convenience — the main-panel rect the help builder anchors from.
+    _MAIN_PANEL = layout_mod_lt.Rect(x=100.0, y=200.0, w=800.0, h=400.0)
+
+    with test(
+        "L1",
+        "L1.103",
+        "build_help_layout: help_visible=False → None",
+    ):
+        # Fast-path: no draw when the pager is hidden.
+        out = _build_help(
+            _HelpCursorStateStub(help_visible=False, help_page=0),
+            panel_rect=_MAIN_PANEL,
+        )
+        assert out is None, f"expected None when help_visible=False; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.104",
+        "build_help_layout: help_page out of range → None",
+    ):
+        # Below zero.
+        out_lo = _build_help(
+            _HelpCursorStateStub(help_visible=True, help_page=-1),
+            panel_rect=_MAIN_PANEL,
+        )
+        assert out_lo is None, f"expected None for page=-1; got {out_lo!r}"
+        # At len(HELP_PAGES) — first invalid page.
+        out_hi = _build_help(
+            _HelpCursorStateStub(help_visible=True, help_page=len(_HELP_PAGES)),
+            panel_rect=_MAIN_PANEL,
+        )
+        assert out_hi is None, (
+            f"expected None for page={len(_HELP_PAGES)}; got {out_hi!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.105",
+        "build_help_layout: valid page → HelpLayout with title row + one row per entry",
+    ):
+        # Page 0 is "Basics" — 6 (cmd, desc) tuples, no section headers.
+        # Rows list should be: 1 title + 6 entries = 7 rows.
+        out = _build_help(
+            _HelpCursorStateStub(help_visible=True, help_page=0),
+            panel_rect=_MAIN_PANEL,
+        )
+        assert out is not None
+        assert type(out) is layout_mod_lt.HelpLayout
+        assert out.page == 0, f"page mismatch: {out.page}"
+        assert out.total_pages == len(_HELP_PAGES), (
+            f"total_pages mismatch: {out.total_pages} vs {len(_HELP_PAGES)}"
+        )
+        # Basics page: title + 6 entries.
+        expected_rows = 1 + 6
+        assert len(out.rows) == expected_rows, (
+            f"expected {expected_rows} rows for page 0; got {len(out.rows)}"
+        )
+        # First row is the title: left="Basics", right="".
+        assert out.rows[0].left == "Basics", (
+            f"first row should be page title 'Basics'; got {out.rows[0].left!r}"
+        )
+        assert out.rows[0].right == "", (
+            f"title row should have empty right column; got {out.rows[0].right!r}"
+        )
+        # Second row is the first entry: '"bravely"' -> "confirm + paste".
+        assert out.rows[1].left == '"bravely"', (
+            f"first entry should be '\"bravely\"'; got {out.rows[1].left!r}"
+        )
+        assert out.rows[1].right == "confirm + paste", (
+            f"first entry desc should be 'confirm + paste'; got {out.rows[1].right!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.106",
+        "build_help_layout: section-header entries emit '── name ──' rows",
+    ):
+        # Page 1 is "Delete" — 4 tuple entries, 1 section header, 2 tuples = 7 entries.
+        # Rows list: 1 title + 7 entries = 8 rows total; row index 5 (title + 4
+        # entries before the section header) should be the section header.
+        out = _build_help(
+            _HelpCursorStateStub(help_visible=True, help_page=1),
+            panel_rect=_MAIN_PANEL,
+        )
+        assert out is not None
+        assert out.rows[0].left == "Delete"
+        # Find the section-header row.
+        header_rows = [r for r in out.rows if r.right == "" and r.left.startswith("──")]
+        assert len(header_rows) == 1, (
+            f"expected exactly one section header row on Delete page; "
+            f"got {len(header_rows)}: {[r.left for r in header_rows]}"
+        )
+        assert header_rows[0].left == "── hat colors (on any command) ──", (
+            f"header row shape wrong: got {header_rows[0].left!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.107",
+        "build_help_layout: row y coordinates are strictly monotonically increasing",
+    ):
+        # Rows are painted top-to-bottom; y baselines must advance monotonically.
+        # Locks the paint-order invariant.
+        for page_idx in range(len(_HELP_PAGES)):
+            out = _build_help(
+                _HelpCursorStateStub(help_visible=True, help_page=page_idx),
+                panel_rect=_MAIN_PANEL,
+            )
+            assert out is not None
+            ys = [r.y for r in out.rows]
+            for a, b in zip(ys, ys[1:]):
+                assert a < b, (
+                    f"page {page_idx}: row y coordinates should strictly "
+                    f"increase; got {ys}"
+                )
+
+    with test(
+        "L1",
+        "L1.108",
+        "build_help_layout: rows anchor from panel_rect.y + panel_rect.h + gap + PANEL_PAD",
+    ):
+        # Title's baseline sits at:
+        #   pager_y_top = panel_rect.y + panel_rect.h + HELP_PANEL_GAP
+        #   cy = pager_y_top + PANEL_PAD
+        #   title_baseline = cy + HINT_FONT_SIZE
+        # With defaults hint_font_size=12, help_panel_gap=8.0 and PANEL_PAD=12:
+        #   pager_y_top = 200 + 400 + 8 = 608
+        #   cy = 608 + 12 = 620
+        #   title_baseline = 620 + 12 = 632
+        out = _build_help(
+            _HelpCursorStateStub(help_visible=True, help_page=0),
+            panel_rect=_MAIN_PANEL,
+        )
+        assert out is not None
+        expected_title_y = 200.0 + 400.0 + 8.0 + _DC.PANEL_PAD + 12.0
+        assert out.rows[0].y == expected_title_y, (
+            f"title y mismatch: got {out.rows[0].y}, expected {expected_title_y}"
+        )
+
+    with test(
+        "L1",
+        "L1.109",
+        "build_help_layout: custom hint_font_size flows into row heights",
+    ):
+        # help_bigger / help_smaller commands mutate the module-level
+        # HINT_FONT_SIZE. Pure builder takes it as an arg — verify the
+        # geometry scales. Title baseline moves by (new - default) px.
+        default = _build_help(
+            _HelpCursorStateStub(help_visible=True, help_page=0),
+            panel_rect=_MAIN_PANEL,
+        )
+        bigger = _build_help(
+            _HelpCursorStateStub(help_visible=True, help_page=0),
+            panel_rect=_MAIN_PANEL,
+            hint_font_size=20,
+        )
+        assert default is not None and bigger is not None
+        # Title baseline: cy + HINT_FONT_SIZE, so bigger's title y is
+        # exactly (20 - 12) = 8 px lower.
+        assert bigger.rows[0].y - default.rows[0].y == 8.0, (
+            "hint_font_size should shift title baseline by (new - default); "
+            f"got shift {bigger.rows[0].y - default.rows[0].y}"
+        )
+
+    with test(
+        "L1",
+        "L1.110",
+        "build_help_layout: HelpLayout output is frozen",
+    ):
+        import dataclasses as _dc4
+        out = _build_help(
+            _HelpCursorStateStub(help_visible=True, help_page=0),
+            panel_rect=_MAIN_PANEL,
+        )
+        assert out is not None
+        try:
+            out.page = 999
+        except _dc4.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError("HelpLayout accepted mutation — should be frozen")
+
+    with test(
+        "L1",
+        "L1.111",
+        "build_help_layout: determinism — same inputs, dataclass-equal outputs",
+    ):
+        args = dict(
+            state=_HelpCursorStateStub(help_visible=True, help_page=2),
+            panel_rect=_MAIN_PANEL,
+        )
+        out1 = _build_help(**args)
+        out2 = _build_help(**args)
+        assert out1 == out2, "help builder is non-deterministic"
+        assert out1 is not out2, "must return a fresh instance"
+
+    with test(
+        "L1",
+        "L1.112",
+        "build_help_layout: no state mutation — state and panel_rect untouched",
+    ):
+        state = _HelpCursorStateStub(help_visible=True, help_page=1)
+        before = (state.help_visible, state.help_page)
+        panel_before = (_MAIN_PANEL.x, _MAIN_PANEL.y, _MAIN_PANEL.w, _MAIN_PANEL.h)
+        _build_help(state, panel_rect=_MAIN_PANEL)
+        after = (state.help_visible, state.help_page)
+        panel_after = (_MAIN_PANEL.x, _MAIN_PANEL.y, _MAIN_PANEL.w, _MAIN_PANEL.h)
+        assert before == after, f"state mutated: before={before}, after={after}"
+        assert panel_before == panel_after, (
+            f"panel_rect mutated (Rect is frozen so this shouldn't be "
+            f"possible): before={panel_before}, after={panel_after}"
+        )
+
+    # -------- build_cursor_layout tests --------
+
+    with test(
+        "L1",
+        "L1.113",
+        "build_cursor_layout: state.cursor is None → None",
+    ):
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=None),
+            tokens=["hello"],
+            token_widths=[40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is None, f"expected None when cursor is None; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.114",
+        "build_cursor_layout: empty tokens + cursor=0 → rect at x_origin (listening…)",
+    ):
+        # ui/draw.py's empty-buffer branch draws the cursor at
+        # (panel_x + PANEL_PAD, panel_y + PANEL_PAD + DOT_RADIUS*2 + DOT_GAP_Y).
+        # Builder mirrors: with x_origin=X, y_start=Y, rect anchors at
+        # (X - 1, Y + DOT_RADIUS*2 + DOT_GAP_Y).
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=0),
+            tokens=[],
+            token_widths=[],
+            x_origin=100.0,
+            y_start=200.0,
+            max_row_w=1000.0,
+        )
+        assert out is not None
+        assert type(out) is layout_mod_lt.CursorLayout
+        expected_x = 100.0 - 1
+        expected_y = 200.0 + _DC.DOT_RADIUS * 2 + _DC.DOT_GAP_Y
+        assert out.rect.x == expected_x, (
+            f"empty-buf cursor x should be x_origin - 1; got {out.rect.x}, "
+            f"expected {expected_x}"
+        )
+        assert out.rect.y == expected_y, (
+            f"empty-buf cursor y should be y_start + hat band; got "
+            f"{out.rect.y}, expected {expected_y}"
+        )
+        assert out.rect.w == float(_DC.CURSOR_WIDTH), (
+            f"cursor width should be CURSOR_WIDTH; got {out.rect.w}"
+        )
+        assert out.rect.h == float(_DC.TOKEN_FONT_SIZE), (
+            f"cursor height should be TOKEN_FONT_SIZE; got {out.rect.h}"
+        )
+
+    with test(
+        "L1",
+        "L1.115",
+        "build_cursor_layout: empty tokens + cursor != 0 → None",
+    ):
+        # ui/draw.py's empty-buf branch only draws for cursor == 0. Any
+        # other value with empty tokens is silently skipped by paint.
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=1),
+            tokens=[],
+            token_widths=[],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is None, f"expected None for cursor=1 on empty tokens; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.116",
+        "build_cursor_layout: cursor in gap before mid-row token → rect at token x",
+    ):
+        # Tokens on one row at x_origin=0, widths [10, 15, 20], gaps
+        # TOKEN_GAP_X between. Cursor at idx 1 → gap BEFORE token 1.
+        # Token 1's x = 0 + 10 + TOKEN_GAP_X.
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=1),
+            tokens=["a", "b", "c"],
+            token_widths=[10.0, 15.0, 20.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is not None
+        expected_x = 0.0 + 10.0 + _DC.TOKEN_GAP_X - 1
+        assert out.rect.x == expected_x, (
+            f"cursor x at gap before token 1 should be its token x - 1; "
+            f"got {out.rect.x}, expected {expected_x}"
+        )
+        expected_y = 0.0 + _DC.DOT_RADIUS * 2 + _DC.DOT_GAP_Y
+        assert out.rect.y == expected_y, (
+            f"cursor y should be y_base + hat band; got {out.rect.y}, "
+            f"expected {expected_y}"
+        )
+
+    with test(
+        "L1",
+        "L1.117",
+        "build_cursor_layout: cursor == len(tokens) → rect after last token",
+    ):
+        # Cursor after the final token in the buffer, on the final row.
+        # Paint code: `x - TOKEN_GAP_X` where x has already advanced past
+        # the last token's width + trailing gap. So the cursor sits at
+        # (x_origin + sum_widths + (N-1)*TOKEN_GAP_X) - 1.
+        tokens = ["a", "b", "c"]
+        widths = [10.0, 15.0, 20.0]
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=3),
+            tokens=tokens,
+            token_widths=widths,
+            x_origin=100.0,
+            y_start=200.0,
+            max_row_w=1000.0,
+        )
+        assert out is not None
+        # Sum of widths + trailing-gap for each token, minus one trailing gap.
+        # x after loop = 100 + 10 + gap + 15 + gap + 20 + gap; -gap = 100 + 45 + 2*gap
+        expected_x = 100.0 + 10.0 + 15.0 + 20.0 + 2 * _DC.TOKEN_GAP_X - 1
+        assert out.rect.x == expected_x, (
+            f"cursor after last token x mismatch: got {out.rect.x}, "
+            f"expected {expected_x}"
+        )
+
+    with test(
+        "L1",
+        "L1.118",
+        "build_cursor_layout: change_mode + blink_on propagated verbatim",
+    ):
+        out_change = _build_cursor(
+            _HelpCursorStateStub(cursor=0, change_mode=True, blink_on=True),
+            tokens=["a"],
+            token_widths=[10.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out_change is not None
+        assert out_change.change_mode is True
+        assert out_change.blink_on is True
+
+        out_blink_off = _build_cursor(
+            _HelpCursorStateStub(cursor=0, change_mode=False, blink_on=False),
+            tokens=["a"],
+            token_widths=[10.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        # blink_on=False must NOT gate out — the layout is emitted so
+        # debug snapshots can distinguish "cursor blinking off" from
+        # "no cursor set."
+        assert out_blink_off is not None, (
+            "blink_on=False must NOT return None — paint layer keeps "
+            "the gate; model carries the phase"
+        )
+        assert out_blink_off.blink_on is False
+        assert out_blink_off.change_mode is False
+
+    with test(
+        "L1",
+        "L1.119",
+        "build_cursor_layout: cursor on trimmed row → None",
+    ):
+        # Three tokens, each on its own row (max_row_w=10 forces one-per-row).
+        # max_visible_rows=1 drops rows 0 and 1; only row 2 (token 2) survives.
+        # Cursor at token 0 targets a trimmed row → None.
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=0),
+            tokens=["a", "b", "c"],
+            token_widths=[100.0, 100.0, 100.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=10.0,
+            max_visible_rows=1,
+        )
+        assert out is None, (
+            f"cursor on trimmed row should return None; got {out!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.120",
+        "build_cursor_layout: cursor on surviving row after trim → rect at correct y",
+    ):
+        # Same setup — three rows, keep last. Cursor at token 2 lands on
+        # the (only) surviving row at y_base = y_start (trim shifts the
+        # row grid up so the last row is at y_start).
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=2),
+            tokens=["a", "b", "c"],
+            token_widths=[100.0, 100.0, 100.0],
+            x_origin=0.0,
+            y_start=200.0,
+            max_row_w=10.0,
+            max_visible_rows=1,
+        )
+        assert out is not None
+        expected_y = 200.0 + _DC.DOT_RADIUS * 2 + _DC.DOT_GAP_Y
+        assert out.rect.y == expected_y, (
+            f"cursor y on surviving row should anchor at y_start; got "
+            f"{out.rect.y}, expected {expected_y}"
+        )
+
+    with test(
+        "L1",
+        "L1.121",
+        "build_cursor_layout: cursor out of range → None",
+    ):
+        # cursor = 5 but only 3 tokens; not equal to len(tokens)=3 either.
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=5),
+            tokens=["a", "b", "c"],
+            token_widths=[10.0, 10.0, 10.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is None, f"cursor > len(tokens)+1 should be None; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.122",
+        "build_cursor_layout: multi-row wrap → cursor on row 1 lands at row 1's y_base",
+    ):
+        # Force a wrap: two tokens of width 100 with max_row_w=100 → each
+        # token gets its own row. Cursor at token 1 → row 1 at
+        # y_base = y_start + LINE_HEIGHT.
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=1),
+            tokens=["a", "b"],
+            token_widths=[100.0, 100.0],
+            x_origin=0.0,
+            y_start=50.0,
+            max_row_w=100.0,
+        )
+        assert out is not None
+        expected_y = 50.0 + _DC.LINE_HEIGHT + _DC.DOT_RADIUS * 2 + _DC.DOT_GAP_Y
+        assert out.rect.y == expected_y, (
+            f"cursor on row 1 y mismatch: got {out.rect.y}, "
+            f"expected {expected_y}"
+        )
+        # x resets to x_origin at the start of each row.
+        assert out.rect.x == 0.0 - 1, (
+            f"cursor on row 1 x should restart at x_origin - 1; got {out.rect.x}"
+        )
+
+    with test(
+        "L1",
+        "L1.123",
+        "build_cursor_layout: CursorLayout output is frozen",
+    ):
+        import dataclasses as _dc5
+        out = _build_cursor(
+            _HelpCursorStateStub(cursor=0),
+            tokens=["a"],
+            token_widths=[10.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is not None
+        try:
+            out.change_mode = True
+        except _dc5.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError(
+                "CursorLayout accepted mutation — should be frozen"
+            )
+
+    with test(
+        "L1",
+        "L1.124",
+        "build_cursor_layout: determinism — same inputs, dataclass-equal outputs",
+    ):
+        args = dict(
+            state=_HelpCursorStateStub(cursor=1, change_mode=True, blink_on=False),
+            tokens=["a", "b", "c"],
+            token_widths=[10.0, 15.0, 20.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        out1 = _build_cursor(**args)
+        out2 = _build_cursor(**args)
+        assert out1 == out2, "cursor builder is non-deterministic"
+        assert out1 is not out2, "must return a fresh instance"
+
+    with test(
+        "L1",
+        "L1.125",
+        "build_cursor_layout: no state mutation — inputs untouched",
+    ):
+        state = _HelpCursorStateStub(cursor=1, change_mode=True, blink_on=True)
+        tokens_arg = ["a", "b"]
+        widths_arg = [10.0, 15.0]
+        before = (state.cursor, state.change_mode, state.blink_on)
+        _build_cursor(
+            state,
+            tokens=tokens_arg,
+            token_widths=widths_arg,
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        after = (state.cursor, state.change_mode, state.blink_on)
+        assert before == after, f"state mutated: before={before}, after={after}"
+        assert tokens_arg == ["a", "b"], f"tokens mutated: {tokens_arg}"
+        assert widths_arg == [10.0, 15.0], f"widths mutated: {widths_arg}"

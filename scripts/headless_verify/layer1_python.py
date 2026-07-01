@@ -5179,3 +5179,64 @@ def run_layer_1() -> None:
         assert isinstance(bubble_ops[3], _ShapeGlyphOp)
         # Green is DARK → white fg.
         assert bubble_ops[1].color == "ffffffff"
+
+    # ----- L1.166 — selection overlay emission (Step 7 of paint retirement) --
+
+    _SelectionOverlay = _po_layout.SelectionOverlay
+
+    with test(
+        "L1",
+        "L1.166",
+        "to_paint_ops: selection overlay → one RoundedRectOp per rect at 25%% alpha blue, BEFORE token text",
+    ):
+        # Two selection rects — the model has already computed the
+        # per-token rects in row-visible paint order.
+        r1 = _Rect_layout(x=10.0, y=50.0, w=40.0, h=18.0)
+        r2 = _Rect_layout(x=60.0, y=50.0, w=35.0, h=18.0)
+        sel = _SelectionOverlay(rects=[r1, r2])
+        # Give the model a single token so we can verify z-order.
+        tok = _mk_token_with_hat(0, "abc", x=10.0, y=30.0, hat=None)
+        panel = _Rect_layout(x=0.0, y=0.0, w=1000.0, h=200.0)
+        ca = _Rect_layout(x=12.0, y=12.0, w=776.0, h=176.0)
+        model = _LayoutModelPO(
+            panel=panel,
+            content_area=ca,
+            help_area=None,
+            tokens=[tok],
+            selection=sel,
+            flash=None,
+            bubbles=[],
+            help=None,
+            cursor=None,
+            target_label="",
+            using_fallback=False,
+            hints_hidden_by_overflow=False,
+        )
+        ops = _to_paint_ops(model)
+        # First 2 ops should be the selection RoundedRectOps (25% alpha blue).
+        sel_ops = [o for o in ops if isinstance(o, _RoundedRectOp) and o.color == "089ad340"]
+        assert len(sel_ops) == 2, (
+            f"expected exactly 2 selection RoundedRectOps at 089ad340; "
+            f"got {len(sel_ops)}: {[type(o).__name__ for o in ops]}"
+        )
+        # Order: two selection ops must come BEFORE the token TextOp so
+        # tokens paint on top of the highlight.
+        first_text = next(
+            (i for i, o in enumerate(ops) if isinstance(o, _TextOp) and o.text == "abc"),
+            None,
+        )
+        assert first_text is not None, "token TextOp missing from ops"
+        first_sel = next(
+            (i for i, o in enumerate(ops) if isinstance(o, _RoundedRectOp) and o.color == "089ad340"),
+            None,
+        )
+        assert first_sel is not None and first_sel < first_text, (
+            f"selection ops must precede token text; "
+            f"first_sel={first_sel}, first_text={first_text}"
+        )
+        # Geometry matches model rects exactly.
+        assert (sel_ops[0].x, sel_ops[0].y, sel_ops[0].w, sel_ops[0].h) == (10.0, 50.0, 40.0, 18.0)
+        assert (sel_ops[1].x, sel_ops[1].y, sel_ops[1].w, sel_ops[1].h) == (60.0, 50.0, 35.0, 18.0)
+        # Corner radius 3 (mirrors draw_tokens.py's draw_rounded_rect(..., 3)).
+        assert sel_ops[0].radius == 3.0
+        assert sel_ops[1].radius == 3.0

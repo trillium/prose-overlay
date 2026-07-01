@@ -1068,3 +1068,91 @@ process.stdout.write(out);
             f"L5.24 (#11 trailing): expected [(7,8)] (space after 'air'), "
             f"got {trailing_ranges!r} — bundle stage shape may have changed"
         )
+
+    # Wishlist #8 — inside / outside (interior) modifier on a surrounding
+    # pair. `InteriorOnlyStage` ships at bundle line 15819 and
+    # `ExcludeInteriorStage` at 15828 (see `docs/BUNDLE_REST_SCOPE.md §1`).
+    # Grammar routing is free per OQ2=YES — cursorless-talon's
+    # `cursorless_interior_modifier` (from
+    # `~/.talon/user/cursorless-talon/src/modifiers/interior.py:11-16`) is a
+    # `cursorless_modifier` variant per
+    # `~/.talon/user/cursorless-talon/src/modifiers/modifiers.py:33`, so it
+    # composes into `<user.cursorless_target>` for free — ZERO new
+    # prose-overlay grammar rules.
+    #
+    # Spoken-forms map from
+    # `~/.talon/user/cursorless-talon/src/spoken_forms.json`:
+    #   interior_modifier: "inside"  → "interiorOnly"
+    #   simple_modifier:   "bounds"  → "excludeInterior"
+    # Task-level shorthand "inside / outside" maps onto cursorless's
+    # "inside / bounds" naming; the L5 rows below assert the bundle
+    # semantics using the canonical modifier-type names.
+    #
+    # Buffer for these rows: `the ( air ball ) drum` — the mark 'a' lands
+    # on token 2 ("air"), and the surrounding-pair round pair encloses
+    # tokens 1..4 (`( air ball )`). Interior-only semantics:
+    #   - `interiorOnly`   → tokens 2..3 (`air ball`) — delimiters trimmed
+    #   - `excludeInterior` → the two delimiter tokens themselves as TWO
+    #                          ranges: [(1,1), (4,4)] — cursorless's
+    #                          "Bounding paired delimiters" semantics per
+    #                          `~/.talon/user/cursorless-talon/src/cheatsheet/sections/modifiers.py:57`.
+    # Python fallback: no `interiorOnly`/`excludeInterior` handler in
+    # `cursorless/resolve.py:174-180`. Documented as asymmetric-gap per
+    # `docs/BUNDLE_REST_SCOPE.md §Cluster D` (Python remains token-level;
+    # JS handles the interior split). ISC-9 (Python-retirement) makes the
+    # split moot; matches sub-word precedent per
+    # `docs/SUBWORD_INVESTIGATION.md`.
+    _INTERIOR_TOKENS = ["the", "(", "air", "ball", ")", "drum"]
+    _INTERIOR_LETTERS = ["t", "", "a", "b", "", "d"]
+
+    with test("L5", "L5.25", "wishlist #8 — `take inside round air` (interiorOnly trims delimiters)"):
+        target = {
+            "type": "primitive",
+            "mark": {"type": "decoratedSymbol", "symbolColor": "default",
+                     "character": "a"},
+            "modifiers": [
+                {"type": "interiorOnly"},
+                {"type": "containingScope",
+                 "scopeType": {"type": "surroundingPair",
+                               "delimiter": "parentheses"}},
+            ],
+        }
+        hat_entries = _build_hat_map_for_js(
+            _INTERIOR_TOKENS, _INTERIOR_LETTERS, color="default",
+        )
+        js_result = _run_js_resolver(
+            target, _INTERIOR_TOKENS, hat_entries, cursor_char=0,
+        )
+        expected = [(2, 3)]
+        assert js_result == expected, (
+            f"L5.25 (#8): interiorOnly + SP round — got {js_result!r}, "
+            f"expected {expected!r} (tokens 2..3 = `air ball`, delimiters trimmed)"
+        )
+
+    with test("L5", "L5.26", "wishlist #8 — `take bounds round air` (excludeInterior returns delimiters)"):
+        target = {
+            "type": "primitive",
+            "mark": {"type": "decoratedSymbol", "symbolColor": "default",
+                     "character": "a"},
+            "modifiers": [
+                {"type": "excludeInterior"},
+                {"type": "containingScope",
+                 "scopeType": {"type": "surroundingPair",
+                               "delimiter": "parentheses"}},
+            ],
+        }
+        hat_entries = _build_hat_map_for_js(
+            _INTERIOR_TOKENS, _INTERIOR_LETTERS, color="default",
+        )
+        js_result = _run_js_resolver(
+            target, _INTERIOR_TOKENS, hat_entries, cursor_char=0,
+        )
+        # excludeInterior returns the delimiter tokens as TWO ranges — cursorless
+        # documents this in the cheatsheet as "Bounding paired delimiters"
+        # (see cursorless-talon cheatsheet/sections/modifiers.py:57). The
+        # ranges are the `(` at token 1 and the `)` at token 4.
+        expected = [(1, 1), (4, 4)]
+        assert js_result == expected, (
+            f"L5.26 (#8): excludeInterior + SP round — got {js_result!r}, "
+            f"expected {expected!r} (two ranges: `(` at token 1, `)` at token 4)"
+        )

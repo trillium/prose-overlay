@@ -72,6 +72,8 @@ showing the overlay (5 tokens, hats t/a/b/d/e on each token respectively).
 | 34 | #5 | `round wrap air` | std | `air` at chars [4,7) gets parens — buffer reads `the (air) ball drum echo` | | f9-34.png | |
 | 35 | #5 | `curly wrap air past drum` | std | Range [4,17) gets curly braces — buffer reads `the {air ball drum} echo` | | f9-35.png | |
 | 36 | #5 | `quad wrap air` | std | `air` gets double-quotes — buffer reads `the "air" ball drum echo` | | f9-36.png | |
+| 37 | #8 | `take inside round air` | `the ( air ball ) drum` (dictate parens as `round`) | tokens 2..3 (`air ball`) highlighted — delimiters trimmed | | f9-37.png | |
+| 38 | #8 | `take bounds round air` | `the ( air ball ) drum` | the two delimiter tokens (`(` and `)`) highlighted as two separate ranges — cursorless's "Bounding paired delimiters" semantics | | f9-38.png | |
 
 (Buffer key: `std` = `the air ball drum echo` with default-color hats.)
 

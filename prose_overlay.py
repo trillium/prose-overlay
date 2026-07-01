@@ -105,6 +105,26 @@ mod.setting(
     ),
 )
 
+mod.setting(
+    "prose_overlay_use_cursorless_shape_allocator",
+    type=bool,
+    default=False,
+    desc=(
+        "When true, the letter-hat allocation for shape-flagged tokens "
+        "routes through the cursorless bundle via shim/shape_bridge.py "
+        "(the Slice 2 projection wrapper) instead of the classic "
+        "compute_hat_assignments path. This preserves the ISC-14c "
+        "per-group-same-shape invariant (the Python allocator in "
+        "shim/shapes.py still owns group -> shape assignment) while "
+        "consulting cursorless for letter+color allocation with a "
+        "shape-enabled enabled_styles map. Default OFF while the "
+        "projection layer bakes; flip on for a session via the "
+        "action prose_overlay_set_cursorless_shape_allocator(1). "
+        "Slice 3 of docs/BUNDLE_SHAPE_SCOPE.md; see "
+        "docs/BUNDLE_SHAPE_DECISIONS.md OQ3."
+    ),
+)
+
 
 # Slice A of docs/PHONES_SPEC.md / HOMOPHONE_SHAPES_PLAN.md §4.6 —
 # decoupled hat-shape vocabulary. Declared in-repo so the prose-overlay

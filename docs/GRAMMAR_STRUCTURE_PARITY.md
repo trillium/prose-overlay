@@ -237,6 +237,10 @@ The remaining blocker is asymmetric: the Python resolver fallback at `cursorless
 
 Impact on drift narrative: any earlier list here or in adjacent docs that lumped sub-word into "wantable but not shipped" needs to be reframed as "shipped via JS resolver; asymmetric on Python fallback; needs a headless row." `FEATURE_PARITY.md §3c` has been flipped from `[ ]` to `[~]` to reflect the corrected status.
 
+### 7a-note. Shape allocator via cursorless bundle — opt-in (added 2026-07-01)
+
+Slice 3 of `docs/BUNDLE_SHAPE_SCOPE.md` landed a `mod.setting("prose_overlay_use_cursorless_shape_allocator", default=False)` that routes shape-flagged letter+color allocation through the cursorless bundle instead of the classic `compute_hat_assignments` path. The Python group-allocator in `shim/shapes.py` remains authoritative for the ISC-14c per-group-same-shape invariant (the option-b projection wrapper per `docs/BUNDLE_SHAPE_DECISIONS.md` OQ3). Default OFF while the projection layer bakes; grammar surface is unaffected — the `phone <shape>` and `<color> <shape>` rules resolve via `instance.shape_assignments` and `instance.hat_to_token` respectively, both of which keep their pre-Slice-3 semantics regardless of the setting. This section will be revisited if the setting flips default-on and the classic path is retired.
+
 ## 8. How this doc was built
 
 - Read `~/.talon/user/cursorless-talon/src/cursorless.talon` end-to-end (60 lines, 22 rule bodies).

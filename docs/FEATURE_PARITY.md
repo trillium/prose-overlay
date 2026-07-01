@@ -244,6 +244,7 @@ Items 2 ✅ + 3 are the meaningful coverage leaps. Items 1, 4, 5 are quick wins.
 | `[x]` | Cursor blink + change-mode amber zone | visible | shipped |
 | `[x]` | Shape hats on flagged tokens | HOMOPHONE_SHAPES_PLAN Slices 1+2+3 all shipped: renderer (ISC-14a), per-token stability (ISC-14b), same-group-same-shape allocation (ISC-14c) |
 | `[x]` | Shape panel with alternates | PHONES_SPEC Slice C shipped as ISC-14d — bubble panel with color-coded chips per shape-hatted token, `<color> <shape>` swap grammar wired |
+| `[~]` | Cursorless-native shape allocation (opt-in) | 2026-07-01 — Slice 3 of `docs/BUNDLE_SHAPE_SCOPE.md` lands the projection wrapper (`shim/shape_bridge.py`) behind `prose_overlay_use_cursorless_shape_allocator` (default OFF). Python group-allocator remains authoritative for ISC-14c; setting-on routes letter+color allocation through the cursorless bundle with a shape-enabled `enabled_styles` pool. Flip via action `prose_overlay_set_cursorless_shape_allocator(1)`. |
 | `[ ]` | Mid-token cursor render | character-level cursor visible inside a word | depends on §2 mid-token cursor |
 | `[ ]` | Sub-word highlight | within "one_two_three", just "two" highlighted | depends on sub-word resolver |
 

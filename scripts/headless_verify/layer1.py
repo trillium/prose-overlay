@@ -1225,3 +1225,83 @@ def run_layer_1() -> None:
         assert not any("-" in k for k in styles), f"bad color leaked shape entries: {list(styles)!r}"
         assert "gray" in styles, "plain colors must still be there"
 
+    # -----------------------------------------------------------------------
+    # Slice 3 of docs/BUNDLE_SHAPE_SCOPE.md — opt-in setting for the bridge
+    # path. Default must stay OFF; toggle must be reachable without any
+    # code change other than the setting flip.
+    # -----------------------------------------------------------------------
+
+    with test(
+        "L1",
+        "L1.63",
+        "prose_overlay.py declares prose_overlay_use_cursorless_shape_allocator setting, default False",
+    ):
+        po_text = (REPO / "prose_overlay.py").read_text()
+        assert "prose_overlay_use_cursorless_shape_allocator" in po_text, (
+            "setting missing from prose_overlay.py — Slice 3 flip surface"
+        )
+        # Find the setting block and verify default=False shows up in it.
+        # The block starts with the setting name string and continues until
+        # the terminating ')'. Slice keyword args from the block.
+        i = po_text.find("prose_overlay_use_cursorless_shape_allocator")
+        # Walk backwards to find the enclosing `mod.setting(` opening.
+        opener = po_text.rfind("mod.setting(", 0, i)
+        assert opener >= 0, "setting block for allocator missing mod.setting( opener"
+        # Walk forwards past matching close paren.
+        depth = 1
+        j = po_text.index("(", opener) + 1
+        while j < len(po_text) and depth:
+            c = po_text[j]
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+            j += 1
+        block = po_text[opener:j]
+        assert "default=False" in block, (
+            "Slice 3 setting must default to False — got "
+            f"{block!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.64",
+        "shape_bridge: projected old_assignments carry shape-suffixed style for stability",
+    ):
+        # Contract for docs/BUNDLE_SHAPE_SCOPE.md §6 risk 3 mitigation:
+        # the bridge must rewrite `oldAssignments` so the stability
+        # comparator sees the styleName the bundle will hand back. This
+        # test locks in that rewrite path so a future refactor can't
+        # silently regress it.
+        prior = {
+            0: (0, "t", "gray"),      # was color-only pre-Slice-3
+            1: (0, "t", "gray"),
+        }
+        shape_assignments = {0: "frame", 1: "frame"}
+        projected = shape_bridge.project_group_shapes_onto_old_assignments(
+            old_assignments=prior,
+            shape_assignments=shape_assignments,
+            color_for_shape="gray",
+        )
+        assert projected[0][2] == "gray-frame", (
+            f"projection must rewrite bare color to shape-suffixed style; "
+            f"got {projected[0]!r}"
+        )
+        assert projected[1][2] == "gray-frame", (
+            f"projection must rewrite ALL flagged entries; got {projected[1]!r}"
+        )
+        # None case — must return empty dict, not raise.
+        assert shape_bridge.project_group_shapes_onto_old_assignments(
+            None, shape_assignments, "gray",
+        ) == {}
+        # Token not in shape_assignments keeps its prior style.
+        prior_mixed = {0: (0, "t", "gray"), 3: (0, "b", "blue")}
+        shape_only_0 = {0: "frame"}
+        p2 = shape_bridge.project_group_shapes_onto_old_assignments(
+            prior_mixed, shape_only_0, "gray",
+        )
+        assert p2[0][2] == "gray-frame"
+        assert p2[3][2] == "blue", (
+            f"non-shape token's style must pass through unchanged; got {p2[3]!r}"
+        )
+

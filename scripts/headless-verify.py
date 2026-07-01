@@ -20,11 +20,11 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from headless_verify.common import GREEN, RED, RESET, results
-from headless_verify.layer1 import run_layer_1
-from headless_verify.layer2 import run_layer_2
-from headless_verify.layer3 import run_layer_3
-from headless_verify.layer4 import run_layer_4
-from headless_verify.layer5 import run_layer_5
+from headless_verify.layer1_python import run_layer_1
+from headless_verify.layer2_bundle import run_layer_2
+from headless_verify.layer3_dispatch import run_layer_3
+from headless_verify.layer4_audit import run_layer_4
+from headless_verify.layer5_parity import run_layer_5
 
 
 def main() -> int:

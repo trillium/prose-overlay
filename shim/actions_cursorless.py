@@ -190,6 +190,73 @@ class Actions:
 
         _flash_tokens(all_indices, _action_color("applyFormatter"), _execute)
 
+    def prose_overlay_swap(cursorless_swap_targets: Any):
+        """Exchange the texts of two resolved targets (wishlist #3 Swap).
+
+        Bound to the dedicated rule in prose_overlay_cursorless.talon:
+          {user.cursorless_swap_action} <user.cursorless_swap_targets>:
+            user.prose_overlay_swap(cursorless_swap_targets)
+
+        cursorless_swap_targets is a SwapTargets dataclass from
+        cursorless-talon (src/actions/swap.py); it exposes .target1 and
+        .target2 attributes, each a CursorlessTarget. If target1 is an
+        ImplicitTarget (single-target spoken form `swap with drum`),
+        we resolve it against the cursor via the standard
+        _resolve_target_to_token_range path.
+
+        Multi-range targets (each side is a RangeTarget or ListTarget)
+        collapse into a single (first_idx, last_idx) span per side,
+        matching how cursorless's Swap treats each target as one text
+        blob. Multi-range on EACH side would need N-way swap semantics
+        which cursorless itself does not ship; see docs/BUNDLE_REST_SCOPE.md
+        §2 #3.
+        """
+        target1 = getattr(cursorless_swap_targets, "target1", None)
+        target2 = getattr(cursorless_swap_targets, "target2", None)
+        if target1 is None or target2 is None:
+            print("prose_overlay: swap requires two targets — got malformed capture")
+            return
+
+        if not instance.canvas.is_showing:
+            _po_matcher_misfire("swap", "swapTargets", cursorless_swap_targets)
+            actions.user.cursorless_command("swapTargets", cursorless_swap_targets)
+            return
+
+        r1 = _resolve_target_to_token_range(target1)
+        r2 = _resolve_target_to_token_range(target2)
+        if r1 is None or r2 is None:
+            print("prose_overlay: unresolvable target for swap")
+            return
+
+        # Collapse each side to one span — the leftmost start and the
+        # rightmost end across whatever ranges the side resolves to.
+        first1 = min(a for a, _ in r1)
+        last1 = max(b for _, b in r1)
+        first2 = min(a for a, _ in r2)
+        last2 = max(b for _, b in r2)
+
+        all_indices = list(range(first1, last1 + 1)) + list(range(first2, last2 + 1))
+
+        def _execute():
+            tokens = instance.buffer.get_tokens()
+            text = " ".join(tokens)
+            s1, _ = _token_char_range(first1, tokens)
+            _, e1 = _token_char_range(last1, tokens)
+            s2, _ = _token_char_range(first2, tokens)
+            _, e2 = _token_char_range(last2, tokens)
+            cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+            plan = _js.run_action(
+                "swapTargets", s1, e1, text,
+                dest_start_char=s2, dest_end_char=e2,
+                cursor_anchor_char=cursor_char,
+                cursor_active_char=cursor_char,
+            )
+            _apply_edit_plan(plan)
+            _recompute_hats()
+            instance.canvas.refresh()
+
+        _flash_tokens(all_indices, _action_color("swapTargets"), _execute)
+
     def prose_overlay_bring_move(action_name: str, cursorless_target: Any):
         """replaceWithTarget / moveToTarget — source is resolved from
         cursorless_target, destination is the current cursor gap (no-op if no

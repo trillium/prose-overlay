@@ -240,6 +240,10 @@ process.stdout.write(out);
             # Wishlist #13 Reverse shipped 2026-07-01 (see
             # docs/BUNDLE_REST_SCOPE.md §7). Multi-target action.
             "\"reverseTargets\"",
+            # Wishlist #3 Swap shipped 2026-07-01 (see
+            # docs/BUNDLE_REST_SCOPE.md §7). Two-target action using
+            # the source+dest slots.
+            "\"swapTargets\"",
         )
         missing = [name for name in ACTIONS_MUST_HAVE if name not in src]
         assert not missing, (
@@ -258,7 +262,6 @@ process.stdout.write(out);
         # ACTIONS_MUST_HAVE in the same PR that lands the action.
         # Mapping: docs/BUNDLE_REST_SCOPE.md §7 recommended-order.
         ACTIONS_PLANNED = (
-            ("swap", "#3 Swap action"),
             ("pasteAtDestination", "#4 Paste at destination"),
             ("wrap", "#5 Wrap paired delimiter"),
         )
@@ -406,4 +409,52 @@ process.stdout.write(out);
             assert edit["text"] == text, (
                 f"expected replace text {text!r}, got {edit['text']!r}"
             )
+
+    # L2.13 — Wishlist #3 Swap (swapTargets). Two-target action using the
+    # existing source+dest slots (ABI-clean; no signature widening). Std
+    # buffer: swap 'air' [4,7) with 'drum' [13,17) → two replace ops.
+    with test(
+        "L2",
+        "L2.13",
+        "wishlist #3 — swapTargets emits two replace ops exchanging texts",
+    ):
+        script = f"""
+const code = require('fs').readFileSync('{ACTIONS_JS}', 'utf8');
+eval(code);
+const out = globalThis.proseRunAction(
+  JSON.stringify('swapTargets'),
+  JSON.stringify({{contentRange:{{start:{{line:0,character:4}}, end:{{line:0,character:7}}}}, isReversed:false}}),
+  JSON.stringify({{contentRange:{{start:{{line:0,character:13}}, end:{{line:0,character:17}}}}, isReversed:false}}),
+  JSON.stringify({{text:'the air ball drum echo',selectionAnchorChar:0,selectionActiveChar:0}}),
+);
+process.stdout.write(out);
+"""
+        tmp = pathlib.Path("/tmp/headless-verify-swap.js")
+        tmp.write_text(script)
+        proc = subprocess.run(
+            ["bun", str(tmp)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert proc.returncode == 0, f"bun exit {proc.returncode}: {proc.stderr[:200]}"
+        plan = json.loads(proc.stdout)
+        assert "error" not in plan, f"unexpected error: {plan!r}"
+        edits = plan.get("edits", [])
+        assert len(edits) == 2, f"expected 2 replace ops, got {len(edits)}: {edits!r}"
+        # Order: dispatcher calls b.replace(r1, t2); b.replace(r2, t1);
+        # so edits[0] = target1 range with target2's text, edits[1] = vice versa.
+        by_start = {op["range"]["start"]["character"]: op for op in edits}
+        assert 4 in by_start, f"missing replace at char 4: {edits!r}"
+        assert 13 in by_start, f"missing replace at char 13: {edits!r}"
+        assert by_start[4]["type"] == "replace"
+        assert by_start[4]["range"]["end"]["character"] == 7
+        assert by_start[4]["text"] == "drum", (
+            f"expected 'drum' at [4,7), got {by_start[4]['text']!r}"
+        )
+        assert by_start[13]["type"] == "replace"
+        assert by_start[13]["range"]["end"]["character"] == 17
+        assert by_start[13]["text"] == "air", (
+            f"expected 'air' at [13,17), got {by_start[13]['text']!r}"
+        )
 

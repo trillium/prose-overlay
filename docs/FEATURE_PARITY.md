@@ -219,6 +219,7 @@ Items 2 ✅ + 3 are the meaningful coverage leaps. Items 1, 4, 5 are quick wins.
 |---|---|---|---|
 | `[x]` | bring (copy src token → dst hat) | "bring air to drum" | ISC-6 |
 | `[x]` | move (cut src → dst hat) | "move air to drum" | ISC-6 |
+| `[x]` | **swap (exchange src ↔ dst texts)** | `swap air with drum` on std → `the drum ball air echo` | wishlist item #3 (`docs/BUNDLE_REST_SCOPE.md §Cluster A / §2 #3`). `swapTargets` geometry added to `js/prose_actions.js` via cursorless `proseActionsStandalone.ts`. Uses the existing two-target ABI (source + dest slots). Dedicated grammar rule at `prose_overlay_cursorless.talon` after the bring/move rule because `swapTargets` lives in the `cursorless_swap_action` LIST (not `simple_action`) and takes a `cursorless_swap_targets` capture with two targets. Python: `prose_overlay_swap(cursorless_swap_targets)` resolves both sides and calls `_js.run_action('swapTargets', ...)`. Headless: L2.13 (bundle probe — two replace ops) + L2.9 must-have. |
 | `[x]` | applyFormatter on a hat target | "format snake at fox past bat" | ISC-7 |
 | `[x]` | Prose formatters (say/sentence/title) routed to buffer | "sentence the quick brown fox" → "The quick brown fox" | `5652b0e` |
 | `[x]` | Code formatters (snake/camel/dotted/...) routed to buffer | "snake the quick brown fox" → "the_quick_brown_fox" | `31df606` |

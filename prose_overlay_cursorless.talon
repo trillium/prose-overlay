@@ -22,6 +22,9 @@
 #   - PrimitiveTarget with decoratedSymbol mark ("chuck air", "take blue bat")
 #   - RangeTarget ("chuck air past bat")
 #   - PrimitiveTarget with scope modifier ("chuck file", "chuck line")
+#
+# <user.cursorless_swap_targets> covers the two-target swap shape:
+#   - `[<target>] with <target>` — implicit source at cursor if omitted.
 mode: dictation
 mode: command
 tag: user.prose_overlay_active
@@ -50,6 +53,14 @@ and not tag: user.clock_ring_showing
 # # # Bring / move to cursor position
 {user.cursorless_bring_move_action} <user.cursorless_target>:
     user.prose_overlay_bring_move(cursorless_bring_move_action, cursorless_target)
+
+# Swap two targets (wishlist #3). cursorless-talon's swap.py exposes
+# cursorless_swap_targets as a two-target capture (`[<target>] with <target>`).
+# Rule shape matches cursorless.talon C3 — LIST + CAPTURE so it outranks the
+# generic action rule on grammar-specificity tie-break whenever our context
+# is active.
+{user.cursorless_swap_action} <user.cursorless_swap_targets>:
+    user.prose_overlay_swap(cursorless_swap_targets)
 
 # # # Reformat target with formatter(s) (e.g. "format snake air", "format camel air past bat")
 {user.cursorless_reformat_action} <user.formatters> at <user.cursorless_target>:

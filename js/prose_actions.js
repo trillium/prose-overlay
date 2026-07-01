@@ -248,6 +248,20 @@
     editor.setSelections([sel]);
     return editor.getPlan();
   }
+  function actionSwap(target1, target2, editor) {
+    const r1 = rangeFromObj(target1.contentRange);
+    const r2 = rangeFromObj(target2.contentRange);
+    const t1 = editor.document.getText(r1);
+    const t2 = editor.document.getText(r2);
+    editor.edit((b) => {
+      b.replace(r1, t2);
+      b.replace(r2, t1);
+    });
+    const leftStart = r1.start.character <= r2.start.character ? r1.start : r2.start;
+    const sel = new ProseSelection(leftStart, leftStart);
+    editor.setSelections([sel]);
+    return editor.getPlan();
+  }
   function actionReverse(targets, editor) {
     if (targets.length === 0) {
       editor.setSelections([]);
@@ -312,6 +326,14 @@
               throw new Error("moveToTarget requires a destination target");
             }
             plan = actionMoveToTarget(source, dest, editor);
+            break;
+          case "swapTargets":
+            if (dest == null) {
+              throw new Error(
+                "swapTargets requires a second target in the dest slot"
+              );
+            }
+            plan = actionSwap(source, dest, editor);
             break;
           case "setSelectionBefore":
             plan = actionSetSelectionBefore(source, editor);

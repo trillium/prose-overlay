@@ -6,7 +6,6 @@ prose_overlay_draw_constants, and viewport state to prose_overlay_viewport
 (accessed via `instance.runtime.viewport`).
 """
 
-from talon import settings, ui
 from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect
 
@@ -83,8 +82,16 @@ def draw_overlay(
     anchor_rect = viewport._anchor_rect
     anchor_position = viewport._anchor_position
 
-    screen = ui.main_screen()
-    sr = screen.rect
+    # Move 3 — screen rect is populated at recompute time via
+    # shim.actions_core._populate_visual_state, landing on
+    # instance.state.screen_rect. Belt+braces guard: if a paint fires
+    # before the first recompute (or under a partial talon environment
+    # where ui.main_screen failed) sr is None — short-circuit to a zero
+    # Rect so the paint is a no-op rather than crashing. This preserves
+    # the return-type contract (talon.ui.Rect) callers expect.
+    sr = instance.state.screen_rect
+    if sr is None:
+        return Rect(0, 0, 0, 0)
 
     c.paint.typeface = "Menlo"
 
@@ -93,7 +100,9 @@ def draw_overlay(
     token_metrics = [(tok, c.paint.measure_text(tok)[1].width) for tok in tokens]
 
     # Panel geometry — window-scoped or full-screen, top or bottom attachment.
-    window_scoped = settings.get("user.prose_overlay_window_scoped") and anchor_rect is not None
+    # Move 3 — window-scoped setting is hoisted onto instance.state at
+    # recompute time (see shim.actions_core._populate_visual_state).
+    window_scoped = instance.state.window_scoped and anchor_rect is not None
     ref = anchor_rect if window_scoped else sr
     panel_h = max(sr.height * PANEL_H_FRACTION, 3 * LINE_HEIGHT + PANEL_PAD * 2)
     panel_x = ref.x if window_scoped else sr.left
@@ -156,9 +165,11 @@ def draw_overlay(
                 blink_on,
             )
     else:
+        # Move 3 — homophone_hint / homophone_shapes settings are hoisted
+        # onto instance.state at recompute time.
         flagged = (
             _homophones.flagged_indices(tokens)
-            if settings.get("user.prose_overlay_homophone_hint") or _homophones.hint_enabled()
+            if instance.state.homophone_hint or _homophones.hint_enabled()
             else frozenset()
         )
         # Slice 1 of HOMOPHONE_SHAPES_PLAN.md — paint hat shape over flagged
@@ -166,7 +177,7 @@ def draw_overlay(
         # setting or the runtime `overlay shapes homo on` toggle (which
         # mutates the module flag in prose_overlay_shapes).
         shape_enabled = bool(
-            settings.get("user.prose_overlay_homophone_shapes")
+            instance.state.homophone_shapes
             or _shapes_runtime.shapes_enabled()
         )
         _draw_token_rows(

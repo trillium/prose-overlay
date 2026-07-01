@@ -56,7 +56,14 @@ DRAW_FILES = (
 # — after which the maintainer lowers the baseline in this file.
 # Eventual target: every entry is 0 (draw is pure).
 EXPECTED_DRAW_PURITY_VIOLATIONS: dict[str, dict[str, int]] = {
-    "ui/draw.py":        {"settings_get": 3, "ui_screen": 1, "actions_dot": 0, "impure_import": 2},
+    # ui/draw.py dropped to all-zero on 2026-07-01 in Move 3 step 3/3 of
+    # the pure-function refactor: ui.main_screen() + three settings.get()
+    # calls were hoisted upstream to shim.actions_core._populate_visual_state,
+    # landing on instance.state.{screen_rect, window_scoped, homophone_hint,
+    # homophone_shapes}. draw_overlay now reads only from its args + state,
+    # with a belt+braces None guard on screen_rect that returns an empty
+    # Rect if paint fires before the first recompute.
+    "ui/draw.py":        {"settings_get": 0, "ui_screen": 0, "actions_dot": 0, "impure_import": 0},
     "ui/draw_tokens.py": {"settings_get": 0, "ui_screen": 0, "actions_dot": 0, "impure_import": 0},
     "ui/draw_panels.py": {"settings_get": 0, "ui_screen": 0, "actions_dot": 0, "impure_import": 0},
 }

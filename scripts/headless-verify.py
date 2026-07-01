@@ -163,6 +163,21 @@ def run_layer_1() -> None:
         _ci, letter, _color = r[0]
         assert letter != "r", f"'foo' has no 'r' — prior must be dropped, got {r[0]!r}"
 
+    with test("L1", "L1.10d", "compute_hat_assignments: empty tokens returns empty dict cleanly (HAT_ALLOC_OVERFLOW guard mirror)"):
+        # The JS bridge short-circuits `tokens == []` to skip the JS call
+        # entirely — QuickJS threw `Maximum call stack size exceeded` on
+        # a 0-token buffer during the recompute that follows show()'s
+        # buffer.clear() (observed live 2026-06-30). This test asserts
+        # the Python re-impl also handles empty gracefully so the fallback
+        # path (and the bridge's short-circuit-returns-{}) is provably
+        # equivalent to what a working JS call would produce.
+        r = compute([])
+        assert r == {}, f"empty tokens must return empty dict; got {r!r}"
+        # And with old_assignments (typical caller shape from _recompute_hats
+        # after a change_head-through-last-token wipe).
+        r = compute([], old_assignments={0: (0, "a", "gray")})
+        assert r == {}, f"empty tokens with prior must return empty dict; got {r!r}"
+
     with test("L1", "L1.11", "letter-extend pattern: 'air' then 'bat cap' → one token 'abc'"):
         # Mirrors what prose_overlay_add_letters does at the buffer level:
         # first utterance appends "a"; second utterance (with prior also

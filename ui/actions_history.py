@@ -175,9 +175,26 @@ class Actions:
         query can race and return the history overlay's now-invisible rect,
         leaving the main canvas anchored to nowhere (symptom: "UI went away").
         """
-        if not (1 <= n <= len(instance.history)):
+        # Load-bearing observability — 2026-06-30 user reported "history
+        # pick N still not working" but the debug JSONL only carries
+        # emit_if_changed diffs, not command-name traces. Without this
+        # print(), every failure path (out-of-range n, empty history,
+        # canvas-race retry) was silent and looked identical from the
+        # log. Kept as `print()` (not the debug stream) so the Talon
+        # log always carries it even when `overlay debug` is off.
+        n_hist = len(instance.history)
+        if not (1 <= n <= n_hist):
+            print(
+                f"prose_overlay: history_pick({n}) — out of range "
+                f"(history has {n_hist} entries); no-op"
+            )
             return
         entry = instance.history[n - 1]
+        print(
+            f"prose_overlay: history_pick({n}) — loading entry "
+            f"({len(entry)} chars): {entry[:60]!r}"
+            f"{'...' if len(entry) > 60 else ''}"
+        )
         if not instance.canvas.is_showing:
             actions.user.prose_overlay_show()
         actions.user.prose_overlay_hide_history()

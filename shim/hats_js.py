@@ -72,6 +72,18 @@ def compute_hat_assignments(
         dict mapping token_index -> (char_index_within_word, letter, color)
     """
     global _using_fallback, _last_err
+    # Empty buffer short-circuit — the JS bundle recursion in
+    # getHatRankingContext blows QuickJS's stack on 0-token input (observed
+    # 2026-06-30 as `JSException('Maximum call stack size exceeded')`
+    # during the recompute that immediately follows `prose_overlay_show()`
+    # clearing the buffer). No hats can exist on an empty buffer, so
+    # returning {} is the correct answer AND avoids the JS call entirely.
+    # Clears the fallback flag + last-err because this path is a clean
+    # non-JS success (not a fallback).
+    if not tokens:
+        _using_fallback = False
+        _last_err = ""
+        return {}
     try:
         _ensure_loaded()
     except Exception as e:

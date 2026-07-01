@@ -346,9 +346,10 @@ class Actions:
             all_indices.extend(range(first_idx, last_idx + 1))
 
         def _execute():
-            # Bracket the multi-range wrap as one STRUCTURAL undo step — the
-            # per-range apply_edit_plan calls each open their own group,
-            # but we want the whole wrap operation to reverse in one `undo`.
+            # Bracket the multi-range wrap as one STRUCTURAL undo step. Pass
+            # manage_undo_group=False to each _apply_edit_plan call so it
+            # doesn't seal our outer bracket mid-loop (which would produce
+            # one undo record per range instead of one atomic wrap).
             instance.state.buffer.commit_start("wrap", EditKind.STRUCTURAL)
             try:
                 for first_idx, last_idx in sorted(token_ranges, reverse=True):
@@ -362,7 +363,7 @@ class Actions:
                         cursor_anchor_char=cursor_char,
                         cursor_active_char=cursor_char,
                     )
-                    _apply_edit_plan(plan)
+                    _apply_edit_plan(plan, manage_undo_group=False)
             finally:
                 instance.state.buffer.commit_end()
             _recompute_hats()

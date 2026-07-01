@@ -75,29 +75,37 @@ def run_layer_2() -> None:
         assert {"0", "1", "2"}.issubset(r.keys()), f"missing keys: {sorted(r.keys())}"
         assert r["2"]["letter"] == "1", f"123 should hat letter '1', got {r['2']!r}"
 
-    # L2.6 — post-2026-07-01 un-strip: shape identifiers and WordScopeHandler
-    # survive esbuild's tree-shake into the shipped bundle. If either grep
-    # returns 0 the bundle was built from the pre-un-strip source (or the
-    # tree-shaker aggressively dropped the shape vocabulary) and the shim
-    # can't opt into shape-suffixed style names. See docs/BUNDLE_SHAPE_SCOPE.md
-    # §3 and docs/SUBWORD_INVESTIGATION.md §1 for the referenced patterns.
+    # L2.6 — post-2026-07-01 un-strip: shape identifiers survive esbuild's
+    # tree-shake into the shipped hat bundle, AND the targets bundle still
+    # ships WordScopeHandler (piggyback probe from docs/SUBWORD_INVESTIGATION.md
+    # §1 so a future rebuild that accidentally tree-shakes it out flags
+    # here first). If either grep returns 0 the bundle was built from the
+    # wrong source (or the tree-shaker aggressively dropped the vocabulary)
+    # and the shim can't opt into shape-suffixed style names / sub-word
+    # scope. See docs/BUNDLE_SHAPE_SCOPE.md §3 and docs/SUBWORD_INVESTIGATION.md §1.
     with test(
         "L2",
         "L2.6",
-        "bundle contains shape identifiers (frame, crosshairs) and proseBuildEnabledHatStyles",
+        "hats bundle: shape identifiers + styleName + proseBuildEnabledHatStyles; targets bundle: WordScopeHandler",
     ):
-        bundle_text = pathlib.Path(HAT_JS).read_text()
+        hats_bundle = pathlib.Path(HAT_JS).read_text()
         # Shape suffix vocabulary — un-stripped 2026-07-01.
-        assert "frame" in bundle_text, "shape identifier 'frame' missing from bundle — un-strip regressed"
-        assert "crosshairs" in bundle_text, "shape identifier 'crosshairs' missing from bundle"
-        # New helper name is a strong signal the bundle was rebuilt from
-        # the post-un-strip source (it's a globalThis attach, not a
-        # tree-shakeable local).
+        assert "frame" in hats_bundle, "shape identifier 'frame' missing from hats bundle — un-strip regressed"
+        assert "crosshairs" in hats_bundle, "shape identifier 'crosshairs' missing from hats bundle"
+        # New helper name is a strong signal the hats bundle was rebuilt
+        # from the post-un-strip source (globalThis attach, not tree-shakeable).
         assert (
-            "proseBuildEnabledHatStyles" in bundle_text
-        ), "proseBuildEnabledHatStyles missing — bundle predates un-strip"
+            "proseBuildEnabledHatStyles" in hats_bundle
+        ), "proseBuildEnabledHatStyles missing — hats bundle predates un-strip"
         # New styleName field on the return dict — Slice 1 contract.
-        assert "styleName" in bundle_text, "styleName field missing — bundle predates un-strip"
+        assert "styleName" in hats_bundle, "styleName field missing — hats bundle predates un-strip"
+        # Targets bundle — verify sub-word scope substrate still present.
+        # Independent of shape work but rebuilds could break it, so
+        # keep the probe alongside the shape probes per parent instruction.
+        targets_bundle = (pathlib.Path(HAT_JS).parent / "prose_resolve_targets.js").read_text()
+        assert (
+            "WordScopeHandler" in targets_bundle
+        ), "WordScopeHandler missing from targets bundle — see docs/SUBWORD_INVESTIGATION.md §1"
 
     # L2.7 — 5th arg round-trip. Backward-compat and shape-enabled paths.
     with test(

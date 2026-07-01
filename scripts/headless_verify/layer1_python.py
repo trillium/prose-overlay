@@ -4827,3 +4827,65 @@ def run_layer_1() -> None:
     # po_lt_pkg.ui.paint_ops (currently none, but future L1 tests may)
     # see the original stub-tree path.
     po_mod.__package__ = _po_pkg_orig
+
+    # ----- L1.156-L1.157 — help-zone separator emission -----------------
+
+    def _mk_model_with_help(help_area):
+        panel = _Rect_layout(x=0.0, y=0.0, w=1000.0, h=200.0)
+        ca = _Rect_layout(x=12.0, y=12.0, w=776.0, h=176.0)
+        return _LayoutModelPO(
+            panel=panel,
+            content_area=ca,
+            help_area=help_area,
+            tokens=[],
+            selection=None,
+            flash=None,
+            bubbles=[],
+            help=None,
+            cursor=None,
+            target_label="",
+            using_fallback=False,
+            hints_hidden_by_overflow=False,
+        )
+
+    with test(
+        "L1",
+        "L1.156",
+        "to_paint_ops: help_area=None → NO separator LineOp emitted",
+    ):
+        model = _mk_model_with_help(None)
+        ops = _to_paint_ops(model)
+        # Empty tokens + no cursor → just the listening TextOp.
+        line_ops = [o for o in ops if isinstance(o, _LineOp)]
+        assert not line_ops, (
+            f"expected no LineOps when help_area is None; got {line_ops!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.157",
+        "to_paint_ops: help_area set → one separator LineOp at help_area.x with SEP_COLOR",
+    ):
+        ha = _Rect_layout(x=800.0, y=12.0, w=176.0, h=176.0)
+        model = _mk_model_with_help(ha)
+        ops = _to_paint_ops(model)
+        line_ops = [o for o in ops if isinstance(o, _LineOp)]
+        assert len(line_ops) == 1, (
+            f"expected exactly 1 separator LineOp; got {len(line_ops)}"
+        )
+        sep = line_ops[0]
+        assert sep.x0 == sep.x1 == 800.0, (
+            f"separator should be vertical at help_area.x=800; got x0={sep.x0}, x1={sep.x1}"
+        )
+        expected_y0 = 0.0 + _DC_PO.PANEL_PAD
+        expected_y1 = 0.0 + 200.0 - _DC_PO.PANEL_PAD
+        assert sep.y0 == expected_y0, (
+            f"separator y0 should be panel.y+PANEL_PAD={expected_y0}; got {sep.y0}"
+        )
+        assert sep.y1 == expected_y1, (
+            f"separator y1 should be panel.y+panel.h-PANEL_PAD={expected_y1}; got {sep.y1}"
+        )
+        assert sep.color == _DC_PO.SEP_COLOR, (
+            f"separator color mismatch: expected SEP_COLOR={_DC_PO.SEP_COLOR}, got {sep.color!r}"
+        )
+        assert sep.width == 1.0

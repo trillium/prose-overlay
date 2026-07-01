@@ -4861,6 +4861,86 @@ def run_layer_1() -> None:
             f"expected no LineOps when help_area is None; got {line_ops!r}"
         )
 
+    _HatMark = _po_layout.HatMark
+    _ShapeMark = _po_layout.ShapeMark
+    _UnderlineSegment = _po_layout.UnderlineSegment
+
+    def _mk_token_with_hat(index, text, x, y, hat, w=30.0, h=20.0):
+        return _TokenLayout(
+            index=index,
+            text=text,
+            rect=_Rect_layout(x=x, y=y, w=w, h=h),
+            hat=hat,
+            shape=None,
+            underline_segments=[],
+            flagged=False,
+            on_visible_row=True,
+        )
+
+    with test(
+        "L1",
+        "L1.158",
+        "to_paint_ops: gray letter hat → single EllipseOp before token TextOp",
+    ):
+        # Dot position: 2*DOT_RADIUS square. cx=x+DOT_RADIUS, cy=y+DOT_RADIUS.
+        r = _DC_PO.DOT_RADIUS
+        hat_pos = _Rect_layout(
+            x=10.0, y=30.0, w=r * 2.0, h=r * 2.0
+        )
+        hat = _HatMark(char_index=0, letter="a", color="gray", position=hat_pos)
+        tok = _mk_token_with_hat(0, "abc", x=10.0, y=30.0, hat=hat)
+        model = _mk_empty_model_po(tokens=[tok])
+        ops = _to_paint_ops(model)
+        # Expect: [EllipseOp(gray dot), TextOp(token)]
+        assert len(ops) == 2, f"expected 2 ops (hat + text); got {len(ops)}: {ops!r}"
+        assert isinstance(ops[0], _EllipseOp), (
+            f"first op should be hat EllipseOp; got {type(ops[0]).__name__}"
+        )
+        assert isinstance(ops[1], _TextOp)
+        assert ops[0].color == _DC_PO.HAT_COLOR_HEX["gray"]
+        assert ops[0].cx == 10.0 + r
+        assert ops[0].cy == 30.0 + r
+        assert ops[0].rx == r and ops[0].ry == r
+
+    with test(
+        "L1",
+        "L1.159",
+        "to_paint_ops: black letter hat → white outline EllipseOp BEFORE the colored dot",
+    ):
+        r = _DC_PO.DOT_RADIUS
+        hat_pos = _Rect_layout(
+            x=50.0, y=100.0, w=r * 2.0, h=r * 2.0
+        )
+        hat = _HatMark(char_index=0, letter="b", color="black", position=hat_pos)
+        tok = _mk_token_with_hat(0, "z", x=50.0, y=100.0, hat=hat)
+        model = _mk_empty_model_po(tokens=[tok])
+        ops = _to_paint_ops(model)
+        # Expect: [EllipseOp(white outer), EllipseOp(black dot), TextOp]
+        assert len(ops) == 3, (
+            f"expected 3 ops (white outline + black dot + text); got {len(ops)}: {ops!r}"
+        )
+        outer = ops[0]
+        inner = ops[1]
+        assert isinstance(outer, _EllipseOp) and isinstance(inner, _EllipseOp)
+        assert outer.color == "ffffffff", (
+            f"white outline should be ffffffff; got {outer.color!r}"
+        )
+        assert outer.rx == r + 1, f"outline radius should be DOT_RADIUS+1; got {outer.rx}"
+        assert inner.color == _DC_PO.HAT_COLOR_HEX["black"]
+        assert inner.rx == r
+        assert isinstance(ops[2], _TextOp)
+
+    with test(
+        "L1",
+        "L1.160",
+        "to_paint_ops: no hat → only token TextOp",
+    ):
+        tok = _mk_token_with_hat(0, "abc", x=10.0, y=30.0, hat=None)
+        model = _mk_empty_model_po(tokens=[tok])
+        ops = _to_paint_ops(model)
+        assert len(ops) == 1, f"expected 1 op (text only) when hat is None; got {len(ops)}: {ops!r}"
+        assert isinstance(ops[0], _TextOp)
+
     with test(
         "L1",
         "L1.157",

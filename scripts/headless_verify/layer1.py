@@ -403,11 +403,15 @@ def run_layer_1() -> None:
     except Exception:
         shapes_mod = None
 
-    with test("L1", "L1.16b", "shapes_enabled() is True by default (keep verdict)"):
+    with test("L1", "L1.16b", "shapes_enabled() is False by default (2026-07-01 flip)"):
         if shapes_mod is None:
             raise AssertionError("prose_overlay_shapes failed to import")
-        assert shapes_mod.shapes_enabled() is True, (
-            f"default should be ON after 2026-06-30 keep verdict; got "
+        # Default flipped True → False on 2026-07-01 to match the static setting
+        # default (also False). Prior regression: static was False but runtime
+        # was True, and ui/draw.py ORs them, so shapes stayed ON. Both must be
+        # False for the OR to actually turn shapes off by default.
+        assert shapes_mod.shapes_enabled() is False, (
+            f"default should be OFF after 2026-07-01 runtime-flag flip; got "
             f"{shapes_mod.shapes_enabled()!r}"
         )
 

@@ -44,12 +44,14 @@ import xml.etree.ElementTree as ET
 # so a module-level flag is the right tool for THIS toggle specifically.
 # The voice command `overlay shapes homo on/off` mutates this flag. The draw
 # module ORs both (static `user.prose_overlay_homophone_shapes` setting OR
-# this runtime flag) so either path turns shapes on.
-# Default ON since 2026-06-30 (user keep verdict — mirrors the slice-A
-# homophone-hint default flip; rationale per memory
-# feedback_overlay_subtle_hints_wrong: must-perceive signals should default
-# loud, not subtle). Toggle off via `overlay shapes homo off`.
-_shapes_enabled: bool = True
+# this runtime flag) so either path turns shapes on — meaning BOTH must be
+# False for shapes to actually be off.
+# Default OFF as of 2026-07-01. The static setting was flipped True → False
+# in commit 7358bfe (2026-07-01 09:18) but this runtime-flag default was
+# missed, so shapes stayed painted on live overlays regardless of the static
+# setting. Toggle on at runtime via `overlay shapes homo on` (voice) or by
+# flipping the static setting in a user override.
+_shapes_enabled: bool = False
 
 
 def set_shapes_enabled(v: bool) -> None:

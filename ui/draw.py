@@ -3,7 +3,7 @@
 Renders word tokens in a horizontal flow layout with Cursorless-style hat dots.
 Delegates token rendering to prose_overlay_draw_tokens, shared constants to
 prose_overlay_draw_constants, and viewport state to prose_overlay_viewport
-(accessed via `instance.viewport`).
+(accessed via `instance.runtime.viewport`).
 """
 
 from talon import settings, ui
@@ -79,7 +79,7 @@ def draw_overlay(
     """
     global _hints_hidden_by_overflow
 
-    viewport = instance.viewport
+    viewport = instance.runtime.viewport
     anchor_rect = viewport._anchor_rect
     anchor_position = viewport._anchor_position
 

@@ -101,7 +101,7 @@ class OverlayCanvas:
             cursor=cursor, change_mode=change_mode, blink_on=blink_on,
             flash_indices=flash_indices, flash_color=flash_color,
             selection=selection, target_label=target_label,
-            using_fallback=instance.hat_js_fallback,
+            using_fallback=instance.state.hat_js_fallback,
         )
         if not panel_rect:
             return

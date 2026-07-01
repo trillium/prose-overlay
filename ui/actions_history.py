@@ -53,8 +53,17 @@ def _on_draw_history(c, overlay):
 
 
 def _on_history_overlay_hide():
-    """Called by DismissibleOverlay when dismissed via click-outside or escape."""
-    actions.user.prose_overlay_hide_history()
+    """Called by DismissibleOverlay AFTER .hide() has torn down the overlay.
+
+    Pure cleanup — do NOT re-enter the public prose_overlay_hide_history
+    action from here. That action calls instance.history_overlay.hide(),
+    which fires THIS callback; re-invoking the action from inside the
+    callback triggers Talon's ``Cannot recursively call action`` error
+    (see docs/HISTORY_HIDE_RECURSION.md for the full trace). Clear the
+    context tag directly instead — mirrors the second line of
+    prose_overlay_hide_history and is safe to run twice.
+    """
+    instance.ctx_history.tags = []
 
 
 # ---------------------------------------------------------------------------

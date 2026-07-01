@@ -2080,3 +2080,508 @@ def run_layer_1() -> None:
         assert flagged_arg == {0}
         assert hats_arg == {0: (1, "h", "gray")}
         assert pcw_arg == {0: [0.0, 8.0, 16.0, 24.0, 32.0, 40.0]}
+
+    # -----------------------------------------------------------------------
+    # Move 4b (homophone-bubble layout builder) — ui/layout_bubbles.py
+    # Pure builder that turns a state snapshot + measured widths into a
+    # list of ui.layout.BubbleLayout records. No consumers yet (Move 4e
+    # replaces the measurement+placement portion of draw_homophone_panels).
+    # These tests lock in the extraction: measurement, ideal_x centering,
+    # placement collision, anchor-aware band y, determinism, and no
+    # mutation.
+    # -----------------------------------------------------------------------
+
+    # Load ui/layout_bubbles.py under the same synthetic package tree used
+    # by layout_tokens above so its relative imports resolve without
+    # pulling talon in. Reuse the po_lt_pkg tree — draw_constants and
+    # ui.layout are already loaded under it.
+    lb_spec = importlib.util.spec_from_file_location(
+        "po_lt_pkg.ui.layout_bubbles",
+        REPO / "ui" / "layout_bubbles.py",
+    )
+    lb_mod = importlib.util.module_from_spec(lb_spec)
+    _sys.modules["po_lt_pkg.ui.layout_bubbles"] = lb_mod
+    lb_spec.loader.exec_module(lb_mod)
+
+    # Alias for concision.
+    _build_bubbles = lb_mod.build_bubble_layouts
+
+    # Tiny bubble state stub — layout_bubbles only reads
+    # .homophone_panel_alts and .shape_assignments.
+    class _BubbleStateStub:
+        def __init__(self, panel_alts=None, shape=None):
+            self.homophone_panel_alts = panel_alts or {}
+            self.shape_assignments = shape or {}
+
+    with test("L1", "L1.79", "build_bubble_layouts: empty panel_alts → []"):
+        # Fast-path guard: when the state carries no homophone_panel_alts,
+        # the builder short-circuits without touching tokens / widths.
+        out = _build_bubbles(
+            _BubbleStateStub(),
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            panel_rect_y=100.0,
+            panel_rect_h=50.0,
+            anchor_position="top",
+        )
+        assert out == [], f"expected [] when no panel_alts; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.80",
+        "build_bubble_layouts: 3-member group → 2-chip BubbleLayout with correct centering",
+    ):
+        # One token "there" (width 40) with a 3-member group panel entry.
+        # Left chip = yellow their, right chip = blue they're. Exact chip
+        # widths INJECTED via alt_text_widths so the expected values are
+        # deterministic (no proportional-fallback float drift).
+        st = _BubbleStateStub(
+            panel_alts={0: {"yellow": "their", "blue": "they're"}},
+            shape={0: "play"},
+        )
+        # Chip text widths at BUBBLE_CHIP_FONT_SIZE. Numbers picked to
+        # give tidy arithmetic:
+        #   left_text_w = 30    → left_chip_w = 30 + 2*4 = 38
+        #   right_text_w = 42   → right_chip_w = 42 + 2*4 = 50
+        atw = {"their": 30.0, "they're": 42.0}
+        # Token positioned at x=200 (well past x_origin=0) so the wide
+        # bubble's ideal_x = 200 + (40 - 101.2)/2 = 169.4 stays above
+        # x_origin — no clamp fires, and we test the centering algebra
+        # itself, not the clamp. Clamp-then-shift composition is
+        # covered in L1.85 / L1.86.
+        out = _build_bubbles(
+            st,
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=200.0,
+            y_start=200.0,
+            max_row_w=1000.0,
+            panel_rect_y=300.0,
+            panel_rect_h=50.0,
+            anchor_position="top",
+            alt_text_widths=atw,
+        )
+        assert len(out) == 1, f"expected 1 bubble; got {len(out)}"
+        b = out[0]
+        # Sanity: MUST be a ui.layout.BubbleLayout (frozen), not
+        # internal/panel_layout.py's mutable placement record.
+        assert type(b) is layout_mod_lt.BubbleLayout, (
+            f"expected ui.layout.BubbleLayout; got {type(b).__name__}"
+        )
+        assert b.token_idx == 0
+        # bubble_w = left_chip_w + INNER_GAP + shape_w + INNER_GAP + right_chip_w
+        #          = 38 + 0 + (12*1.1) + 0 + 50 = 101.2
+        shape_w = 12.0 * _DC.BUBBLE_SHAPE_SCALE
+        expected_w = 38.0 + _DC.BUBBLE_INNER_GAP + shape_w + _DC.BUBBLE_INNER_GAP + 50.0
+        assert b.w == expected_w, f"bubble_w: got {b.w}, expected {expected_w}"
+        # bubble_h = max(chip_h, shape_h) = max(11+2*5=21, 9*1.1=9.9) = 21
+        chip_h = _DC.BUBBLE_CHIP_FONT_SIZE + _DC.BUBBLE_CHIP_PAD_Y * 2
+        shape_h = 9.0 * _DC.BUBBLE_SHAPE_SCALE
+        assert b.h == max(chip_h, shape_h), (
+            f"bubble_h: got {b.h}, expected {max(chip_h, shape_h)}"
+        )
+        # Ideal x: bubble centered on the token. token_x_abs = x_origin = 200,
+        # token_w = 40. ideal_x = 200 + (40 - bubble_w) / 2 = 169.4.
+        # Above x_origin=200? No — 169.4 < 200. Let's re-verify: the
+        # placement pass clamps `x < x_origin` up to `x_origin`. So if
+        # ideal_x < x_origin the placed x == x_origin. For this test we
+        # WANT to see the raw centering, so we assert the max of the two.
+        expected_ideal_x = 200.0 + (40.0 - expected_w) / 2.0
+        expected_placed_x = max(expected_ideal_x, 200.0)
+        assert b.x == expected_placed_x, (
+            f"placed x for single bubble: got {b.x}, expected {expected_placed_x} "
+            f"(ideal_x={expected_ideal_x}, x_origin=200.0)"
+        )
+        # Band y: anchor="top" → panel_y + panel_h + BUBBLE_TOP_GAP
+        # = 300 + 50 + 6 = 356.
+        assert b.y == 300.0 + 50.0 + _DC.BUBBLE_TOP_GAP, (
+            f"band y: got {b.y}, expected {300.0 + 50.0 + _DC.BUBBLE_TOP_GAP}"
+        )
+        # Chip data — includes the measured chip widths (with pad).
+        assert b.left_chip == ("yellow", "their", 38.0)
+        assert b.right_chip == ("blue", "they're", 50.0)
+        # Shape identity + scale + placement contract.
+        assert b.shape_name == "play"
+        assert b.shape_scale == _DC.BUBBLE_SHAPE_SCALE
+        assert b.band == 0, f"v2 always band 0; got {b.band}"
+
+    with test(
+        "L1",
+        "L1.81",
+        "build_bubble_layouts: 2-member group → left_chip only, right_chip=None",
+    ):
+        # 2-member group ("aid,aide") → panel entry has one alt on the
+        # yellow slot only. Builder must emit a bubble with right_chip=None
+        # and bubble_w = left_chip_w + INNER_GAP + shape_w (no right side).
+        st = _BubbleStateStub(
+            panel_alts={0: {"yellow": "aide"}},
+            shape={0: "wing"},
+        )
+        atw = {"aide": 24.0}  # left_chip_w = 24 + 8 = 32
+        out = _build_bubbles(
+            st,
+            tokens=["aid"],
+            token_widths=[20.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            panel_rect_y=0.0,
+            panel_rect_h=100.0,
+            anchor_position="top",
+            alt_text_widths=atw,
+        )
+        assert len(out) == 1
+        b = out[0]
+        assert b.left_chip == ("yellow", "aide", 32.0)
+        assert b.right_chip is None, f"2-member group must have right_chip=None; got {b.right_chip!r}"
+        shape_w = 12.0 * _DC.BUBBLE_SHAPE_SCALE
+        expected_w = 32.0 + _DC.BUBBLE_INNER_GAP + shape_w
+        assert b.w == expected_w, f"2-member bubble_w: got {b.w}, expected {expected_w}"
+
+    with test(
+        "L1",
+        "L1.82",
+        "build_bubble_layouts: token in panel_alts but missing shape_assignments → skipped",
+    ):
+        # Defensive: bubble anchors on the shape glyph; a panel entry
+        # without a shape assignment would render a chip-pair with no
+        # center glyph. draw_panels._build_row_bubbles skips these, so
+        # the pure builder must skip them too.
+        st = _BubbleStateStub(
+            panel_alts={0: {"yellow": "their"}},
+            shape={},  # no shape for idx 0
+        )
+        out = _build_bubbles(
+            st,
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            panel_rect_y=0.0,
+            panel_rect_h=100.0,
+            anchor_position="top",
+        )
+        assert out == [], f"missing shape must skip the token; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.83",
+        "build_bubble_layouts: anchor_position='top' → band y = panel_y + panel_h + BUBBLE_TOP_GAP",
+    ):
+        # Anchor-aware band y. "top" means the panel sits at the TOP of
+        # the screen → bubble band appears BELOW the panel so it doesn't
+        # overlap window chrome above.
+        st = _BubbleStateStub(
+            panel_alts={0: {"yellow": "their"}},
+            shape={0: "wing"},
+        )
+        atw = {"their": 30.0}
+        out = _build_bubbles(
+            st,
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            panel_rect_y=100.0,
+            panel_rect_h=200.0,
+            anchor_position="top",
+            alt_text_widths=atw,
+        )
+        assert len(out) == 1
+        # band = 100 + 200 + BUBBLE_TOP_GAP.
+        assert out[0].y == 100.0 + 200.0 + _DC.BUBBLE_TOP_GAP, (
+            f"top-anchor band y: got {out[0].y}, "
+            f"expected {100.0 + 200.0 + _DC.BUBBLE_TOP_GAP}"
+        )
+
+    with test(
+        "L1",
+        "L1.84",
+        "build_bubble_layouts: anchor_position='bottom' → band y = panel_y - BUBBLE_ROW_H - BUBBLE_TOP_GAP",
+    ):
+        # "bottom" means the panel sits at the BOTTOM of the screen →
+        # bubble band appears ABOVE the panel so it doesn't run off the
+        # bottom of the display.
+        st = _BubbleStateStub(
+            panel_alts={0: {"yellow": "their"}},
+            shape={0: "wing"},
+        )
+        atw = {"their": 30.0}
+        out = _build_bubbles(
+            st,
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            panel_rect_y=500.0,
+            panel_rect_h=200.0,
+            anchor_position="bottom",
+            alt_text_widths=atw,
+        )
+        assert len(out) == 1
+        # band = 500 - BUBBLE_ROW_H - BUBBLE_TOP_GAP.
+        expected_y = 500.0 - _DC.BUBBLE_ROW_H - _DC.BUBBLE_TOP_GAP
+        assert out[0].y == expected_y, (
+            f"bottom-anchor band y: got {out[0].y}, expected {expected_y}"
+        )
+
+    with test(
+        "L1",
+        "L1.85",
+        "build_bubble_layouts: two non-colliding bubbles keep their ideal_x",
+    ):
+        # Two tokens far apart with narrow bubbles → both sit at their
+        # ideal_x with no shift. v2 placement contract: horizontal-only,
+        # band always 0.
+        st = _BubbleStateStub(
+            panel_alts={
+                0: {"yellow": "their"},
+                2: {"yellow": "aide"},
+            },
+            shape={0: "wing", 2: "frame"},
+        )
+        atw = {"their": 30.0, "aide": 24.0}
+        # 3 tokens: "there" (40 px), "spacer" (200 px), "aid" (20 px).
+        # Token 0 sits at x=0; token 1 at 0 + 40 + TOKEN_GAP_X;
+        # token 2 at 0 + 40 + gap + 200 + gap.
+        gap = _DC.TOKEN_GAP_X
+        out = _build_bubbles(
+            st,
+            tokens=["there", "spacer", "aid"],
+            token_widths=[40.0, 200.0, 20.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            panel_rect_y=0.0,
+            panel_rect_h=50.0,
+            anchor_position="top",
+            alt_text_widths=atw,
+        )
+        assert len(out) == 2, f"expected 2 bubbles; got {len(out)}"
+        # Bubble 0 centered on token 0 (width 40) starting at x=0.
+        shape_w = 12.0 * _DC.BUBBLE_SHAPE_SCALE
+        b0_w = 38.0 + _DC.BUBBLE_INNER_GAP + shape_w  # 30+8 for "their" left chip
+        b0_ideal = 0.0 + (40.0 - b0_w) / 2.0
+        # Bubble 1 centered on token 2 (width 20) starting at token 2's x.
+        token2_x = 0.0 + 40.0 + gap + 200.0 + gap
+        b1_w = 32.0 + _DC.BUBBLE_INNER_GAP + shape_w  # 24+8 for "aide" left chip
+        b1_ideal = token2_x + (20.0 - b1_w) / 2.0
+        # Placement clamps b0_ideal to x_origin=0 if it went negative — the
+        # ideal_x for a wide bubble on a narrow token near x=0 is negative.
+        # Verify against that too: whichever the builder places at is
+        # max(ideal, x_origin), no right-shift because they don't collide.
+        expected_b0 = max(b0_ideal, 0.0)
+        assert out[0].x == expected_b0, (
+            f"bubble 0 x: got {out[0].x}, expected {expected_b0}"
+        )
+        assert out[1].x == b1_ideal, (
+            f"bubble 1 x should equal its ideal_x (no collision, above x_origin); "
+            f"got {out[1].x}, expected {b1_ideal}"
+        )
+        assert out[0].band == 0 and out[1].band == 0
+        assert out[0].token_idx == 0 and out[1].token_idx == 2
+
+    with test(
+        "L1",
+        "L1.86",
+        "build_bubble_layouts: two colliding bubbles → second shifts RIGHT by BUBBLE_OUTER_GAP",
+    ):
+        # Two tokens close together with wide bubbles → second bubble
+        # collides and shifts right to prev_right + BUBBLE_OUTER_GAP. v2
+        # contract: single row; no vertical wrap.
+        st = _BubbleStateStub(
+            panel_alts={
+                0: {"yellow": "their"},
+                1: {"yellow": "aide"},
+            },
+            shape={0: "wing", 1: "frame"},
+        )
+        atw = {"their": 30.0, "aide": 24.0}
+        # Two adjacent tokens: "there" (40 px), "aid" (20 px). Token 1
+        # sits at x = 0 + 40 + TOKEN_GAP_X.
+        gap = _DC.TOKEN_GAP_X
+        out = _build_bubbles(
+            st,
+            tokens=["there", "aid"],
+            token_widths=[40.0, 20.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            panel_rect_y=0.0,
+            panel_rect_h=50.0,
+            anchor_position="top",
+            alt_text_widths=atw,
+        )
+        assert len(out) == 2
+        shape_w = 12.0 * _DC.BUBBLE_SHAPE_SCALE
+        b0_w = 38.0 + _DC.BUBBLE_INNER_GAP + shape_w
+        b1_w = 32.0 + _DC.BUBBLE_INNER_GAP + shape_w
+        b0_ideal = 0.0 + (40.0 - b0_w) / 2.0
+        # Clamp: b0 ideal_x may be < x_origin=0.0.
+        b0_placed = max(b0_ideal, 0.0)
+        b0_right = b0_placed + b0_w
+        # Expected b1 x: prev_right + BUBBLE_OUTER_GAP (they collide when
+        # bubble widths straddle the small gap between token centers).
+        expected_b1 = b0_right + _DC.BUBBLE_OUTER_GAP
+        assert out[0].x == b0_placed
+        assert out[1].x == expected_b1, (
+            f"colliding bubble 1 must shift to prev_right + OUTER_GAP; "
+            f"got {out[1].x}, expected {expected_b1}"
+        )
+        assert out[0].band == 0 and out[1].band == 0, (
+            "v2 single band; no vertical wrap"
+        )
+
+    with test(
+        "L1",
+        "L1.87",
+        "build_bubble_layouts: determinism — identical inputs → dataclass-equal output",
+    ):
+        # Frozen ui.layout.BubbleLayout compares structurally. Two builds
+        # with identical inputs must produce byte-equal lists. Guards
+        # against dict-iteration order dependence in panel_alts / shape
+        # dict traversal, and against per-call state creep.
+        st = _BubbleStateStub(
+            panel_alts={
+                0: {"yellow": "their", "blue": "they're"},
+                1: {"yellow": "aide"},
+            },
+            shape={0: "play", 1: "wing"},
+        )
+        atw = {"their": 30.0, "they're": 42.0, "aide": 24.0}
+        args = dict(
+            tokens=["there", "aid"],
+            token_widths=[40.0, 20.0],
+            x_origin=100.0,
+            y_start=200.0,
+            max_row_w=1000.0,
+            panel_rect_y=300.0,
+            panel_rect_h=50.0,
+            anchor_position="top",
+            alt_text_widths=atw,
+        )
+        out1 = _build_bubbles(st, **args)
+        out2 = _build_bubbles(st, **args)
+        assert out1 == out2, (
+            "identical inputs produced non-equal outputs — builder is not "
+            "deterministic"
+        )
+        # Length parity + per-record equality — makes the failure message
+        # actionable if the top-level equality ever regresses.
+        assert len(out1) == len(out2)
+        for a, b in zip(out1, out2):
+            assert a == b, f"per-record diverged: {a!r} vs {b!r}"
+
+    with test(
+        "L1",
+        "L1.88",
+        "build_bubble_layouts: no state mutation — inputs untouched after build",
+    ):
+        # Purity contract — the builder MUST NOT mutate state,
+        # tokens, token_widths, panel_alts, shape_assignments, or
+        # alt_text_widths. Snapshot before, compare after.
+        st = _BubbleStateStub(
+            panel_alts={0: {"yellow": "their", "blue": "they're"}},
+            shape={0: "play"},
+        )
+        # deep-ish copies for the state maps (they're dicts of dicts)
+        panel_before = {k: dict(v) for k, v in st.homophone_panel_alts.items()}
+        shape_before = dict(st.shape_assignments)
+        tokens_arg = ["there"]
+        widths_arg = [40.0]
+        atw_arg = {"their": 30.0, "they're": 42.0}
+        atw_before = dict(atw_arg)
+        _build_bubbles(
+            st,
+            tokens=tokens_arg,
+            token_widths=widths_arg,
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            panel_rect_y=100.0,
+            panel_rect_h=50.0,
+            anchor_position="top",
+            alt_text_widths=atw_arg,
+        )
+        # State dicts and their nested dicts unchanged.
+        assert st.homophone_panel_alts == panel_before, (
+            f"panel_alts mutated: before={panel_before}, "
+            f"after={st.homophone_panel_alts}"
+        )
+        assert st.shape_assignments == shape_before, (
+            f"shape_assignments mutated: before={shape_before}, "
+            f"after={st.shape_assignments}"
+        )
+        # Argument lists / dicts unchanged.
+        assert tokens_arg == ["there"]
+        assert widths_arg == [40.0]
+        assert atw_arg == atw_before, (
+            f"alt_text_widths mutated: before={atw_before}, after={atw_arg}"
+        )
+
+    with test(
+        "L1",
+        "L1.89",
+        "build_bubble_layouts: returns frozen ui.layout.BubbleLayout (not internal.panel_layout.BubbleLayout)",
+    ):
+        # Type-identity contract: the builder's output MUST be instances
+        # of ui.layout.BubbleLayout. internal/panel_layout.py has its own
+        # class of the same NAME but different shape (mutable __slots__).
+        # A downstream renderer relies on the ui.layout paint-record
+        # fields (token_idx, x, y, w, h, shape_scale, band, ...);
+        # accidentally returning the placement-scratchpad type would
+        # AttributeError at paint time. Lock that in here.
+        import dataclasses as _dc2
+        # Also load the internal.panel_layout module and verify the two
+        # classes are DIFFERENT identities (regression guard against a
+        # future consolidation move accidentally colliding them).
+        pl_spec = importlib.util.spec_from_file_location(
+            "prose_overlay_panel_layout_types",
+            REPO / "internal" / "panel_layout.py",
+        )
+        pl_mod = importlib.util.module_from_spec(pl_spec)
+        pl_spec.loader.exec_module(pl_mod)
+        assert layout_mod_lt.BubbleLayout is not pl_mod.BubbleLayout, (
+            "ui.layout.BubbleLayout and internal.panel_layout.BubbleLayout "
+            "are still separate types — a consolidation move landed but "
+            "this test wasn't updated. Update this test after consolidation."
+        )
+        st = _BubbleStateStub(
+            panel_alts={0: {"yellow": "their"}},
+            shape={0: "wing"},
+        )
+        atw = {"their": 30.0}
+        out = _build_bubbles(
+            st,
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+            panel_rect_y=100.0,
+            panel_rect_h=50.0,
+            anchor_position="top",
+            alt_text_widths=atw,
+        )
+        assert len(out) == 1
+        b = out[0]
+        # Type identity — must be the ui.layout version.
+        assert type(b) is layout_mod_lt.BubbleLayout, (
+            f"output type should be ui.layout.BubbleLayout; got "
+            f"{type(b).__module__}.{type(b).__name__}"
+        )
+        # Frozen check — attempting to mutate must raise FrozenInstanceError.
+        try:
+            b.x = 999.0
+        except _dc2.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError(
+                "returned BubbleLayout accepted mutation — should be frozen"
+            )

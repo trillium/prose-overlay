@@ -169,7 +169,7 @@ def _draw_token_rows(
     y_start   — top of the first row (typically panel_y + PANEL_PAD)
     shape_enabled — when True, paint a Cursorless-style hat shape above each
                     flagged token (Slices 1+2 of HOMOPHONE_SHAPES_PLAN.md).
-                    Shape selection comes from ``instance.shape_assignments``
+                    Shape selection comes from ``instance.state.shape_assignments``
                     (Slice 2's deterministic per-flag allocator). Tokens
                     that are flagged but absent from ``shape_assignments``
                     (pool-overflow case >10 flagged tokens) get no shape;
@@ -177,14 +177,14 @@ def _draw_token_rows(
                     bottom of this function per §4.8 spillover semantics.
     """
     # Slice 2 of HOMOPHONE_SHAPES_PLAN.md — read pre-computed assignments
-    # from instance.shape_assignments (populated by
+    # from instance.state.shape_assignments (populated by
     # shim.actions_core._recompute_hats). Slice 1's round-robin
     # `flagged_rank % 10` has been retired — stable identity across edits
     # is the whole point of this slice. Look up via .get(idx) so the
     # overflow case (>10 flagged tokens, idx omitted from the dict)
     # falls through cleanly with no shape paint.
     shape_for_idx: dict[int, str] = (
-        _instance.shape_assignments if shape_enabled else {}
+        _instance.state.shape_assignments if shape_enabled else {}
     )
 
     y_base = y_start
@@ -221,7 +221,7 @@ def _draw_token_rows(
 
             # Homophone hat shape (Slice 2 — HOMOPHONE_SHAPES_PLAN.md §3)
             # Paint above the existing letter-hat dot when the token has a
-            # shape assignment in instance.shape_assignments AND shape_enabled
+            # shape assignment in instance.state.shape_assignments AND shape_enabled
             # is on. Coexists with the underline (Slice A) — both paint when
             # both flags fire; spillover tokens (idx flagged but missing
             # from shape_assignments because the 10-shape pool exhausted)
@@ -280,7 +280,7 @@ def _draw_token_rows(
 
             if idx in flagged_indices:
                 # Slice A of docs/PHONES_SPEC.md — Scenario 3.
-                # If we have cycle-position info (instance.position_assignments
+                # If we have cycle-position info (instance.state.position_assignments
                 # populated by shim.actions_core._recompute_hats) AND the group
                 # has multiple members, paint a SEGMENTED underline: N
                 # contiguous segments separated by HOMOPHONE_UNDERLINE_GAP_W
@@ -296,7 +296,7 @@ def _draw_token_rows(
                 #   - any segment would be < HOMOPHONE_UNDERLINE_MIN_SEGMENT_W
                 #     (OQ11 — render an unreadably narrow segmented bar as
                 #     solid + log hint once)
-                pos = _instance.position_assignments.get(idx)
+                pos = _instance.state.position_assignments.get(idx)
                 underline_y_base = (
                     y_base + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE + 2
                 )

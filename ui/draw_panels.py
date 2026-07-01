@@ -49,9 +49,9 @@ For 2-member groups (e.g. `your,you're`): one chip only —
 For 4+ member groups: only the first two alts get chips inside the
 bubble. Extras are reachable via cycling (`phone <shape>`).
 
-Reads from `instance.homophone_panel_alts` (already populated by
+Reads from `instance.state.homophone_panel_alts` (already populated by
 `shim.actions_core._recompute_hats` via `shim.shapes.compute_panel_alts`)
-and `instance.shape_assignments` (the per-token shape name). When the
+and `instance.state.shape_assignments` (the per-token shape name). When the
 former is empty, this routine returns without painting.
 
 Geometry strategy: walks the same `rows` list that `_draw_token_rows`

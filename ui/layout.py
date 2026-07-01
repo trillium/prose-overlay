@@ -12,8 +12,8 @@ composable stages:
     paint(canvas, ops)                        # thin Skia adapter
 
 Today, ``draw_overlay`` interleaves geometry computation, state reads
-(``instance.viewport``, ``instance.shape_assignments``,
-``instance.position_assignments``, ``instance.homophone_panel_alts``),
+(``instance.runtime.viewport``, ``instance.state.shape_assignments``,
+``instance.state.position_assignments``, ``instance.state.homophone_panel_alts``),
 Talon setting lookups, and Skia paint calls in one 240-line routine. That
 makes it impossible to headless-test the geometry, impossible to snapshot
 a paint plan without booting Talon + Skia, and impossible for callers to
@@ -134,7 +134,7 @@ class Rect:
 class HatMark:
     """One letter-hat dot above a token character.
 
-    Populated from ``instance.hat_assignments[token_idx]`` in the
+    Populated from ``instance.state.hat_assignments[token_idx]`` in the
     producer. The dot is drawn as a filled circle at the center of
     ``position``; ``letter`` is the addressable letter the user speaks
     (e.g. ``"h"`` in ``t[h]ere``); ``color`` is the palette color name
@@ -153,7 +153,7 @@ class HatMark:
         color      : palette color NAME (not hex). The paint step
                      resolves to hex via ``HAT_COLOR_HEX``. Storing the
                      name (not the hex) keeps the model in the same
-                     vocabulary as ``instance.hat_assignments`` and
+                     vocabulary as ``instance.state.hat_assignments`` and
                      the shape hat, which also live in name-space.
         position   : the dot's bounding rect (typically 2*DOT_RADIUS
                      square, centered on the target character). The
@@ -173,7 +173,7 @@ class ShapeMark:
     Coexists with ``HatMark`` when both apply — per
     ``docs/HOMOPHONE_SHAPES_PLAN.md``, the letter hat and the shape
     hat live on DIFFERENT characters of the same token to avoid
-    visual overlap. Populated from ``instance.shape_assignments`` +
+    visual overlap. Populated from ``instance.state.shape_assignments`` +
     ``shim/shapes.py:shape_char_position``.
 
     Fields:
@@ -256,7 +256,7 @@ class TokenLayout:
         index          : the token's ORIGINAL index in the buffer
                          (not the row-visible index). Preserved so
                          callers can correlate model tokens to
-                         ``instance.buffer`` entries — needed by
+                         ``instance.state.buffer`` entries — needed by
                          debug snapshots and by any future overlay
                          inspector.
         text           : the token string as it will be painted. May
@@ -274,7 +274,7 @@ class TokenLayout:
                          tokens and tokens past ``HAT_ALPHABET``'s
                          limit both fall through).
         shape          : optional shape-hat mark. ``None`` when the
-                         token isn't in ``instance.shape_assignments``
+                         token isn't in ``instance.state.shape_assignments``
                          (unflagged, shape-disabled, or 11th+ group's
                          pool-overflow token).
         underline_segments

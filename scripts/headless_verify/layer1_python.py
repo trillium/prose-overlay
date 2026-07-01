@@ -2585,3 +2585,407 @@ def run_layer_1() -> None:
             raise AssertionError(
                 "returned BubbleLayout accepted mutation — should be frozen"
             )
+
+    # -----------------------------------------------------------------------
+    # Move 4c (selection + flash overlay builders) — ui/layout_overlays.py
+    # Two pure builders that turn a state snapshot + measured widths into
+    # SelectionOverlay | None and FlashOverlay | None. No consumers yet
+    # (Move 4e wires draw_overlay onto them). Tests lock in the extraction:
+    # no-selection/no-flash short-circuits, per-token highlight geometry,
+    # multi-row spans, viewport trim, alpha rewrite, determinism, no
+    # mutation, and frozen type identity.
+    # -----------------------------------------------------------------------
+
+    # Load ui/layout_overlays.py under the same synthetic package tree used
+    # by layout_tokens / layout_bubbles above. draw_constants and ui.layout
+    # are already loaded under po_lt_pkg.
+    lo_spec = importlib.util.spec_from_file_location(
+        "po_lt_pkg.ui.layout_overlays",
+        REPO / "ui" / "layout_overlays.py",
+    )
+    lo_mod = importlib.util.module_from_spec(lo_spec)
+    _sys.modules["po_lt_pkg.ui.layout_overlays"] = lo_mod
+    lo_spec.loader.exec_module(lo_mod)
+
+    # Aliases for concision.
+    _build_selection = lo_mod.build_selection_overlay
+    _build_flash = lo_mod.build_flash_overlay
+
+    # Tiny buffer stub — layout_overlays only calls buffer.get_selection().
+    # State stub exposes .buffer (with get_selection) and .flash_state.
+    class _BufferStub:
+        def __init__(self, sel):
+            self._sel = sel
+
+        def get_selection(self):
+            return self._sel
+
+    class _OverlayStateStub:
+        def __init__(self, selection=None, flash_state=None):
+            self.buffer = _BufferStub(selection)
+            self.flash_state = flash_state or {}
+
+    # Shared highlight-rect geometry helper for the tests. Mirrors
+    # ui/layout_overlays.py:_highlight_rect exactly so the test expectations
+    # don't drift from the implementation constant.
+    def _expected_hl_rect(x, y_base, tw):
+        hl_pad_x = 2
+        hl_y_top = y_base + (_DC.DOT_RADIUS * 2) + _DC.DOT_GAP_Y
+        return (
+            x - hl_pad_x,
+            hl_y_top,
+            tw + hl_pad_x * 2,
+            _DC.TOKEN_FONT_SIZE + 2,
+        )
+
+    with test(
+        "L1",
+        "L1.90",
+        "build_selection_overlay: no selection → None",
+    ):
+        # buffer.get_selection() returns None → builder short-circuits.
+        out = _build_selection(
+            _OverlayStateStub(selection=None),
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is None, f"expected None when no selection; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.91",
+        "build_selection_overlay: single-token span → one rect at exact geometry",
+    ):
+        # Selection = (0, 0) inclusive → one rect covering token 0.
+        # Rect geometry mirrors ui/draw_tokens.py's highlight rect exactly:
+        # (x - 2, y_base + (DOT_RADIUS*2) + DOT_GAP_Y, tw + 4, TOKEN_FONT_SIZE + 2)
+        out = _build_selection(
+            _OverlayStateStub(selection=(0, 0)),
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=100.0,
+            y_start=200.0,
+            max_row_w=1000.0,
+        )
+        assert out is not None, "expected SelectionOverlay; got None"
+        assert type(out) is layout_mod_lt.SelectionOverlay
+        assert len(out.rects) == 1
+        r = out.rects[0]
+        ex_x, ex_y, ex_w, ex_h = _expected_hl_rect(100.0, 200.0, 40.0)
+        assert r.x == ex_x and r.y == ex_y, (
+            f"rect origin: got ({r.x}, {r.y}), expected ({ex_x}, {ex_y})"
+        )
+        assert r.w == ex_w and r.h == ex_h, (
+            f"rect size: got ({r.w}, {r.h}), expected ({ex_w}, {ex_h})"
+        )
+
+    with test(
+        "L1",
+        "L1.92",
+        "build_selection_overlay: multi-token inclusive span → one rect per selected token",
+    ):
+        # Selection = (0, 2) inclusive covers tokens 0, 1, 2 on the same row.
+        # Second rect x = 100 + tw0 + TOKEN_GAP_X = 100 + 10 + 5 = 115.
+        # Third rect x = 115 + tw1 + TOKEN_GAP_X = 115 + 15 + 5 = 135.
+        out = _build_selection(
+            _OverlayStateStub(selection=(0, 2)),
+            tokens=["a", "bb", "ccc"],
+            token_widths=[10.0, 15.0, 20.0],
+            x_origin=100.0,
+            y_start=200.0,
+            max_row_w=1000.0,
+        )
+        assert out is not None
+        assert len(out.rects) == 3, f"expected 3 rects; got {len(out.rects)}"
+        # Verify row order + rect x progression.
+        expected_xs = [100.0, 115.0, 135.0]
+        expected_tws = [10.0, 15.0, 20.0]
+        for i, (want_x, want_tw) in enumerate(zip(expected_xs, expected_tws)):
+            ex_x, ex_y, ex_w, ex_h = _expected_hl_rect(want_x, 200.0, want_tw)
+            r = out.rects[i]
+            assert r.x == ex_x, f"rect[{i}] x: got {r.x}, expected {ex_x}"
+            assert r.w == ex_w, f"rect[{i}] w: got {r.w}, expected {ex_w}"
+            assert r.y == ex_y, f"rect[{i}] y: got {r.y}, expected {ex_y}"
+
+    with test(
+        "L1",
+        "L1.93",
+        "build_selection_overlay: multi-row span → rects on both rows at correct y",
+    ):
+        # tw=40 each, TOKEN_GAP_X=5. Row width limit 100:
+        #   row 0: 40 + 5 + 40 = 85 fits; 3rd token 40 more pushes over.
+        # Row 0 has tokens 0, 1 at y=0. Row 1 has token 2 at y=LINE_HEIGHT.
+        # Selection (0, 2) → one rect per token; token 2 lands on row 1.
+        out = _build_selection(
+            _OverlayStateStub(selection=(0, 2)),
+            tokens=["aa", "bb", "cc"],
+            token_widths=[40.0, 40.0, 40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=100.0,
+        )
+        assert out is not None
+        assert len(out.rects) == 3
+        # Row 0 rects at y_base=0; row 1 rect at y_base=LINE_HEIGHT.
+        hl_y_top_row0 = 0.0 + (_DC.DOT_RADIUS * 2) + _DC.DOT_GAP_Y
+        hl_y_top_row1 = (
+            float(_DC.LINE_HEIGHT) + (_DC.DOT_RADIUS * 2) + _DC.DOT_GAP_Y
+        )
+        assert out.rects[0].y == hl_y_top_row0
+        assert out.rects[1].y == hl_y_top_row0
+        assert out.rects[2].y == hl_y_top_row1, (
+            f"row-1 rect y should be at LINE_HEIGHT band; "
+            f"got {out.rects[2].y}, expected {hl_y_top_row1}"
+        )
+        # Row 1 token x restarts at x_origin.
+        assert out.rects[2].x == 0.0 - 2, (
+            "row-1 first-token x should restart at x_origin; "
+            f"got {out.rects[2].x}"
+        )
+
+    with test(
+        "L1",
+        "L1.94",
+        "build_selection_overlay: reversed range (5, 2) → None (paint would draw nothing)",
+    ):
+        # ui/draw_tokens.py uses `selection[0] <= idx <= selection[1]` which
+        # paints NOTHING when start > end. Builder mirrors: returns None.
+        out = _build_selection(
+            _OverlayStateStub(selection=(5, 2)),
+            tokens=["a", "b", "c"],
+            token_widths=[10.0, 10.0, 10.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is None, f"expected None for reversed range; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.95",
+        "build_selection_overlay: viewport trim omits selection rects on scrolled-off rows",
+    ):
+        # Three tokens, each on its own row (max_row_w=10 forces one-per-row).
+        # max_visible_rows=1 drops rows 0 and 1; only row 2 (token 2) survives.
+        # Selection (0, 2) covers all three; only the surviving token gets
+        # a rect. Matches _draw_token_rows dropping trimmed rows entirely.
+        out = _build_selection(
+            _OverlayStateStub(selection=(0, 2)),
+            tokens=["a", "b", "c"],
+            token_widths=[100.0, 100.0, 100.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=10.0,
+            max_visible_rows=1,
+        )
+        assert out is not None
+        assert len(out.rects) == 1, (
+            f"only surviving token should produce a rect; got {len(out.rects)}"
+        )
+
+    with test(
+        "L1",
+        "L1.96",
+        "build_flash_overlay: no flash_state → None",
+    ):
+        out = _build_flash(
+            _OverlayStateStub(flash_state={}),
+            tokens=["there"],
+            token_widths=[40.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is None, f"expected None when no flash_state; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.97",
+        "build_flash_overlay: flash_state present → FlashOverlay with 30% alpha color",
+    ):
+        # Producer sets flash_state = {"indices": [...], "color": "aabbcc"}.
+        # Builder emits FlashOverlay with color = "aabbcc" + "4d" per the
+        # paint code's `flash_color[:6] + "4d"` rewrite.
+        out = _build_flash(
+            _OverlayStateStub(
+                flash_state={"indices": [0, 2], "color": "aabbcc"},
+            ),
+            tokens=["a", "b", "c"],
+            token_widths=[10.0, 15.0, 20.0],
+            x_origin=100.0,
+            y_start=200.0,
+            max_row_w=1000.0,
+        )
+        assert out is not None
+        assert type(out) is layout_mod_lt.FlashOverlay
+        assert out.color == "aabbcc4d", (
+            f"flash color should be [:6]+'4d'; got {out.color!r}"
+        )
+        # Two rects — token 0 at x=100, token 2 at x = 100 + 10 + 5 + 15 + 5 = 135.
+        assert len(out.rects) == 2
+        assert out.rects[0].x == 100.0 - 2, "token-0 rect x = x_origin - hl_pad"
+        assert out.rects[1].x == 135.0 - 2, (
+            f"token-2 rect x should skip token-1: got {out.rects[1].x}, "
+            f"expected {135.0 - 2}"
+        )
+
+    with test(
+        "L1",
+        "L1.98",
+        "build_flash_overlay: empty indices → None",
+    ):
+        # `indices` present but empty: nothing to paint.
+        out = _build_flash(
+            _OverlayStateStub(
+                flash_state={"indices": [], "color": "ffaa00"},
+            ),
+            tokens=["a"],
+            token_widths=[10.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is None, f"expected None for empty indices; got {out!r}"
+
+    with test(
+        "L1",
+        "L1.99",
+        "build_flash_overlay: color longer than 6 chars is truncated + alpha suffix",
+    ):
+        # Some callers may pass an 8-char color (with alpha). The paint code
+        # slices [:6] before appending "4d"; builder mirrors that exactly.
+        out = _build_flash(
+            _OverlayStateStub(
+                flash_state={"indices": [0], "color": "aabbccff"},
+            ),
+            tokens=["a"],
+            token_widths=[10.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert out is not None
+        assert out.color == "aabbcc4d", (
+            f"color should be sliced to [:6] then get '4d' alpha; "
+            f"got {out.color!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.100",
+        "layout_overlays builders: determinism — same inputs, byte-equal outputs",
+    ):
+        # Purity contract: identical inputs must produce dataclass-equal
+        # outputs across calls. Applies to both builders.
+        sel_state = _OverlayStateStub(selection=(0, 1))
+        flash_state = _OverlayStateStub(
+            flash_state={"indices": [0, 1], "color": "aabbcc"},
+        )
+        args = dict(
+            tokens=["a", "b"],
+            token_widths=[10.0, 15.0],
+            x_origin=100.0,
+            y_start=200.0,
+            max_row_w=1000.0,
+        )
+        sel1 = _build_selection(sel_state, **args)
+        sel2 = _build_selection(sel_state, **args)
+        assert sel1 == sel2, "selection builder is non-deterministic"
+        assert sel1 is not sel2, "must return a fresh instance, not a cached one"
+        flash1 = _build_flash(flash_state, **args)
+        flash2 = _build_flash(flash_state, **args)
+        assert flash1 == flash2, "flash builder is non-deterministic"
+        assert flash1 is not flash2, "must return a fresh instance"
+
+    with test(
+        "L1",
+        "L1.101",
+        "layout_overlays builders: no state mutation — inputs untouched",
+    ):
+        # Purity contract: builders MUST NOT mutate state, tokens,
+        # token_widths, or the flash_state dict. Snapshot before / compare after.
+        flash_dict = {"indices": [0, 1], "color": "aabbcc"}
+        indices_ref = flash_dict["indices"]
+        indices_before = list(indices_ref)
+        state = _OverlayStateStub(selection=(0, 1), flash_state=flash_dict)
+        tokens_arg = ["a", "b"]
+        widths_arg = [10.0, 15.0]
+        _build_selection(
+            state,
+            tokens=tokens_arg,
+            token_widths=widths_arg,
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        _build_flash(
+            state,
+            tokens=tokens_arg,
+            token_widths=widths_arg,
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert tokens_arg == ["a", "b"], f"tokens mutated: {tokens_arg}"
+        assert widths_arg == [10.0, 15.0], f"widths mutated: {widths_arg}"
+        assert flash_dict == {"indices": indices_ref, "color": "aabbcc"}, (
+            f"flash_state top-level mutated: {flash_dict}"
+        )
+        assert indices_ref is flash_dict["indices"], (
+            "flash_state.indices list identity replaced — builder must "
+            "not swap the list reference"
+        )
+        assert list(indices_ref) == indices_before, (
+            f"flash_state.indices mutated: before={indices_before}, "
+            f"after={list(indices_ref)}"
+        )
+
+    with test(
+        "L1",
+        "L1.102",
+        "SelectionOverlay + FlashOverlay outputs are frozen ui.layout dataclasses",
+    ):
+        # Type identity + frozen check — SelectionOverlay/FlashOverlay from
+        # ui/layout.py are @dataclass(frozen=True). Locking the immutability
+        # contract so downstream renderers can rely on it.
+        import dataclasses as _dc3
+        sel_out = _build_selection(
+            _OverlayStateStub(selection=(0, 0)),
+            tokens=["a"],
+            token_widths=[10.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        flash_out = _build_flash(
+            _OverlayStateStub(
+                flash_state={"indices": [0], "color": "aabbcc"},
+            ),
+            tokens=["a"],
+            token_widths=[10.0],
+            x_origin=0.0,
+            y_start=0.0,
+            max_row_w=1000.0,
+        )
+        assert type(sel_out) is layout_mod_lt.SelectionOverlay
+        assert type(flash_out) is layout_mod_lt.FlashOverlay
+        # Attempting to mutate must raise FrozenInstanceError.
+        try:
+            sel_out.rects = []
+        except _dc3.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError(
+                "SelectionOverlay accepted mutation — should be frozen"
+            )
+        try:
+            flash_out.color = "ffffffff"
+        except _dc3.FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError(
+                "FlashOverlay accepted mutation — should be frozen"
+            )

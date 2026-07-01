@@ -56,7 +56,7 @@ def _ensure_loaded() -> None:
 def compute_hat_assignments(
     tokens: list[str],
     old_assignments: dict[int, tuple[int, str, str]] | None = None,
-    stability: str = "balanced",
+    stability: str = "greedy",
     cursor_pos: int | None = None,
     enabled_styles: dict[str, dict] | None = None,
 ) -> dict[int, tuple[int, str, str]]:
@@ -73,7 +73,17 @@ def compute_hat_assignments(
                          stability comparator sees the schema change once
                          (on the first call after the Slice 1 bundle bump)
                          and no more. See docs/BUNDLE_SHAPE_SCOPE.md §6 risk 3.
-        stability: "greedy" | "balanced" | "stable". Default "balanced".
+        stability: "greedy" | "balanced" | "stable". Default "greedy"
+                   (flipped from "balanced" 2026-07-01 per user ask — under
+                   balanced, gray and colored hats collapse into the same
+                   penalty equivalence class, so near-cursor tokens can't
+                   steal a default hat from a farther token holding one.
+                   Under greedy, the equivalence class distinguishes every
+                   penalty, so a near-cursor token with a higher rank grabs
+                   the default hat (possibly on a different character) and
+                   avoids needing a color prefix in the spoken form. See
+                   docs/CURSORLESS_NEAR_CURSOR_BIAS.md for the full analysis
+                   and a live-repro comparison across all three modes.
         cursor_pos: gap index for cursor proximity ranking, or None.
         enabled_styles: opt-in shape-enabled `HatStyleMap`. When ``None``
                         (default), the bundle uses its built-in colors-only

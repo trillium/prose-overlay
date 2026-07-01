@@ -511,3 +511,72 @@ process.stdout.write(out);
                 f"expected {expected_text!r} at char {char}, got {op['text']!r}"
             )
 
+    # L2.15 — Near-cursor default-hat bias (stability="greedy").
+    # Locks the live 2026-07-01 11:44:07 repro: a new `hey` appended at index
+    # 11 (cursor gap 12) should grab a gray hat instead of getting blue-h,
+    # even though `this` at index 6 already holds gray-h. Under "balanced"
+    # this fails (hey→blue-h); under "greedy" the near-cursor rank breaks
+    # stability inertia and hey gets a gray hat (on a different letter — h
+    # stays with `this`). Full analysis: docs/CURSORLESS_NEAR_CURSOR_BIAS.md.
+    with test(
+        "L2",
+        "L2.15",
+        "near-cursor default-hat bias — stability=greedy breaks stability inertia",
+    ):
+        tokens = [
+            "testing", "testing", "testing", "discord", "questions",
+            "in", "this", "discord", "server", "hay", "hey", "hey",
+        ]
+        prior_hats = {
+            0: ("gray", "s"), 1: ("gray", "e"), 2: ("gray", "t"),
+            3: ("gray", "d"), 4: ("gray", "q"), 5: ("gray", "n"),
+            6: ("gray", "h"), 7: ("gray", "i"), 8: ("gray", "r"),
+            9: ("gray", "a"), 10: ("gray", "y"),
+        }
+        old_arr = [
+            {"tokenIdx": idx, "charIdx": 0, "letter": letter,
+             "color": color, "styleName": color}
+            for idx, (color, letter) in prior_hats.items()
+        ]
+        script = f"""
+const code = require('fs').readFileSync('{HAT_JS}', 'utf8');
+eval(code);
+const results = {{}};
+for (const mode of ['balanced', 'greedy']) {{
+  const out = globalThis.proseAllocateHats(
+    JSON.stringify({json.dumps(tokens)}),
+    JSON.stringify({json.dumps(old_arr)}),
+    mode,
+    JSON.stringify(12),
+  );
+  results[mode] = JSON.parse(out);
+}}
+process.stdout.write(JSON.stringify(results));
+"""
+        tmp = pathlib.Path("/tmp/headless-verify-greedy-cursor.js")
+        tmp.write_text(script)
+        proc = subprocess.run(
+            ["bun", str(tmp)], capture_output=True, text=True, timeout=15,
+        )
+        assert proc.returncode == 0, f"bun exit {proc.returncode}: {proc.stderr[:200]}"
+        both = json.loads(proc.stdout)
+        # Balanced: reproduces the reported bug (hey[11] gets a non-gray color).
+        bal_11 = both["balanced"]["11"]
+        assert bal_11["color"] != "gray", (
+            f"L2.15 baseline changed: expected balanced to give hey[11] a non-gray hat "
+            f"(the bug we're guarding against), got {bal_11!r}"
+        )
+        # Greedy: hey[11] gets a gray hat (any letter).
+        greedy_11 = both["greedy"]["11"]
+        assert greedy_11["color"] == "gray", (
+            f"L2.15 regression: greedy should give hey[11] a gray hat, got {greedy_11!r}"
+        )
+        # `this` at index 6 keeps its gray-h under both modes (stability preserved
+        # for the older allocation; only the newer token gets reshuffled).
+        for mode in ("balanced", "greedy"):
+            h6 = both[mode]["6"]
+            assert h6["color"] == "gray" and h6["letter"] == "h", (
+                f"L2.15 stability broken under {mode}: this[6] should stay gray-h, "
+                f"got {h6!r}"
+            )
+

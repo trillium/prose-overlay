@@ -28,7 +28,7 @@ class Actions:
         dst = _hat_to_index(dst_letter, dst_color)
         if src < 0 or dst < 0 or src == dst:
             return
-        tokens = instance.buffer.get_tokens()
+        tokens = instance.state.buffer.get_tokens()
         src_text = tokens[src]
         # Splice locally then commit through the bracket API so rev bumps and
         # the undo record carries the inversion. replace_token would split on
@@ -39,11 +39,11 @@ class Actions:
         new_tokens.pop(dst)
         for i, w in enumerate(words):
             new_tokens.insert(dst + i, w)
-        instance.buffer.commit_start("bring_hat_to_hat", EditKind.STRUCTURAL)
-        instance.buffer.set_tokens_raw(new_tokens)
-        instance.buffer.commit_end()
+        instance.state.buffer.commit_start("bring_hat_to_hat", EditKind.STRUCTURAL)
+        instance.state.buffer.set_tokens_raw(new_tokens)
+        instance.state.buffer.commit_end()
         _recompute_hats()
-        instance.canvas.refresh()
+        instance.runtime.canvas.refresh()
 
     def prose_overlay_move_hat_to_hat(
         src_letter: str, src_color: str,
@@ -54,7 +54,7 @@ class Actions:
         dst = _hat_to_index(dst_letter, dst_color)
         if src < 0 or dst < 0 or src == dst:
             return
-        tokens = instance.buffer.get_tokens()
+        tokens = instance.state.buffer.get_tokens()
         src_text = tokens[src]
         words = src_text.strip().split()
         new_tokens = list(tokens)
@@ -68,8 +68,8 @@ class Actions:
         insert_pos = lo if dst <= src else hi - 1
         for i, w in enumerate(words):
             new_tokens.insert(insert_pos + i, w)
-        instance.buffer.commit_start("move_hat_to_hat", EditKind.STRUCTURAL)
-        instance.buffer.set_tokens_raw(new_tokens)
-        instance.buffer.commit_end()
+        instance.state.buffer.commit_start("move_hat_to_hat", EditKind.STRUCTURAL)
+        instance.state.buffer.set_tokens_raw(new_tokens)
+        instance.state.buffer.commit_end()
         _recompute_hats()
-        instance.canvas.refresh()
+        instance.runtime.canvas.refresh()

@@ -19,30 +19,30 @@ mod = Module()
 
 def _clear_flash():
     """Clear flash state + pending callback and trigger a canvas redraw."""
-    instance.flash_state = {}
-    instance.flash_callback = None
-    if instance.canvas is not None:
-        instance.canvas.refresh()
+    instance.state.flash_state = {}
+    instance.runtime.flash_callback = None
+    if instance.runtime.canvas is not None:
+        instance.runtime.canvas.refresh()
 
 
 def _flash_tokens(indices: list, color: str, callback, duration_ms: int = 150):
     """Highlight the given token indices briefly, then call callback.
 
-    Sets instance.flash_state so draw_overlay renders the colored highlight rect,
+    Sets instance.state.flash_state so draw_overlay renders the colored highlight rect,
     freezes the canvas for an immediate redraw, then schedules a cron job
     to clear the flash and execute the actual action callback.
     """
-    instance.flash_state = {"indices": indices, "color": color}
-    instance.flash_callback = callback
-    if instance.canvas is not None:
-        instance.canvas.refresh()  # redraw with highlight
+    instance.state.flash_state = {"indices": indices, "color": color}
+    instance.runtime.flash_callback = callback
+    if instance.runtime.canvas is not None:
+        instance.runtime.canvas.refresh()  # redraw with highlight
 
     def _after_flash():
-        instance.flash_state = {}
-        cb = instance.flash_callback
-        instance.flash_callback = None
-        if instance.canvas is not None:
-            instance.canvas.refresh()  # redraw without highlight
+        instance.state.flash_state = {}
+        cb = instance.runtime.flash_callback
+        instance.runtime.flash_callback = None
+        if instance.runtime.canvas is not None:
+            instance.runtime.canvas.refresh()  # redraw without highlight
         if cb is not None:
             cb()
 
@@ -72,8 +72,8 @@ def _action_color(action_name: str) -> str:
 class Actions:
     def prose_overlay_get_flash_indices() -> list:
         """Return the list of token indices currently being flashed (empty if none)."""
-        return list(instance.flash_state.get("indices", []))
+        return list(instance.state.flash_state.get("indices", []))
 
     def prose_overlay_get_flash_color() -> str:
         """Return the current flash color hex (6 chars), or '' if no flash."""
-        return instance.flash_state.get("color", "")
+        return instance.state.flash_state.get("color", "")

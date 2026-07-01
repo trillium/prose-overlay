@@ -26,11 +26,11 @@ _PREFS_PATH = os.path.join(os.path.dirname(__file__), "prose_overlay_prefs.json"
 
 def _save_prefs() -> None:
     """Write current preferences to disk."""
-    viewport = instance.viewport
+    viewport = instance.runtime.viewport
     try:
         with open(_PREFS_PATH, "w") as f:
             json.dump({
-                "auto_dictation": instance.auto_dictation,
+                "auto_dictation": instance.state.auto_dictation,
                 "anchor_position": viewport._anchor_position,
             }, f)
     except Exception as e:
@@ -39,13 +39,13 @@ def _save_prefs() -> None:
 
 def _load_prefs() -> None:
     """Load persisted preferences and apply them (called once at module init)."""
-    viewport = instance.viewport
+    viewport = instance.runtime.viewport
     try:
         with open(_PREFS_PATH) as f:
             prefs = json.load(f)
-        instance.auto_dictation = bool(prefs.get("auto_dictation", False))
+        instance.state.auto_dictation = bool(prefs.get("auto_dictation", False))
         _sync_tags()  # canvas is not showing at init, so tags derive cleanly
-        print(f"prose_overlay: auto-dictation restored to {'ON' if instance.auto_dictation else 'OFF'}")
+        print(f"prose_overlay: auto-dictation restored to {'ON' if instance.state.auto_dictation else 'OFF'}")
         pos = prefs.get("anchor_position", "top")
         viewport.set_anchor_position(pos)
         print(f"prose_overlay: anchor position restored to '{pos}'")
@@ -67,23 +67,23 @@ class Actions:
         if not settings.get("user.prose_overlay_enabled"):
             return
 
-        viewport = instance.viewport
+        viewport = instance.runtime.viewport
         # Record window title and capture anchor rect for window-scoped layout.
         try:
             win = ui.active_window()
-            instance.target_window_title = win.title or ""
+            instance.state.target_window_title = win.title or ""
             viewport.set_anchor_rect(win.rect)
         except Exception:
-            instance.target_window_title = ""
+            instance.state.target_window_title = ""
             viewport.set_anchor_rect(None)
 
-        instance.buffer.clear()
-        instance.target_recall_name = None
+        instance.state.buffer.clear()
+        instance.state.target_recall_name = None
         viewport.set_scroll_offset(0)
         from .actions_cursor import _prose_overlay_clear_cursor
         _prose_overlay_clear_cursor()
         _recompute_hats()
-        instance.canvas.show()
+        instance.runtime.canvas.show()
         _sync_tags()  # canvas.is_showing is now True
         from ..internal.debug import emit_if_changed
         emit_if_changed("show")
@@ -97,39 +97,39 @@ class Actions:
         from .actions_flash import _clear_flash
         _prose_overlay_clear_cursor()
         _clear_flash()
-        instance.viewport.set_scroll_offset(0)
-        instance.canvas.hide()
-        instance.buffer.clear()
+        instance.runtime.viewport.set_scroll_offset(0)
+        instance.runtime.canvas.hide()
+        instance.state.buffer.clear()
         _sync_tags()  # canvas.is_showing is now False
         from ..internal.debug import emit_if_changed
         emit_if_changed("hide")
-        instance.target_window_title = ""
-        instance.target_recall_name = None
-        instance.help_visible = False
-        instance.help_page = 0
+        instance.state.target_window_title = ""
+        instance.state.target_recall_name = None
+        instance.state.help_visible = False
+        instance.state.help_page = 0
         # Return to command mode — paired with the enable in prose_overlay_show.
         actions.mode.enable("command")
         # In auto mode, keep dictation active so the next phrase routes through
         # the dictation_insert shim and re-opens the overlay automatically.
         # Without this, the hide would drop dictation and the next phrase would
         # land in command mode where the shim never fires.
-        if not instance.auto_dictation:
+        if not instance.state.auto_dictation:
             actions.mode.disable("dictation")
 
     def prose_overlay_toggle_auto_dictation():
         """Toggle auto-show prose overlay on any dictation phrase."""
-        instance.auto_dictation = not instance.auto_dictation
-        _sync_tags()  # derives correct tag state from canvas + instance.auto_dictation
+        instance.state.auto_dictation = not instance.state.auto_dictation
+        _sync_tags()  # derives correct tag state from canvas + instance.state.auto_dictation
         _save_prefs()
-        print(f"prose_overlay: auto-dictation {'ON' if instance.auto_dictation else 'OFF'}")
+        print(f"prose_overlay: auto-dictation {'ON' if instance.state.auto_dictation else 'OFF'}")
 
     def prose_overlay_is_active() -> bool:
         """Check if the prose overlay is currently showing."""
-        return instance.canvas.is_showing
+        return instance.runtime.canvas.is_showing
 
     def prose_overlay_get_selection() -> list:
         """Return [start, end] selection indices, or [] if no selection."""
-        sel = instance.buffer.get_selection()
+        sel = instance.state.buffer.get_selection()
         if sel is None:
             return []
         return list(sel)
@@ -146,24 +146,24 @@ class Actions:
         wiring up the full debug-mode JSONL stream. Output: tokens, hats,
         cursor, change mode, canvas-showing, JS-fallback flag.
         """
-        tokens = instance.buffer.get_tokens()
-        hats = dict(instance.hat_assignments) if instance.hat_assignments else {}
+        tokens = instance.state.buffer.get_tokens()
+        hats = dict(instance.state.hat_assignments) if instance.state.hat_assignments else {}
         unhatted = [i for i in range(len(tokens)) if i not in hats]
         print(f"prose_overlay: dump — {len(tokens)} tokens")
         for i, t in enumerate(tokens):
             h = hats.get(i)
             mark = f"{h[2]}-{h[1]}" if h else "NO HAT"
             print(f"  [{i}] {t!r:30} → {mark}")
-        print(f"  showing={instance.canvas.is_showing} cursor={instance.cursor} "
+        print(f"  showing={instance.runtime.canvas.is_showing} cursor={instance.state.cursor} "
               f"change_mode={getattr(instance, 'change_mode', False)} "
-              f"hat_js_fallback={instance.hat_js_fallback} unhatted={unhatted}")
+              f"hat_js_fallback={instance.state.hat_js_fallback} unhatted={unhatted}")
 
     def prose_overlay_set_homophone_hint(enabled: int):
         """Enable (1) or disable (0) the homophone-underline indicator (slice A)."""
         from ..internal import homophones as _h
         _h.set_hint_enabled(bool(enabled))
-        if instance.canvas.is_showing:
-            instance.canvas.refresh()
+        if instance.runtime.canvas.is_showing:
+            instance.runtime.canvas.refresh()
         print(f"prose_overlay: homophone hint {'ON' if enabled else 'OFF'}")
 
     def prose_overlay_set_homophone_shapes(enabled: int):
@@ -177,8 +177,8 @@ class Actions:
         """
         from ..shim import shapes as _s
         _s.set_shapes_enabled(bool(enabled))
-        if instance.canvas.is_showing:
-            instance.canvas.refresh()
+        if instance.runtime.canvas.is_showing:
+            instance.runtime.canvas.refresh()
         print(f"prose_overlay: homophone shapes {'ON' if enabled else 'OFF'}")
 
     def prose_overlay_clear_buffer():
@@ -198,14 +198,14 @@ class Actions:
         from .actions_flash import _clear_flash
         _prose_overlay_clear_cursor()
         _clear_flash()
-        instance.buffer.clear()
-        instance.viewport.set_scroll_offset(0)
-        instance.change_mode = False
-        instance._last_input_source = "init"
+        instance.state.buffer.clear()
+        instance.runtime.viewport.set_scroll_offset(0)
+        instance.state.change_mode = False
+        instance.state._last_input_source = "init"
         from ..shim.actions_core import _recompute_hats
         _recompute_hats()
-        if instance.canvas is not None:
-            instance.canvas.refresh()
+        if instance.runtime.canvas is not None:
+            instance.runtime.canvas.refresh()
         from ..internal.debug import emit_if_changed
         emit_if_changed("clear_buffer")
         print("prose_overlay: buffer cleared (canvas still showing)")
@@ -243,10 +243,10 @@ class Actions:
         from .actions_flash import _clear_flash
         _prose_overlay_clear_cursor()
         _clear_flash()
-        if instance.canvas is not None and instance.canvas.is_showing:
-            instance.canvas.hide()
-        if instance.history_overlay is not None and instance.history_overlay.is_showing:
-            instance.history_overlay.hide()
+        if instance.runtime.canvas is not None and instance.runtime.canvas.is_showing:
+            instance.runtime.canvas.hide()
+        if instance.runtime.history_overlay is not None and instance.runtime.history_overlay.is_showing:
+            instance.runtime.history_overlay.hide()
         instance.reset()
         _sync_tags()
         from ..internal.debug import emit_if_changed

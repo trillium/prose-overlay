@@ -18,37 +18,37 @@ mod = Module()
 class Actions:
     def prose_overlay_help_toggle():
         """Toggle the help panel visibility."""
-        instance.help_visible = not instance.help_visible
-        instance.canvas.refresh()
+        instance.state.help_visible = not instance.state.help_visible
+        instance.runtime.canvas.refresh()
 
     def prose_overlay_help_visible() -> bool:
         """Return whether the help panel is currently visible."""
-        return instance.help_visible
+        return instance.state.help_visible
 
     def prose_overlay_help_page() -> int:
         """Return the current help page index."""
-        return instance.help_page
+        return instance.state.help_page
 
     def prose_overlay_help_next():
         """Advance to next help page (wraps)."""
         from .help import HELP_PAGES
-        instance.help_page = (instance.help_page + 1) % len(HELP_PAGES)
-        instance.canvas.refresh()
+        instance.state.help_page = (instance.state.help_page + 1) % len(HELP_PAGES)
+        instance.runtime.canvas.refresh()
 
     def prose_overlay_help_back():
         """Go to previous help page (wraps)."""
         from .help import HELP_PAGES
-        instance.help_page = (instance.help_page - 1) % len(HELP_PAGES)
-        instance.canvas.refresh()
+        instance.state.help_page = (instance.state.help_page - 1) % len(HELP_PAGES)
+        instance.runtime.canvas.refresh()
 
     def prose_overlay_help_bigger():
         """Increase the help footer font size by 2pt and refresh."""
-        draw_mod = instance.draw_mod
+        draw_mod = instance.runtime.draw_mod
         draw_mod.HINT_FONT_SIZE = min(draw_mod.HINT_FONT_SIZE + 2, 28)
-        instance.canvas.refresh()
+        instance.runtime.canvas.refresh()
 
     def prose_overlay_help_smaller():
         """Decrease the help footer font size by 2pt and refresh."""
-        draw_mod = instance.draw_mod
+        draw_mod = instance.runtime.draw_mod
         draw_mod.HINT_FONT_SIZE = max(draw_mod.HINT_FONT_SIZE - 2, 8)
-        instance.canvas.refresh()
+        instance.runtime.canvas.refresh()

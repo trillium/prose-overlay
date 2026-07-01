@@ -593,7 +593,7 @@ def run_layer_1() -> None:
         # Reset viewport rect to None, call again — must produce None,
         # not raise. This mirrors the common case where the overlay is
         # showing full-screen (no window scope).
-        inst.viewport.set_anchor_rect(None)
+        inst.runtime.viewport.set_anchor_rect(None)
         snap2 = debug_mod._snapshot()
         assert snap2["viewport_anchor_rect_summary"] is None, (
             f"rect_summary must be None when anchor rect is None; got {snap2['viewport_anchor_rect_summary']!r}"
@@ -602,12 +602,12 @@ def run_layer_1() -> None:
     with test("L1", "L1.14", "reset() preserves object identity of buffer/canvas/etc."):
         # Object refs created at module init should NOT be reassigned.
         inst = ProseOverlayState()
-        inst.buffer = ProseBuffer()
-        b_id = id(inst.buffer)
+        inst.state.buffer = ProseBuffer()
+        b_id = id(inst.state.buffer)
         # canvas and viewport are typically created by prose_overlay.py;
         # reset() should leave None alone and not reassign existing refs.
         inst.reset()
-        assert id(inst.buffer) == b_id, "buffer object identity should be preserved"
+        assert id(inst.state.buffer) == b_id, "buffer object identity should be preserved"
 
     homophones_spec = importlib.util.spec_from_file_location(
         "prose_overlay_homophones",

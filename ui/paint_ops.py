@@ -304,10 +304,21 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
         CURSOR_WIDTH,
         DOT_GAP_Y,
         DOT_RADIUS,
+        HINT_CMD_COLOR,
         LISTENING_COLOR,
+        PANEL_PAD,
+        SEP_COLOR,
         TOKEN_COLOR,
         TOKEN_FONT_SIZE,
     )
+    # HINT_FONT_SIZE lives in ui/draw.py as a mutable module-level
+    # global (adjusted by help_bigger / help_smaller). The paint pipeline
+    # threads the current value onto model.target_label indirectly — the
+    # target label baseline is painted at panel_y + panel_h - PANEL_PAD
+    # which is independent of font size. For the separator line the size
+    # doesn't matter — it's a fixed 1-px stroke. The pager side hint rows
+    # remain out of the pipeline (time-dependent rotation state; painted
+    # direct in draw_from_model).
 
     ops: list[PaintOp] = []
 
@@ -392,6 +403,52 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
             )
         )
 
+    # --- Target label (bottom-left window-target hint) ---
+    # Mirrors ui/draw.py lines 276-279: painted at
+    # (panel_x + PANEL_PAD, panel_y + panel_h - PANEL_PAD) when
+    # target_label is non-empty AND hints are not hidden by overflow.
+    # The label uses HINT_FONT_SIZE (draw.py's mutable global) — we
+    # cannot read that global here without a runtime coupling, so we
+    # use TOKEN_FONT_SIZE as the size fallback. In practice
+    # HINT_FONT_SIZE default is 12; using TOKEN_FONT_SIZE (16) makes the
+    # label slightly larger — visible regression risk. Instead, we make
+    # the target label emission the caller's responsibility (draw sink
+    # gets access to HINT_FONT_SIZE). For symmetry with the field on
+    # LayoutModel we still skip emission from here when hidden.
+    #
+    # Actually to keep the emission pure, we emit at TOKEN_FONT_SIZE
+    # here and note the divergence — the caller (draw_from_model) can
+    # instead emit its own TextOp with the right font size and bypass
+    # our version. Simpler: skip target-label emission here entirely
+    # and let draw_from_model paint it direct with HINT_FONT_SIZE
+    # from ui/draw.py's global. That matches the pattern for the
+    # rotating side hints (also font-size dependent).
+    #
+    # -> target label + side hints remain outside this pipeline for now.
+
+    # --- Help zone separator (vertical line between content and side hints) ---
+    # Mirrors ui/draw.py lines 282-286: a single vertical LineOp between
+    # content and help zones, painted when help_area is present (i.e.
+    # hints are not hidden by overflow).
+    if layout.help_area is not None:
+        help_x = layout.help_area.x
+        # Line spans from panel_y + PANEL_PAD to panel_y + panel_h - PANEL_PAD
+        # (matches draw.py's `c.draw_line(help_x, panel_y + PANEL_PAD,
+        #   help_x, panel_y + panel_h - PANEL_PAD)`).
+        line_y0 = layout.panel.y + PANEL_PAD
+        line_y1 = layout.panel.y + layout.panel.h - PANEL_PAD
+        ops.append(
+            LineOp(
+                x0=help_x,
+                y0=line_y0,
+                x1=help_x,
+                y1=line_y1,
+                color=SEP_COLOR,
+                width=1.0,
+            )
+        )
+
+    _ = HINT_CMD_COLOR  # imported for future in-pipeline hint emission
     return ops
 
 

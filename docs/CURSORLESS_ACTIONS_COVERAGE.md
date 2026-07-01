@@ -35,8 +35,8 @@ fixed."
 
 ```
 Total fixtures walked:      188
-[x] full pass:              2   (green)
-[~] partial (state divergence with diff): 13
+[x] full pass:              4   (green)
+[~] partial (state divergence with diff): 11
 [!] bundle-error:           0
 [skip] unsupported action:  125
 [skip] non-plaintext:       38
@@ -46,12 +46,14 @@ Total fixtures walked:      188
                                      total skipped = 173
 ```
 
-Runnable = 15 (2 full-pass + 13 partial). Skip = 173.
+Runnable = 15 (4 full-pass + 11 partial). Skip = 173.
 
 ## What passes today
 
 | Fixture | Action | Notes |
 |---|---|---|
+| `bringAirAfterAir.yml` | `replaceWithTarget` | `insertionMode: after` — bundle wraps source text with a leading space delimiter and applies closedClosed cursor-shift semantics (cursor at 1 stays at 1 because insert lands at cursor position, not before it). See gap-fix note below. |
+| `bringAirBeforeAir.yml` | `replaceWithTarget` | `insertionMode: before` — bundle wraps source text with a trailing space delimiter; cursor at 1 shifts rightwards by insert length (2) to 3. See gap-fix note below. |
 | `cloneToken4.yml` | `insertCopyAfter` | Cursor lands in the same char position after `containingScope:token` clone happens to align our end-of-token cursor with cursorless's. |
 | `cloneUpToken3.yml` | `insertCopyBefore` | Same alignment coincidence with `containingScope:token` upstream clone. |
 
@@ -63,7 +65,7 @@ sections below.
 
 | Action | Runnable fixtures | Full pass | Partial |
 |---|---|---|---|
-| `replaceWithTarget` | 4 | 0 | 4 |
+| `replaceWithTarget` | 4 | 2 | 2 |
 | `insertCopyAfter` | 5 (of 8 plaintext-single-line) | 1 | 4 |
 | `insertCopyBefore` | 5 (of 8 plaintext-single-line) | 1 | 4 |
 | `wrapWithPairedDelimiter` | 1 | 0 | 1 |
@@ -82,20 +84,45 @@ survives the MVP filter, or JS bundle lacks the geometry):
 
 Ordered by impact — a gap that unblocks many fixtures ranks higher.
 
-### 1. `bring` does not insert a space padding at token boundaries
+### 1. `bring` does not insert a space padding at token boundaries — FIXED
 
-Fixtures: `bringAirBeforeAir`, `bringAirAfterAir` — text expected `"a a"`,
-we produce `"aa"`.
+Fixtures: `bringAirBeforeAir`, `bringAirAfterAir` — previously produced
+`"aa"` where cursorless produces `"a a"`.
 
-Cursorless's `replaceWithTarget` uses cursorless's token model — inserting
-`a` after token `a` produces a two-word sequence with implicit whitespace
-between tokens. Our bundle operates in flat char space and does not add
-whitespace when inserting at a token boundary. Fix requires a bundle-side
-"token-aware insertion mode" — cursorless-engine ships this via
-`insertionRangeOverlap` + destination-modifier chain, TODO for us.
+Root cause: our JS bundle only received the pre-collapsed destination range
+from Python and had no way to know whether the collapse came from a
+`before` / `after` / `to` `insertionMode`. Upstream `DestinationImpl.
+constructChangeEdit` at `packages/cursorless-engine/src/processTargets/
+targets/DestinationImpl.ts:87-107` inspects the mode and wraps the text
+with `insertionDelimiter` (a single space for plaintext token targets) via
+`getEditText` — that's what preserves the token boundary.
 
-Recommend: track under `docs/BUNDLE_REST_SCOPE.md` as a bundle enhancement
-(NOT a Layer 7 fix — Layer 7 is the reporter).
+Fix (2026-07-01):
+
+* `packages/cursorless-engine/src/actions/proseActionsStandalone.ts` —
+  `TargetObj` grows optional `insertionMode` + `insertionDelimiter` fields;
+  new `prepareDestChange` helper mirrors upstream's before/after collapse +
+  delimiter wrap. `actionReplaceWithTarget` and `actionMoveToTarget` route
+  through it. Legacy 4-arg callers (the shim's live `prose_overlay_
+  bring_move` path — cursor-gap destination, no mode) get the pre-fix
+  behaviour verbatim.
+* `scripts/headless_verify/layer7_cursorless_actions.py` —
+  `_resolve_destination` now returns `(base_range, insertion_mode)` without
+  collapsing; the bundle handles the collapse + wrap. `_target_obj` grows
+  a keyword `insertion_mode=` param.
+* Cursor semantics for before/after: `actionReplaceWithTarget` now shifts
+  the initial cursor through the insert using `closedClosed` selection
+  semantics (insert at position P shifts cursor at C rightwards by insert
+  length iff P < C). Matches upstream `performEditsAndUpdate
+  FullSelectionInfos`. This is what lands `bringAirBeforeAir`'s cursor at
+  3 and `bringAirAfterAir`'s at 1.
+
+Related but out of scope for this fix: `bringAirToEndOfAir` and
+`bringAirToStartOfAir` still `[~ PARTIAL]` on cursor (text OK) — those use
+`insertionMode: to` which takes the range verbatim and lands the cursor at
+the leading edge of the replaced range. Upstream leaves the cursor at the
+END of the replaced region — a symmetric shift-through-edits calculation
+but distinct math from the before/after case. Tracked as gap #5 below.
 
 ### 2. Cursor position after `insertCopyAfter/Before` diverges
 

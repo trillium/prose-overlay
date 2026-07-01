@@ -365,6 +365,38 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
 
     ops: list[PaintOp] = []
 
+    # --- Selection overlay (paints BEHIND token text) ---
+    # Mirrors ui/draw_tokens.py:_draw_token_rows lines 259-274. The old
+    # paint code emits highlight-then-text per token so the selection wash
+    # sits UNDER the token glyphs. The model batches all selection rects
+    # into layout.selection.rects (already in row-visible paint order);
+    # we emit them as one batch BEFORE the token loop so tokens paint on
+    # top. Semantic equivalence: same alpha, same rects, same z-order.
+    #
+    # Color: hardcoded "089ad340" (blue 25% alpha) matching draw_tokens.py
+    # line 263. The SelectionOverlay dataclass doesn't carry a color per
+    # its module docstring — "Colored by the paint step with the current
+    # selection color."
+    #
+    # Note: draw_tokens.py routes highlight rects through
+    # ``draw_rounded_rect`` with corner radius 3. We mirror that with
+    # ``RoundedRectOp`` (radius 3) for byte-equivalent pixel output.
+    # ui/layout.py:SelectionOverlay stores AABBs; the rounding is a
+    # paint-time choice preserved here for live-parity.
+    if layout.selection is not None:
+        for r in layout.selection.rects:
+            ops.append(
+                RoundedRectOp(
+                    x=r.x,
+                    y=r.y,
+                    w=r.w,
+                    h=r.h,
+                    radius=3.0,
+                    color="089ad340",
+                    stroke=False,
+                )
+            )
+
     # --- Listening placeholder OR per-token text ---
     if not layout.tokens:
         # Empty buffer: paint the "listening..." affordance at the

@@ -359,8 +359,9 @@ def run_layer_1() -> None:
         assert "from .history_persist import load_history" in inst_src, (
             "instance.reset() must import load_history from history_persist"
         )
-        assert "self.history = load_history()" in inst_src, (
-            "instance.reset() must assign self.history from load_history()"
+        assert "self.state.history = load_history()" in inst_src, (
+            "instance.reset() must assign self.state.history from load_history() "
+            "(Move 2 step 7/7 — legacy self.history alias removed)"
         )
         # Also verify the persistence file name matches the docstring
         # promise made in visibility's reset() docstring.

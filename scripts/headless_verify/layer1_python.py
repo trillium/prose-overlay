@@ -4109,8 +4109,14 @@ def run_layer_1() -> None:
         Fields to_paint_ops actually consumes: tokens, content_area
         (only when tokens is empty), cursor. Everything else is passed
         as innocuous defaults so the model constructs.
+
+        Panel is ZERO-sized by default so ``to_paint_ops`` short-circuits
+        the panel-frame emission (Step 10 of paint-pipeline retirement
+        added frame RoundedRectOps for non-zero panels). Tests that
+        specifically exercise the frame construct their own model with
+        a positive panel size.
         """
-        panel = _Rect_layout(x=0.0, y=0.0, w=100.0, h=100.0)
+        panel = _Rect_layout(x=0.0, y=0.0, w=0.0, h=0.0)
         ca = content_area or _Rect_layout(x=10.0, y=20.0, w=80.0, h=80.0)
         return _LayoutModelPO(
             panel=panel,
@@ -4831,6 +4837,11 @@ def run_layer_1() -> None:
     # ----- L1.156-L1.157 — help-zone separator emission -----------------
 
     def _mk_model_with_help(help_area):
+        # Panel size stays positive here because the separator line's y0
+        # / y1 test (L1.157) asserts against panel_y + PANEL_PAD /
+        # panel_y + panel_h - PANEL_PAD. Downstream ops-count assertions
+        # in this helper's callers must filter out the two panel-frame
+        # RoundedRectOps that emit for w>0 h>0 (Step 10 retirement).
         panel = _Rect_layout(x=0.0, y=0.0, w=1000.0, h=200.0)
         ca = _Rect_layout(x=12.0, y=12.0, w=776.0, h=176.0)
         return _LayoutModelPO(
@@ -5082,8 +5093,13 @@ def run_layer_1() -> None:
     _BubbleLayout = _po_layout.BubbleLayout
 
     def _mk_model_with_bubbles(bubbles):
-        """Model carrying only bubbles (empty tokens, no cursor)."""
-        panel = _Rect_layout(x=0.0, y=0.0, w=1000.0, h=200.0)
+        """Model carrying only bubbles (empty tokens, no cursor).
+
+        Zero-sized panel keeps the panel-frame RoundedRectOps out of the
+        ops list so bubble-op count assertions stay pure. Tests that
+        specifically care about the frame construct their own model.
+        """
+        panel = _Rect_layout(x=0.0, y=0.0, w=0.0, h=0.0)
         ca = _Rect_layout(x=12.0, y=12.0, w=776.0, h=176.0)
         return _LayoutModelPO(
             panel=panel,
@@ -5342,3 +5358,102 @@ def run_layer_1() -> None:
         # Row 2: same shape.
         assert ops[2].text == '"pre <hat>"' and ops[2].color == _DC_PO.HINT_CMD_COLOR
         assert ops[3].text == "cursor before" and ops[3].color == _DC_PO.HINT_COLOR
+
+    # ----- L1.169 — panel frame emission (Step 10 of paint retirement) --
+
+    with test(
+        "L1",
+        "L1.169",
+        "to_paint_ops: panel frame → two RoundedRectOps (filled bg, stroked border) as FIRST ops",
+    ):
+        # Positive-size panel triggers frame emission. _mk_empty_model_po
+        # defaults to a ZERO panel for parity with pre-Step-10 tests.
+        panel = _Rect_layout(x=0.0, y=0.0, w=100.0, h=100.0)
+        ca = _Rect_layout(x=10.0, y=20.0, w=80.0, h=80.0)
+        model = _LayoutModelPO(
+            panel=panel,
+            content_area=ca,
+            help_area=None,
+            tokens=[],
+            selection=None,
+            flash=None,
+            bubbles=[],
+            help=None,
+            cursor=None,
+            target_label="",
+            using_fallback=False,
+            hints_hidden_by_overflow=False,
+        )
+        ops = _to_paint_ops(model)
+        # First two ops must be the panel frame (filled bg + stroked border).
+        assert len(ops) >= 2, f"expected at least 2 ops (bg + border); got {ops!r}"
+        first_bg = ops[0]
+        first_border = ops[1]
+        assert isinstance(first_bg, _RoundedRectOp), (
+            f"first op should be panel bg RoundedRectOp; got {type(first_bg).__name__}"
+        )
+        assert first_bg.stroke is False and first_bg.color == _DC_PO.BG_COLOR
+        assert first_bg.radius == _DC_PO.PANEL_RADIUS
+        assert (first_bg.x, first_bg.y, first_bg.w, first_bg.h) == (0.0, 0.0, 100.0, 100.0)
+        assert isinstance(first_border, _RoundedRectOp)
+        assert first_border.stroke is True and first_border.color == _DC_PO.BORDER_COLOR
+        assert first_border.stroke_width == 1.0
+        assert (first_border.x, first_border.y, first_border.w, first_border.h) == (0.0, 0.0, 100.0, 100.0)
+
+    with test(
+        "L1",
+        "L1.170",
+        "to_paint_ops: panel frame uses fallback colors when using_fallback=True",
+    ):
+        panel = _Rect_layout(x=0.0, y=0.0, w=100.0, h=100.0)
+        ca = _Rect_layout(x=10.0, y=20.0, w=80.0, h=80.0)
+        model = _LayoutModelPO(
+            panel=panel,
+            content_area=ca,
+            help_area=None,
+            tokens=[],
+            selection=None,
+            flash=None,
+            bubbles=[],
+            help=None,
+            cursor=None,
+            target_label="",
+            using_fallback=True,
+            hints_hidden_by_overflow=False,
+        )
+        ops = _to_paint_ops(model)
+        assert ops[0].color == _DC_PO.BG_COLOR_FALLBACK, (
+            f"bg should use fallback; got {ops[0].color!r}"
+        )
+        assert ops[1].color == _DC_PO.BORDER_COLOR_FALLBACK, (
+            f"border should use fallback; got {ops[1].color!r}"
+        )
+
+    with test(
+        "L1",
+        "L1.171",
+        "to_paint_ops: zero-size panel emits NO frame ops (short-circuit parity)",
+    ):
+        panel = _Rect_layout(x=0.0, y=0.0, w=0.0, h=0.0)
+        ca = _Rect_layout(x=0.0, y=0.0, w=0.0, h=0.0)
+        model = _LayoutModelPO(
+            panel=panel,
+            content_area=ca,
+            help_area=None,
+            tokens=[],
+            selection=None,
+            flash=None,
+            bubbles=[],
+            help=None,
+            cursor=None,
+            target_label="",
+            using_fallback=False,
+            hints_hidden_by_overflow=False,
+        )
+        ops = _to_paint_ops(model)
+        # Zero-size panel → no panel-frame RoundedRectOps. The listening
+        # placeholder TextOp still emits at the content_area origin.
+        rrects = [o for o in ops if isinstance(o, _RoundedRectOp)]
+        assert len(rrects) == 0, (
+            f"zero-size panel should emit no RoundedRectOps; got {rrects!r}"
+        )

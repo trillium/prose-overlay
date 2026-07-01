@@ -134,10 +134,71 @@ def draw_from_model(
     )
 
     # --- Everything else routes through the PaintOp pipeline ---
-    # Listening placeholder text, per-token text, cursor change-zone,
-    # cursor line — all emitted by to_paint_ops(model) and dispatched
-    # by execute(ops, canvas). Paint order is preserved exactly.
+    # Panel frame, listening placeholder, per-token text, hats, shapes,
+    # underlines, cursor, help-zone separator, selection, flash, bubbles
+    # — all emitted by to_paint_ops(model) and dispatched by execute().
     execute(to_paint_ops(model), c)
+
+    # --- Target label (bottom-left window-target hint) ---
+    # Direct paint — HINT_FONT_SIZE is a mutable module-level global in
+    # ui/draw.py adjusted by help_bigger / help_smaller commands. TextOp
+    # doesn't carry a mutable font-size handle so this stays outside the
+    # pipeline. Mirrors ui/draw.py:draw_overlay lines 275-279 exactly.
+    from . import draw as _draw_mod
+    from ..internal.draw_constants import HINT_CMD_COLOR as _HINT_CMD_COLOR
+    if model.target_label and not model.hints_hidden_by_overflow:
+        c.paint.textsize = _draw_mod.HINT_FONT_SIZE
+        c.paint.color = _HINT_CMD_COLOR
+        c.draw_text(
+            model.target_label,
+            panel_rect.x + PANEL_PAD,
+            panel_rect.y + panel_rect.height - PANEL_PAD,
+        )
+
+    # --- Rotating side hints (wall-clock-driven ring buffer) ---
+    # Direct paint — rotate_help_ring_buffer is time-dependent (rotates
+    # one entry every HELP_ROTATE_INTERVAL_MS). Pure paint_ops can't
+    # express time-dependent state without a rotation-cursor input on
+    # the model; the rotating side hints stay outside the pipeline like
+    # the target label above. Mirrors ui/draw.py:draw_overlay lines
+    # 281-304 exactly, keyed off model.help_area (which is None when
+    # hints are hidden by overflow — matches the old
+    # ``not _hints_hidden_by_overflow`` guard).
+    if model.help_area is not None:
+        from ..internal.draw_constants import (
+            HINT_COLOR as _HINT_COLOR,
+            LINE_HEIGHT as _LINE_HEIGHT,
+        )
+        from .help import rotate_help_ring_buffer, HELP_COMMAND_POOL
+        from .draw_tokens import _fit_text
+        hint_font_size = _draw_mod.HINT_FONT_SIZE
+        hint_row_h = hint_font_size + 6
+        # help_area.w already excludes the 2*PANEL_PAD margin per the
+        # ui/layout_root.py orchestrator (help_area.w = help_w - PANEL_PAD*2).
+        # The old paint code used `help_w` (raw) and subtracted the
+        # padding inside the loop. We derive raw help_w by adding the
+        # padding back so cmd_col_w = (help_w - PANEL_PAD*2) * 0.48
+        # yields the same value as model.help_area.w * 0.48.
+        cmd_col_w = model.help_area.w * 0.48
+        desc_col_w = model.help_area.w - cmd_col_w
+        # hint_pad_x = help_x + PANEL_PAD. The model's help_area.x is
+        # already the separator's x (= panel_x + content_w); PANEL_PAD
+        # inside sets the first-column x. Matches ui/draw.py line 289.
+        hint_pad_x = model.help_area.x + PANEL_PAD
+        max_rows = max(1, int((panel_rect.height - PANEL_PAD * 2) / hint_row_h))
+        side_cmds = rotate_help_ring_buffer(min(max_rows, len(HELP_COMMAND_POOL)))
+        hint_y = panel_rect.y + PANEL_PAD
+        for cmd, desc in side_cmds:
+            hint_y += hint_row_h
+            if hint_y > panel_rect.y + panel_rect.height - PANEL_PAD:
+                break
+            c.paint.textsize = hint_font_size
+            c.paint.color = _HINT_CMD_COLOR
+            c.draw_text(_fit_text(c, cmd, cmd_col_w), hint_pad_x, hint_y)
+            c.paint.color = _HINT_COLOR
+            c.draw_text(_fit_text(c, desc, desc_col_w), hint_pad_x + cmd_col_w, hint_y)
+        # Retain _LINE_HEIGHT reference for future use.
+        _ = _LINE_HEIGHT
 
     return panel_rect
 

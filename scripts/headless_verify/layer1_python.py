@@ -370,6 +370,235 @@ def run_layer_1() -> None:
             "find + manually nuke it"
         )
 
+    with test("L1", "L1.13c", "debug._snapshot() emits all lossless fields with correct JSON-friendly types"):
+        # 2026-07-01 (S9-motivated): _snapshot() must be a LOSSLESS view of
+        # every visual-affecting piece of state. This test wires a mocked
+        # instance into internal/debug.py's module namespace, calls
+        # _snapshot(), and asserts every new field is (a) present and
+        # (b) the correct JSON-friendly type. Existing fields keep their
+        # order (append-only rule) so this test also spot-checks that the
+        # historical keys still lead the dict.
+        #
+        # internal/debug.py imports:
+        #   from .instance import instance
+        #   from ..ui import draw as dm
+        #   from . import homophones as _h
+        # ...at CALL time inside _snapshot(). We can't use
+        # spec_from_file_location for internal/debug.py directly because
+        # those relative imports need a real parent package. Approach:
+        # build a fake package `po_debug_pkg` in sys.modules with stubbed
+        # `instance`, `ui.draw`, and `homophones` submodules, then load
+        # internal/debug.py *inside* that package. Same pattern used by
+        # the shape_bridge tests below (L1.58+).
+        import sys as _sys
+        import types as _types
+
+        # Fresh package tree — don't reuse the shape_bridge one because
+        # its `internal` submodule stubs things we need concrete versions
+        # of (like a real ProseOverlayState).
+        _pkg = _types.ModuleType("po_debug_pkg")
+        _pkg.__path__ = []
+        _internal_pkg = _types.ModuleType("po_debug_pkg.internal")
+        _internal_pkg.__path__ = []
+        _ui_pkg = _types.ModuleType("po_debug_pkg.ui")
+        _ui_pkg.__path__ = []
+
+        # Stub `ui.draw` — _snapshot() only touches `dm._hints_hidden_by_overflow`.
+        _ui_draw_stub = _types.ModuleType("po_debug_pkg.ui.draw")
+        _ui_draw_stub._hints_hidden_by_overflow = False
+
+        # Stub `homophones` — _snapshot() only calls flagged_indices(tokens).
+        _homophones_stub = _types.ModuleType("po_debug_pkg.internal.homophones")
+        _homophones_stub.flagged_indices = lambda toks: set()
+
+        # Real ProseOverlayState instance — but we hand-construct enough state
+        # that every field the snapshot reads has a non-trivial value we can
+        # assert against. This is the "mocked instance" the task requires.
+        inst = ProseOverlayState()
+        inst.buffer = ProseBuffer()
+        inst.buffer.add_text("their there")
+        inst.buffer.set_selection(0, 1)
+        inst.shape_assignments = {0: "wing", 1: "wing"}
+        inst.homophone_panel_alts = {0: {"yellow": "there", "blue": "they're"}}
+        inst.next_alt_assignments = {0: "there"}
+        inst.position_assignments = {0: (0, 3), 1: (1, 3)}
+        inst.help_page = 2
+        inst.flash_state = {"indices": [0], "color": "ff00ff"}
+        inst.hat_assignments = {}
+        inst.cursor = 1
+
+        # Register the parent + internal packages in sys.modules BEFORE any
+        # relative-import child loads under them — otherwise
+        # `from .draw_constants import ...` inside viewport.py resolves to
+        # `po_debug_pkg.internal.draw_constants` and blows up with
+        # ModuleNotFoundError because we haven't installed the parent yet.
+        _sys.modules["po_debug_pkg"] = _pkg
+        _sys.modules["po_debug_pkg.internal"] = _internal_pkg
+
+        # Viewport imports draw_constants relatively — load the constants
+        # module under the same fake package first, then load viewport.
+        # Both stay talon-free.
+        dc_spec = importlib.util.spec_from_file_location(
+            "po_debug_pkg.internal.draw_constants",
+            REPO / "internal" / "draw_constants.py",
+        )
+        dc_mod = importlib.util.module_from_spec(dc_spec)
+        _sys.modules["po_debug_pkg.internal.draw_constants"] = dc_mod
+        dc_spec.loader.exec_module(dc_mod)
+
+        vp_spec = importlib.util.spec_from_file_location(
+            "po_debug_pkg.internal.viewport",
+            REPO / "internal" / "viewport.py",
+        )
+        vp_mod = importlib.util.module_from_spec(vp_spec)
+        _sys.modules["po_debug_pkg.internal.viewport"] = vp_mod
+        vp_spec.loader.exec_module(vp_mod)
+        inst.viewport = vp_mod.Viewport()
+        inst.viewport.set_scroll_offset(3)
+        inst.viewport.set_anchor_rect(vp_mod.Rect(10.0, 20.0, 300.0, 200.0))
+        inst.viewport.set_anchor_position("bottom")
+
+        class _FakeCanvas:
+            is_showing = True
+        inst.canvas = _FakeCanvas()
+
+        # Wire the fake instance module.
+        _inst_stub = _types.ModuleType("po_debug_pkg.internal.instance")
+        _inst_stub.instance = inst
+
+        _internal_pkg.instance = _inst_stub
+        _internal_pkg.homophones = _homophones_stub
+        _ui_pkg.draw = _ui_draw_stub
+
+        _sys.modules["po_debug_pkg"] = _pkg
+        _sys.modules["po_debug_pkg.internal"] = _internal_pkg
+        _sys.modules["po_debug_pkg.internal.instance"] = _inst_stub
+        _sys.modules["po_debug_pkg.internal.homophones"] = _homophones_stub
+        _sys.modules["po_debug_pkg.ui"] = _ui_pkg
+        _sys.modules["po_debug_pkg.ui.draw"] = _ui_draw_stub
+
+        debug_spec = importlib.util.spec_from_file_location(
+            "po_debug_pkg.internal.debug",
+            REPO / "internal" / "debug.py",
+        )
+        debug_mod = importlib.util.module_from_spec(debug_spec)
+        _sys.modules["po_debug_pkg.internal.debug"] = debug_mod
+        debug_spec.loader.exec_module(debug_mod)
+
+        snap = debug_mod._snapshot()
+
+        # ---- Existing fields still lead the dict (append-only invariant) ----
+        keys = list(snap.keys())
+        legacy_head = [
+            "showing", "cursor", "change_mode", "auto_dictation",
+            "help_visible", "token_count", "tokens", "hats",
+            "unhatted", "flagged", "hat_count", "hat_js_fallback",
+            "hat_js_last_err", "buffer_rev", "scroll_offset",
+            "hints_hidden", "target_window", "flash", "flash_color",
+        ]
+        assert keys[: len(legacy_head)] == legacy_head, (
+            "legacy field order must not change (jq consumers depend on it); "
+            f"got head={keys[: len(legacy_head)]!r}"
+        )
+
+        # ---- Lossless-snapshot fields: presence + type ----
+        # selection: list[int] of length 2 (buffer had a selection set).
+        assert "selection" in snap, "missing new field: selection"
+        assert isinstance(snap["selection"], list), f"selection type: {type(snap['selection'])!r}"
+        assert snap["selection"] == [0, 1], f"selection value: {snap['selection']!r}"
+
+        # shape_assignments: dict with string keys, string values.
+        assert "shape_assignments" in snap, "missing new field: shape_assignments"
+        sa = snap["shape_assignments"]
+        assert isinstance(sa, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in sa.items()), (
+            f"shape_assignments shape wrong: {sa!r}"
+        )
+        assert sa == {"0": "wing", "1": "wing"}, f"shape_assignments value: {sa!r}"
+
+        # homophone_panel_alts: dict[str, dict[str, str]].
+        assert "homophone_panel_alts" in snap, "missing new field: homophone_panel_alts"
+        hpa = snap["homophone_panel_alts"]
+        assert isinstance(hpa, dict), f"homophone_panel_alts type: {type(hpa)!r}"
+        assert hpa == {"0": {"yellow": "there", "blue": "they're"}}, (
+            f"homophone_panel_alts value: {hpa!r}"
+        )
+
+        # next_alt_assignments: dict[str, str].
+        assert "next_alt_assignments" in snap, "missing new field: next_alt_assignments"
+        naa = snap["next_alt_assignments"]
+        assert isinstance(naa, dict) and all(isinstance(v, str) for v in naa.values()), (
+            f"next_alt_assignments type: {naa!r}"
+        )
+        assert naa == {"0": "there"}, f"next_alt_assignments value: {naa!r}"
+
+        # position_assignments: dict[str, list[int]] — tuple → list conversion.
+        assert "position_assignments" in snap, "missing new field: position_assignments"
+        pa = snap["position_assignments"]
+        assert isinstance(pa, dict), f"position_assignments type: {type(pa)!r}"
+        for k, v in pa.items():
+            assert isinstance(k, str), f"position_assignments key not str: {k!r}"
+            assert isinstance(v, list), (
+                f"position_assignments value must be JSON list (not tuple): {v!r}"
+            )
+            assert len(v) == 2 and all(isinstance(x, int) for x in v), v
+        assert pa == {"0": [0, 3], "1": [1, 3]}, f"position_assignments value: {pa!r}"
+
+        # help_page: int.
+        assert "help_page" in snap, "missing new field: help_page"
+        assert isinstance(snap["help_page"], int), type(snap["help_page"])
+        assert snap["help_page"] == 2, snap["help_page"]
+
+        # viewport_anchor_position: str ('top' or 'bottom').
+        assert "viewport_anchor_position" in snap, "missing new field: viewport_anchor_position"
+        assert snap["viewport_anchor_position"] == "bottom", snap["viewport_anchor_position"]
+
+        # viewport_anchor_rect_summary: {x, y, w, h} dict when rect set.
+        assert "viewport_anchor_rect_summary" in snap, (
+            "missing new field: viewport_anchor_rect_summary"
+        )
+        rect = snap["viewport_anchor_rect_summary"]
+        assert isinstance(rect, dict), f"rect_summary type: {type(rect)!r}"
+        assert set(rect.keys()) == {"x", "y", "w", "h"}, (
+            f"rect_summary keys: {sorted(rect.keys())!r}"
+        )
+        assert rect == {"x": 10.0, "y": 20.0, "w": 300.0, "h": 200.0}, (
+            f"rect_summary value: {rect!r}"
+        )
+
+        # Settings: None when Talon is not importable (headless).
+        # This asserts the sys.modules.get('talon') path: Talon isn't
+        # loaded in the test harness, so _get_setting returns None
+        # cleanly. Locking this in prevents a refactor from swapping the
+        # defensive lookup for a bare import (which would trip
+        # I5.INTERNAL_LAZY_TALON in scripts/layer-audit.py).
+        for k in (
+            "homophone_shapes_setting",
+            "homophone_hint_setting",
+            "window_scoped_setting",
+            "hat_cursor_greedy_setting",
+        ):
+            assert k in snap, f"missing new field: {k}"
+            assert snap[k] is None, (
+                f"{k} must be None when Talon unavailable (headless); got {snap[k]!r}"
+            )
+
+        # ---- Full-dict json.dumps sanity: no non-serializable values ----
+        import json as _json
+        try:
+            _json.dumps(snap)
+        except TypeError as e:
+            raise AssertionError(f"snapshot must be JSON-serializable: {e}") from None
+
+        # ---- Rect None passthrough (defensive: no anchor rect set) ----
+        # Reset viewport rect to None, call again — must produce None,
+        # not raise. This mirrors the common case where the overlay is
+        # showing full-screen (no window scope).
+        inst.viewport.set_anchor_rect(None)
+        snap2 = debug_mod._snapshot()
+        assert snap2["viewport_anchor_rect_summary"] is None, (
+            f"rect_summary must be None when anchor rect is None; got {snap2['viewport_anchor_rect_summary']!r}"
+        )
+
     with test("L1", "L1.14", "reset() preserves object identity of buffer/canvas/etc."):
         # Object refs created at module init should NOT be reassigned.
         inst = ProseOverlayState()

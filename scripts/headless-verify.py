@@ -26,6 +26,7 @@ from headless_verify.layer3_dispatch import run_layer_3
 from headless_verify.layer4_audit import run_layer_4
 from headless_verify.layer5_parity import run_layer_5
 from headless_verify.layer6_cursorless import run_layer_6
+from headless_verify.layer7_cursorless_actions import run_layer_7
 
 
 def main() -> int:
@@ -36,6 +37,7 @@ def main() -> int:
     run_layer_4()
     run_layer_5()
     run_layer_6()
+    run_layer_7()
 
     passed = sum(1 for *_, ok, _ in results if ok)
     total = len(results)

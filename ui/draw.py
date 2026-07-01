@@ -1,85 +1,79 @@
-"""Prose Overlay Draw -- panel layout, overflow handling, and main draw routine.
+"""Prose Overlay Draw -- main draw entrypoint.
 
-Renders word tokens in a horizontal flow layout with Cursorless-style hat dots.
-Delegates token rendering to prose_overlay_draw_tokens, shared constants to
-prose_overlay_draw_constants, and viewport state to prose_overlay_viewport
-(accessed via `instance.runtime.viewport`).
-
-Move 4e — env-gated LayoutModel paint path
-------------------------------------------
-
-When the environment variable ``PROSE_OVERLAY_LAYOUT_MODEL`` is set to a
-truthy value (``"1"``, ``"true"``, ``"yes"``, ``"on"`` — anything the
-``_layout_model_enabled`` helper accepts), ``draw_overlay`` composes a
+Step 11 of the paint-pipeline retirement: the env-gated old paint path
+has been removed. ``draw_overlay`` now unconditionally composes a
 ``LayoutModel`` via ``ui/layout_root.py:layout()`` and paints from it via
-``ui/draw_from_model.py:draw_from_model``. When unset (default), the
-existing imperative paint path runs unchanged.
+``ui/draw_from_model.py:draw_from_model``. Panel frame, per-token text,
+hats, shapes, underlines, cursor, selection, flash, bubbles, and the
+help-zone separator all flow through the pure ``paint_ops`` pipeline.
 
-The env-gate is checked once per call (not memoized) so a running session
-can flip the flag mid-run for debugging without a restart. The new path
-is intentionally minimal today — see ``ui/draw_from_model.py`` for what
-it draws and what it defers to a follow-up sub-move.
+What still lives outside the pipeline (paint-time-only concerns):
+
+* Panel close hint — composed via ``overlay.draw_close_hint`` (text +
+  X-mark line segments in one helper call).
+* Target label (bottom-left) — needs the mutable ``HINT_FONT_SIZE``
+  module-level global adjusted by ``help_bigger`` / ``help_smaller``.
+* Rotating side hints — driven by wall-clock time via
+  ``help.rotate_help_ring_buffer``; not expressible on the pure model
+  without a rotation-cursor input.
+
+All three are painted directly from ``draw_from_model``. Everything else
+is on the model.
+
+Module-level globals retained for debug + tooling:
+
+* ``HINT_FONT_SIZE`` — help panel font size, mutable via
+  ``help_bigger`` / ``help_smaller`` commands. Read by
+  ``draw_from_model`` and by ``draw_help_panel``.
+* ``_hints_hidden_by_overflow`` — mirror of
+  ``LayoutModel.hints_hidden_by_overflow`` from the most recent draw,
+  read by ``internal/debug.py:_snapshot()`` for the debug JSON.
 """
-
-import os
 
 from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect
 
-from ....utils.overlay_kit import (
-    DismissibleOverlay,
-    draw_panel_frame,
-)
-from ..internal.draw_constants import (
-    PANEL_RADIUS, PANEL_PAD, PANEL_H_FRACTION,
-    BG_COLOR, BORDER_COLOR,
-    BG_COLOR_FALLBACK, BORDER_COLOR_FALLBACK,
-    HINT_COLOR, HINT_CMD_COLOR, LISTENING_COLOR, SEP_COLOR,
-    TOKEN_FONT_SIZE, DOT_RADIUS, DOT_GAP_Y, LINE_HEIGHT,
-)
-from .draw_tokens import _fit_text, _flow_layout, draw_cursor, _draw_token_rows
-from .draw_panels import draw_homophone_panels
+from ....utils.overlay_kit import DismissibleOverlay
 from .draw_from_model import draw_from_model as _draw_from_model
 from .layout_root import layout as _compose_layout
-from ..internal import homophones as _homophones
-from ..shim import shapes as _shapes_runtime
-from .help import draw_help_panel, rotate_help_ring_buffer, HELP_COMMAND_POOL
+from .help import draw_help_panel
 from .history_panel import draw_history_panel, HISTORY_PAGE_SIZE
 from ..internal.instance import instance
 
-# Re-export for canvas.py which imports draw_help_panel from this module.
-__all__ = ["draw_overlay", "draw_help_panel", "draw_history_panel", "HISTORY_PAGE_SIZE"]
+# Re-export for canvas.py which imports draw_help_panel + draw_history_panel
+# from this module.
+__all__ = [
+    "draw_overlay",
+    "draw_help_panel",
+    "draw_history_panel",
+    "HISTORY_PAGE_SIZE",
+    "HINT_FONT_SIZE",
+]
 
 # ---------------------------------------------------------------------------
-# Layout fractions (draw-specific, not shared with history panel)
+# Layout fractions (re-exported for external inspection; canonical copy lives
+# in ui/layout_root.py which is what actually drives the layout).
 # ---------------------------------------------------------------------------
-CONTENT_W_FRACTION = 0.80   # content zone: left 80% of screen width
-HELP_W_FRACTION    = 0.20   # help zone:    right 20% of screen width
-PANEL_Y_OFFSET = 0  # flush with top of screen
+CONTENT_W_FRACTION = 0.80
+HELP_W_FRACTION = 0.20
+PANEL_Y_OFFSET = 0
 
-# Mutable — adjusted by help_bigger / help_smaller commands via draw_mod.HINT_FONT_SIZE
+# ---------------------------------------------------------------------------
+# Mutable font-size — adjusted at runtime by help_bigger / help_smaller.
+# Read by ui/draw_from_model.py (target label + rotating side hints) and
+# ui/help.py (draw_help_panel).
+# ---------------------------------------------------------------------------
 HINT_FONT_SIZE = 12
 
+# ---------------------------------------------------------------------------
 # Overflow state — set during each draw, read by debug snapshot.
+#
+# ``internal/debug.py:_snapshot`` reads this to include the overflow state
+# in the debug JSON. Set to the LayoutModel's ``hints_hidden_by_overflow``
+# each draw so a debug capture between draws reflects the current state.
+# ---------------------------------------------------------------------------
 _hints_hidden_by_overflow: bool = False
 
-
-def _layout_model_enabled() -> bool:
-    """Return True when the LayoutModel paint path is active.
-
-    Reads ``PROSE_OVERLAY_LAYOUT_MODEL`` from the environment each call
-    (no memoization) so a running session can flip the flag mid-run for
-    debugging. Recognized truthy values: ``"1"``, ``"true"``, ``"yes"``,
-    ``"on"`` (case-insensitive). Anything else (including unset, empty
-    string, ``"0"``, ``"false"``) is falsy — the old paint path runs.
-    """
-    raw = os.environ.get("PROSE_OVERLAY_LAYOUT_MODEL", "")
-    return raw.strip().lower() in ("1", "true", "yes", "on")
-
-
-# ---------------------------------------------------------------------------
-# Main draw routine
-# ---------------------------------------------------------------------------
 
 def draw_overlay(
     c: SkiaCanvas,
@@ -95,217 +89,44 @@ def draw_overlay(
     target_label: str = "",
     using_fallback: bool = False,
 ) -> Rect:
-    """Main draw routine for the prose overlay.
+    """Compose a LayoutModel + paint from it.
 
-    Renders a panel with word tokens in a flow layout, each with a colored
-    Cursorless-style hat dot above the assigned character.
+    Thin wrapper: builds the model via ``ui.layout_root.layout()`` and
+    delegates paint to ``ui.draw_from_model.draw_from_model``. The
+    ``tokens`` argument is retained for the current caller contract
+    (``ui/canvas.py:draw_overlay`` passes it) even though the
+    orchestrator sources tokens from ``state.buffer.get_tokens()``. The
+    two agree in practice — canvas.py passes exactly what the buffer
+    holds.
 
-    hat_assignments: token_index -> (char_index_within_word, letter, color).
-    cursor: gap index for the editing cursor (None = no cursor).
-    change_mode: True when cursor is in change/replace mode (amber color).
-    blink_on: current blink phase for cursor visibility.
-    flash_indices: token indices to highlight with a brief flash rect.
-    flash_color: 6-char hex color (no alpha) for the flash highlight.
-    selection: (start_idx, end_idx) inclusive range of selected tokens.
-
-    When ``PROSE_OVERLAY_LAYOUT_MODEL`` is set (see
-    ``_layout_model_enabled``), routing switches to
-    ``ui.layout_root.layout()`` + ``ui.draw_from_model.draw_from_model``.
+    Returns the panel ``Rect`` for click-outside detection in canvas.py.
     """
     global _hints_hidden_by_overflow
 
-    # Move 4e — env-gated side path. When the flag is set, delegate to
-    # the LayoutModel pipeline (compose → paint) and return early. The
-    # old paint path below is the default and remains unchanged.
-    if _layout_model_enabled():
-        model = _compose_layout(
-            instance.state,
-            c,
-            overlay,
-            hat_assignments=hat_assignments,
-            cursor=cursor,
-            change_mode=change_mode,
-            blink_on=blink_on,
-            flash_indices=flash_indices,
-            flash_color=flash_color,
-            selection=selection,
-            target_label=target_label,
-            using_fallback=using_fallback,
-            hint_font_size=HINT_FONT_SIZE,
-        )
-        # Set overflow state so debug snapshots pick it up under the new
-        # path too — the field is model-owned, we just mirror it into the
-        # module-global that ui/canvas.py + debug read today.
-        _hints_hidden_by_overflow = model.hints_hidden_by_overflow
-        return _draw_from_model(c, overlay, model)
-
-    viewport = instance.runtime.viewport
-    anchor_rect = viewport._anchor_rect
-    anchor_position = viewport._anchor_position
-
-    # Move 3 — screen rect is populated at recompute time via
-    # shim.actions_core._populate_visual_state, landing on
-    # instance.state.screen_rect. Belt+braces guard: if a paint fires
-    # before the first recompute (or under a partial talon environment
-    # where ui.main_screen failed) sr is None — short-circuit to a zero
-    # Rect so the paint is a no-op rather than crashing. This preserves
-    # the return-type contract (talon.ui.Rect) callers expect.
-    sr = instance.state.screen_rect
-    if sr is None:
-        return Rect(0, 0, 0, 0)
-
-    c.paint.typeface = "Menlo"
-
-    # Measure tokens
-    c.paint.textsize = TOKEN_FONT_SIZE
-    token_metrics = [(tok, c.paint.measure_text(tok)[1].width) for tok in tokens]
-
-    # Panel geometry — window-scoped or full-screen, top or bottom attachment.
-    # Move 3 — window-scoped setting is hoisted onto instance.state at
-    # recompute time (see shim.actions_core._populate_visual_state).
-    window_scoped = instance.state.window_scoped and anchor_rect is not None
-    ref = anchor_rect if window_scoped else sr
-    panel_h = max(sr.height * PANEL_H_FRACTION, 3 * LINE_HEIGHT + PANEL_PAD * 2)
-    panel_x = ref.x if window_scoped else sr.left
-    panel_w = ref.width if window_scoped else sr.width
-    panel_y = (
-        ref.y + ref.height - panel_h
-        if anchor_position == "bottom"
-        else (ref.y if window_scoped else sr.top + PANEL_Y_OFFSET)
+    model = _compose_layout(
+        instance.state,
+        c,
+        overlay,
+        hat_assignments=hat_assignments,
+        cursor=cursor,
+        change_mode=change_mode,
+        blink_on=blink_on,
+        flash_indices=flash_indices,
+        flash_color=flash_color,
+        selection=selection,
+        target_label=target_label,
+        using_fallback=using_fallback,
+        hint_font_size=HINT_FONT_SIZE,
     )
+    # Mirror overflow state so debug snapshots pick it up.
+    _hints_hidden_by_overflow = model.hints_hidden_by_overflow
 
-    content_w = panel_w * CONTENT_W_FRACTION
-    help_x    = panel_x + content_w
-    help_w    = panel_w * HELP_W_FRACTION
-
-    # === Overflow step 1: auto-hide hints if content overflows content zone ===
-    hint_row_h = HINT_FONT_SIZE + 6
-    usable_h = panel_h - PANEL_PAD * 2
-
-    # Target label sits at the bottom and steals hint_row_h from usable space.
-    label_reserve = hint_row_h if target_label else 0
-    rows = _flow_layout(token_metrics, content_w - PANEL_PAD * 2)
-    if len(rows) * LINE_HEIGHT <= usable_h - label_reserve:
-        _hints_hidden_by_overflow = False
-    else:
-        # Reflow using full panel width (hints hidden)
-        rows = _flow_layout(token_metrics, panel_w - PANEL_PAD * 2)
-        _hints_hidden_by_overflow = True
-
-    # === Overflow step 2: terminal-pinned viewport if still overflowing ===
-    # In overflow mode label is hidden, so full usable_h is available.
-    effective_h = usable_h if _hints_hidden_by_overflow else (usable_h - label_reserve)
-    max_visible_rows = max(1, int(effective_h / LINE_HEIGHT))
-    viewport._last_rows = list(rows)
-
-    if len(rows) > max_visible_rows:
-        rows = rows[len(rows) - max_visible_rows:]
-
-    panel_rect = Rect(panel_x, panel_y, panel_w, panel_h)
-    bg = BG_COLOR_FALLBACK if using_fallback else BG_COLOR
-    border = BORDER_COLOR_FALLBACK if using_fallback else BORDER_COLOR
-    draw_panel_frame(c, panel_rect, PANEL_RADIUS, bg, border)
-    overlay.draw_close_hint(c, panel_x, panel_y, panel_w, PANEL_PAD)
-
-    if not tokens:
-        # "listening..." placeholder
-        c.paint.textsize = TOKEN_FONT_SIZE
-        c.paint.color = LISTENING_COLOR
-        c.draw_text(
-            "listening...",
-            panel_x + PANEL_PAD,
-            panel_y + PANEL_PAD + (DOT_RADIUS * 2) + DOT_GAP_Y + TOKEN_FONT_SIZE,
-        )
-        if cursor is not None and cursor == 0:
-            draw_cursor(
-                c,
-                panel_x + PANEL_PAD,
-                panel_y + PANEL_PAD + (DOT_RADIUS * 2) + DOT_GAP_Y,
-                TOKEN_FONT_SIZE,
-                change_mode,
-                blink_on,
-            )
-    else:
-        # Move 3 — homophone_hint / homophone_shapes settings are hoisted
-        # onto instance.state at recompute time.
-        flagged = (
-            _homophones.flagged_indices(tokens)
-            if instance.state.homophone_hint or _homophones.hint_enabled()
-            else frozenset()
-        )
-        # Slice 1 of HOMOPHONE_SHAPES_PLAN.md — paint hat shape over flagged
-        # tokens. Default OFF (per plan §6.1); flip on via the static
-        # setting or the runtime `overlay shapes homo on` toggle (which
-        # mutates the module flag in prose_overlay_shapes).
-        shape_enabled = bool(
-            instance.state.homophone_shapes
-            or _shapes_runtime.shapes_enabled()
-        )
-        _draw_token_rows(
-            c, rows,
-            x_origin=panel_x + PANEL_PAD,
-            y_start=panel_y + PANEL_PAD,
-            hat_assignments=hat_assignments,
-            cursor=cursor,
-            change_mode=change_mode,
-            blink_on=blink_on,
-            flash_indices=flash_indices,
-            flash_color=flash_color,
-            selection=selection,
-            tokens=tokens,
-            flagged_indices=flagged,
-            shape_enabled=shape_enabled,
-        )
-
-        # Slice C of docs/PHONES_SPEC.md Scenario 4 — bubble band sits
-        # OUTSIDE the panel rect. The renderer needs the panel rect AND
-        # the anchor position so it can place the band ABOVE (for
-        # anchor=bottom) or BELOW (for anchor=top) the panel without
-        # overlapping content. v2 redesign per commit d535611.
-        if shape_enabled:
-            draw_homophone_panels(
-                c,
-                rows,
-                x_origin=panel_x + PANEL_PAD,
-                y_start=panel_y + PANEL_PAD,
-                panel_rect=panel_rect,
-                anchor_position=anchor_position,
-            )
-
-    # Target window label — bottom-left of content zone (hidden during overflow)
-    if target_label and not _hints_hidden_by_overflow:
-        c.paint.textsize = HINT_FONT_SIZE
-        c.paint.color = HINT_CMD_COLOR
-        c.draw_text(target_label, panel_x + PANEL_PAD, panel_y + panel_h - PANEL_PAD)
-
-    # Help zone — only when hints are not hidden by overflow
-    if not _hints_hidden_by_overflow:
-        c.paint.style = c.paint.Style.STROKE
-        c.paint.stroke_width = 1
-        c.paint.color = SEP_COLOR
-        c.draw_line(help_x, panel_y + PANEL_PAD, help_x, panel_y + panel_h - PANEL_PAD)
-        c.paint.style = c.paint.Style.FILL
-
-        hint_pad_x = help_x + PANEL_PAD
-        cmd_col_w = (help_w - PANEL_PAD * 2) * 0.48
-        max_rows = max(1, int((panel_h - PANEL_PAD * 2) / hint_row_h))
-        side_cmds = rotate_help_ring_buffer(min(max_rows, len(HELP_COMMAND_POOL)))
-
-        desc_col_w = help_w - PANEL_PAD * 2 - cmd_col_w
-        hint_y = panel_y + PANEL_PAD
-        for cmd, desc in side_cmds:
-            hint_y += hint_row_h
-            if hint_y > panel_y + panel_h - PANEL_PAD:
-                break
-            c.paint.textsize = HINT_FONT_SIZE
-            c.paint.color = HINT_CMD_COLOR
-            c.draw_text(_fit_text(c, cmd, cmd_col_w), hint_pad_x, hint_y)
-            c.paint.color = HINT_COLOR
-            c.draw_text(_fit_text(c, desc, desc_col_w), hint_pad_x + cmd_col_w, hint_y)
+    panel_rect = _draw_from_model(c, overlay, model)
 
     # Continuous capture — emit on every draw. emit_if_changed dedupes by
     # snapshot equality so this is a no-op when nothing changed since the
-    # last earlier-stage hook fired (set_cursor, recompute_hats, show, hide).
+    # last earlier-stage hook fired (set_cursor, recompute_hats, show,
+    # hide).
     from ..internal import debug as prose_overlay_debug
     prose_overlay_debug.emit_if_changed("draw")
 

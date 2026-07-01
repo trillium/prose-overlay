@@ -84,16 +84,32 @@ def _resolve_mark_to_base_idx(mark, tokens) -> "int | None | str":
             return "error"
         return idx
     if mark_type == "cursor":
+        # Cursor gap N sits BETWEEN token N-1 and token N. At a boundary, the
+        # "containing token" for the cursor is the token to the LEFT — matches
+        # cursorless upstream (cursor char 7 immediately after `air`'s 'r'
+        # resolves to `air`, not `ball`). Without this, `take air` (which
+        # places cursor at gap 2, past `air`) followed by `chuck this` would
+        # target `ball`. Boundary gap 0 (before all tokens) stays at token 0.
         if _state.cursor is not None:
-            return min(max(_state.cursor, 0), len(tokens) - 1)
+            gap = _state.cursor
+            if gap <= 0:
+                return 0
+            return min(gap - 1, len(tokens) - 1)
         return len(tokens) - 1
     return None
 
 
 def _cursor_fallback_idx(tokens) -> "int | None":
+    # Same "prefer left at boundary" semantic as _resolve_mark_to_base_idx's
+    # cursor branch: cursor gap N maps to the token on the LEFT (N-1) so
+    # `chuck this`, `chuck past this`, etc. all agree on which token the
+    # cursor is currently "on".
     if _state.cursor is None:
         return None
-    return min(max(_state.cursor, 0), len(tokens) - 1)
+    gap = _state.cursor
+    if gap <= 0:
+        return 0
+    return min(gap - 1, len(tokens) - 1)
 
 
 def _apply_extend_through_start_of(tokens, base_idx, _mod) -> "tuple[int, int] | None":

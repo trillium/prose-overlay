@@ -4,7 +4,24 @@ Renders word tokens in a horizontal flow layout with Cursorless-style hat dots.
 Delegates token rendering to prose_overlay_draw_tokens, shared constants to
 prose_overlay_draw_constants, and viewport state to prose_overlay_viewport
 (accessed via `instance.runtime.viewport`).
+
+Move 4e — env-gated LayoutModel paint path
+------------------------------------------
+
+When the environment variable ``PROSE_OVERLAY_LAYOUT_MODEL`` is set to a
+truthy value (``"1"``, ``"true"``, ``"yes"``, ``"on"`` — anything the
+``_layout_model_enabled`` helper accepts), ``draw_overlay`` composes a
+``LayoutModel`` via ``ui/layout_root.py:layout()`` and paints from it via
+``ui/draw_from_model.py:draw_from_model``. When unset (default), the
+existing imperative paint path runs unchanged.
+
+The env-gate is checked once per call (not memoized) so a running session
+can flip the flag mid-run for debugging without a restart. The new path
+is intentionally minimal today — see ``ui/draw_from_model.py`` for what
+it draws and what it defers to a follow-up sub-move.
 """
+
+import os
 
 from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect
@@ -22,6 +39,8 @@ from ..internal.draw_constants import (
 )
 from .draw_tokens import _fit_text, _flow_layout, draw_cursor, _draw_token_rows
 from .draw_panels import draw_homophone_panels
+from .draw_from_model import draw_from_model as _draw_from_model
+from .layout_root import layout as _compose_layout
 from ..internal import homophones as _homophones
 from ..shim import shapes as _shapes_runtime
 from .help import draw_help_panel, rotate_help_ring_buffer, HELP_COMMAND_POOL
@@ -43,6 +62,19 @@ HINT_FONT_SIZE = 12
 
 # Overflow state — set during each draw, read by debug snapshot.
 _hints_hidden_by_overflow: bool = False
+
+
+def _layout_model_enabled() -> bool:
+    """Return True when the LayoutModel paint path is active.
+
+    Reads ``PROSE_OVERLAY_LAYOUT_MODEL`` from the environment each call
+    (no memoization) so a running session can flip the flag mid-run for
+    debugging. Recognized truthy values: ``"1"``, ``"true"``, ``"yes"``,
+    ``"on"`` (case-insensitive). Anything else (including unset, empty
+    string, ``"0"``, ``"false"``) is falsy — the old paint path runs.
+    """
+    raw = os.environ.get("PROSE_OVERLAY_LAYOUT_MODEL", "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +107,37 @@ def draw_overlay(
     flash_indices: token indices to highlight with a brief flash rect.
     flash_color: 6-char hex color (no alpha) for the flash highlight.
     selection: (start_idx, end_idx) inclusive range of selected tokens.
+
+    When ``PROSE_OVERLAY_LAYOUT_MODEL`` is set (see
+    ``_layout_model_enabled``), routing switches to
+    ``ui.layout_root.layout()`` + ``ui.draw_from_model.draw_from_model``.
     """
     global _hints_hidden_by_overflow
+
+    # Move 4e — env-gated side path. When the flag is set, delegate to
+    # the LayoutModel pipeline (compose → paint) and return early. The
+    # old paint path below is the default and remains unchanged.
+    if _layout_model_enabled():
+        model = _compose_layout(
+            instance.state,
+            c,
+            overlay,
+            hat_assignments=hat_assignments,
+            cursor=cursor,
+            change_mode=change_mode,
+            blink_on=blink_on,
+            flash_indices=flash_indices,
+            flash_color=flash_color,
+            selection=selection,
+            target_label=target_label,
+            using_fallback=using_fallback,
+            hint_font_size=HINT_FONT_SIZE,
+        )
+        # Set overflow state so debug snapshots pick it up under the new
+        # path too — the field is model-owned, we just mirror it into the
+        # module-global that ui/canvas.py + debug read today.
+        _hints_hidden_by_overflow = model.hints_hidden_by_overflow
+        return _draw_from_model(c, overlay, model)
 
     viewport = instance.runtime.viewport
     anchor_rect = viewport._anchor_rect

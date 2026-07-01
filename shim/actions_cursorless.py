@@ -44,7 +44,7 @@ class Actions:
         """
         action_name = cursorless_simple_action
 
-        if not instance.canvas.is_showing:
+        if not instance.runtime.canvas.is_showing:
             _po_matcher_misfire("run_action", action_name, cursorless_target)
             actions.user.cursorless_command(action_name, cursorless_target)
             return
@@ -69,14 +69,14 @@ class Actions:
         # texts between them.
         if action_name == "reverseTargets":
             def _execute_reverse():
-                tokens = instance.buffer.get_tokens()
+                tokens = instance.state.buffer.get_tokens()
                 text = " ".join(tokens)
                 char_ranges: list[tuple[int, int]] = []
                 for first_idx, last_idx in token_ranges:
                     start, _ = _token_char_range(first_idx, tokens)
                     _, end = _token_char_range(last_idx, tokens)
                     char_ranges.append((start, end))
-                cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+                cursor_char = _cursor_to_char(instance.state.cursor, tokens, text)
                 plan = _js.run_action_multi(
                     action_name, char_ranges, text,
                     cursor_anchor_char=cursor_char,
@@ -84,7 +84,7 @@ class Actions:
                 )
                 _apply_edit_plan(plan)
                 _recompute_hats()
-                instance.canvas.refresh()
+                instance.runtime.canvas.refresh()
 
             _flash_tokens(all_indices, _action_color(action_name), _execute_reverse)
             return
@@ -92,11 +92,11 @@ class Actions:
         def _execute():
             # Apply each range in reverse order so earlier indices stay valid.
             for first_idx, last_idx in sorted(token_ranges, reverse=True):
-                tokens = instance.buffer.get_tokens()
+                tokens = instance.state.buffer.get_tokens()
                 text = " ".join(tokens)
                 src_start, _ = _token_char_range(first_idx, tokens)
                 _, src_end = _token_char_range(last_idx, tokens)
-                cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+                cursor_char = _cursor_to_char(instance.state.cursor, tokens, text)
                 plan = _js.run_action(
                     action_name, src_start, src_end, text,
                     cursor_anchor_char=cursor_char,
@@ -104,9 +104,9 @@ class Actions:
                 )
                 _apply_edit_plan(plan)
                 if action_name in ("setSelection", "clearAndSetSelection"):
-                    instance.buffer.set_selection(first_idx, last_idx)
+                    instance.state.buffer.set_selection(first_idx, last_idx)
             _recompute_hats()
-            instance.canvas.refresh()
+            instance.runtime.canvas.refresh()
 
         _flash_tokens(all_indices, _action_color(action_name), _execute)
 
@@ -121,13 +121,13 @@ class Actions:
         if anchor_idx < 0 or active_idx < 0:
             return
 
-        tokens = instance.buffer.get_tokens()
+        tokens = instance.state.buffer.get_tokens()
         text = " ".join(tokens)
         first_idx = min(anchor_idx, active_idx)
         last_idx = max(anchor_idx, active_idx)
         src_start, _ = _token_char_range(first_idx, tokens)
         _, src_end = _token_char_range(last_idx, tokens)
-        cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+        cursor_char = _cursor_to_char(instance.state.cursor, tokens, text)
         range_indices = list(range(first_idx, last_idx + 1))
 
         def _execute():
@@ -138,9 +138,9 @@ class Actions:
             )
             _apply_edit_plan(plan)
             if action_name in ("setSelection", "clearAndSetSelection"):
-                instance.buffer.set_selection(first_idx, last_idx)
+                instance.state.buffer.set_selection(first_idx, last_idx)
             _recompute_hats()
-            instance.canvas.refresh()
+            instance.runtime.canvas.refresh()
 
         _flash_tokens(range_indices, _action_color(action_name), _execute)
 
@@ -150,7 +150,7 @@ class Actions:
         formatters is a comma-separated list of formatter IDs (e.g. 'SNAKE_CASE',
         'ALL_CAPS,SNAKE_CASE' for CONSTANT_CASE).
         """
-        if not instance.canvas.is_showing:
+        if not instance.runtime.canvas.is_showing:
             # Reformat re-dispatch: cursorless's IDE-side reformat entry point
             # lives behind a different rule shape. The matcher misfire signal
             # is the priority here; the no-op is acceptable until #28 lands.
@@ -170,23 +170,23 @@ class Actions:
 
         def _execute():
             # Bracket the multi-range formatter run as one undo step.
-            instance.buffer.commit_start("apply_formatter", EditKind.STRUCTURAL)
+            instance.state.buffer.commit_start("apply_formatter", EditKind.STRUCTURAL)
             try:
                 for first_idx, last_idx in sorted(token_ranges, reverse=True):
-                    tokens = instance.buffer.get_tokens()
+                    tokens = instance.state.buffer.get_tokens()
                     source_text = " ".join(tokens[first_idx : last_idx + 1])
                     # reformat_text handles split (de-camel, de-snake) and rejoin.
                     formatted = actions.user.reformat_text(source_text, formatters)
                     # Formatted may be one joined token (snake/camel) or several
                     # space-separated words (title case).
                     new_tokens = formatted.split() if formatted else []
-                    current_tokens = list(instance.buffer.get_tokens())
+                    current_tokens = list(instance.state.buffer.get_tokens())
                     current_tokens[first_idx : last_idx + 1] = new_tokens
-                    instance.buffer.set_tokens_raw(current_tokens)
+                    instance.state.buffer.set_tokens_raw(current_tokens)
             finally:
-                instance.buffer.commit_end()
+                instance.state.buffer.commit_end()
             _recompute_hats()
-            instance.canvas.refresh()
+            instance.runtime.canvas.refresh()
 
         _flash_tokens(all_indices, _action_color("applyFormatter"), _execute)
 
@@ -217,7 +217,7 @@ class Actions:
             print("prose_overlay: swap requires two targets — got malformed capture")
             return
 
-        if not instance.canvas.is_showing:
+        if not instance.runtime.canvas.is_showing:
             _po_matcher_misfire("swap", "swapTargets", cursorless_swap_targets)
             actions.user.cursorless_command("swapTargets", cursorless_swap_targets)
             return
@@ -238,13 +238,13 @@ class Actions:
         all_indices = list(range(first1, last1 + 1)) + list(range(first2, last2 + 1))
 
         def _execute():
-            tokens = instance.buffer.get_tokens()
+            tokens = instance.state.buffer.get_tokens()
             text = " ".join(tokens)
             s1, _ = _token_char_range(first1, tokens)
             _, e1 = _token_char_range(last1, tokens)
             s2, _ = _token_char_range(first2, tokens)
             _, e2 = _token_char_range(last2, tokens)
-            cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+            cursor_char = _cursor_to_char(instance.state.cursor, tokens, text)
             plan = _js.run_action(
                 "swapTargets", s1, e1, text,
                 dest_start_char=s2, dest_end_char=e2,
@@ -253,7 +253,7 @@ class Actions:
             )
             _apply_edit_plan(plan)
             _recompute_hats()
-            instance.canvas.refresh()
+            instance.runtime.canvas.refresh()
 
         _flash_tokens(all_indices, _action_color("swapTargets"), _execute)
 
@@ -304,7 +304,7 @@ class Actions:
             )
             return
 
-        if not instance.canvas.is_showing:
+        if not instance.runtime.canvas.is_showing:
             _po_matcher_misfire(
                 "wrap_with_paired_delimiter",
                 cursorless_wrap_action,
@@ -349,14 +349,14 @@ class Actions:
             # Bracket the multi-range wrap as one STRUCTURAL undo step — the
             # per-range apply_edit_plan calls each open their own group,
             # but we want the whole wrap operation to reverse in one `undo`.
-            instance.buffer.commit_start("wrap", EditKind.STRUCTURAL)
+            instance.state.buffer.commit_start("wrap", EditKind.STRUCTURAL)
             try:
                 for first_idx, last_idx in sorted(token_ranges, reverse=True):
-                    tokens = instance.buffer.get_tokens()
+                    tokens = instance.state.buffer.get_tokens()
                     text = " ".join(tokens)
                     src_start, _ = _token_char_range(first_idx, tokens)
                     _, src_end = _token_char_range(last_idx, tokens)
-                    cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+                    cursor_char = _cursor_to_char(instance.state.cursor, tokens, text)
                     plan = _js.run_action_wrap(
                         src_start, src_end, text, left, right,
                         cursor_anchor_char=cursor_char,
@@ -364,9 +364,9 @@ class Actions:
                     )
                     _apply_edit_plan(plan)
             finally:
-                instance.buffer.commit_end()
+                instance.state.buffer.commit_end()
             _recompute_hats()
-            instance.canvas.refresh()
+            instance.runtime.canvas.refresh()
 
         _flash_tokens(all_indices, _action_color("wrapWithPairedDelimiter"), _execute)
 
@@ -376,12 +376,12 @@ class Actions:
         active cursor). For 'move' the JS shim returns two edits (insert at
         dest, delete at source); _apply_edit_plan handles ordering.
         """
-        if not instance.canvas.is_showing:
+        if not instance.runtime.canvas.is_showing:
             _po_matcher_misfire("bring_move", action_name, cursorless_target)
             actions.user.cursorless_command(action_name, cursorless_target)
             return
 
-        if instance.cursor is None:
+        if instance.state.cursor is None:
             print("prose_overlay: bring/move requires an active cursor position")
             return
 
@@ -396,11 +396,11 @@ class Actions:
 
         def _execute():
             for first_idx, last_idx in sorted(token_ranges, reverse=True):
-                tokens = instance.buffer.get_tokens()
+                tokens = instance.state.buffer.get_tokens()
                 text = " ".join(tokens)
                 src_start, _ = _token_char_range(first_idx, tokens)
                 _, src_end = _token_char_range(last_idx, tokens)
-                cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+                cursor_char = _cursor_to_char(instance.state.cursor, tokens, text)
                 plan = _js.run_action(
                     action_name, src_start, src_end, text,
                     dest_start_char=cursor_char,
@@ -410,6 +410,6 @@ class Actions:
                 )
                 _apply_edit_plan(plan)
             _recompute_hats()
-            instance.canvas.refresh()
+            instance.runtime.canvas.refresh()
 
         _flash_tokens(all_indices, _action_color(action_name), _execute)

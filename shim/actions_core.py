@@ -48,13 +48,13 @@ def _recompute_hats():
 
     Slice 2 addition (HOMOPHONE_SHAPES_PLAN.md §3): when shapes are enabled
     (static setting OR runtime flag), also recompute
-    ``instance.shape_assignments`` — the per-token shape mapping for
+    ``instance.state.shape_assignments`` — the per-token shape mapping for
     flagged homophones. Stable across edits via prior-assignment carryover
     inside ``compute_shape_assignments``.
     """
-    tokens = instance.buffer.get_tokens()
+    tokens = instance.state.buffer.get_tokens()
     # When no cursor is set, default proximity to end of buffer (where writing happens).
-    cursor_for_hats = instance.cursor if instance.cursor is not None else len(tokens)
+    cursor_for_hats = instance.state.cursor if instance.state.cursor is not None else len(tokens)
 
     # Shape allocator runs FIRST (before letter-hat allocator) when the
     # Slice 3 opt-in setting is on, so the projection wrapper can pass a
@@ -74,27 +74,27 @@ def _recompute_hats():
     if use_bridge:
         # Slice 3 path: compute shape assignments first, then call the bridge.
         flagged = frozenset(flagged_indices(tokens))
-        rev = getattr(instance.buffer, "rev", 0)
-        instance.shape_assignments = compute_shape_assignments(
+        rev = getattr(instance.state.buffer, "rev", 0)
+        instance.state.shape_assignments = compute_shape_assignments(
             tokens=tokens,
             flagged=flagged,
             rev=rev,
-            prior=instance.shape_assignments,
+            prior=instance.state.shape_assignments,
         )
-        instance.hat_assignments = compute_hat_assignments_with_group_shapes(
+        instance.state.hat_assignments = compute_hat_assignments_with_group_shapes(
             tokens=tokens,
-            shape_assignments=instance.shape_assignments,
-            old_assignments=instance.hat_assignments,
+            shape_assignments=instance.state.shape_assignments,
+            old_assignments=instance.state.hat_assignments,
             cursor_pos=cursor_for_hats,
         )
     else:
         # Pre-Slice-3 default path: letter-hat allocator first (colors-only
         # pool), then the deterministic shape allocator runs independently.
-        instance.hat_assignments = compute_hat_assignments(
-            tokens, old_assignments=instance.hat_assignments, cursor_pos=cursor_for_hats
+        instance.state.hat_assignments = compute_hat_assignments(
+            tokens, old_assignments=instance.state.hat_assignments, cursor_pos=cursor_for_hats
         )
-    instance.hat_js_fallback = _hats_js_mod._using_fallback
-    instance.hat_js_last_err = _hats_js_mod._last_err
+    instance.state.hat_js_fallback = _hats_js_mod._using_fallback
+    instance.state.hat_js_last_err = _hats_js_mod._last_err
     # The tuple's third slot is `styleName` in the Slice-2+ world — may be
     # bare color ('gray') OR shape-suffixed ('gray-frame'). The hat_to_token
     # reverse map keys on BOTH the fully-qualified styleName AND the pre-'-'
@@ -108,15 +108,15 @@ def _recompute_hats():
     # `gray-frame` and `gray-bolt` on the same letter), the last write wins
     # — same collision semantics as pre-Slice-3 when a letter had two hats.
     _reverse: dict[tuple[str, str], int] = {}
-    for idx, (_, letter, style) in instance.hat_assignments.items():
+    for idx, (_, letter, style) in instance.state.hat_assignments.items():
         _reverse[(letter, style)] = idx
         dash = style.find("-")
         if dash > 0:
             _reverse[(letter, style[:dash])] = idx
-    instance.hat_to_token = _reverse
-    _resolve_state.hat_to_token = instance.hat_to_token
-    _resolve_state.buffer = instance.buffer
-    instance.canvas.set_hat_assignments(instance.hat_assignments)
+    instance.state.hat_to_token = _reverse
+    _resolve_state.hat_to_token = instance.state.hat_to_token
+    _resolve_state.buffer = instance.state.buffer
+    instance.runtime.canvas.set_hat_assignments(instance.state.hat_assignments)
 
     # When the bridge path already computed shape_assignments above, skip
     # the second call. Otherwise fall through to the classic post-hat
@@ -124,15 +124,15 @@ def _recompute_hats():
     if not use_bridge:
         if shapes_on:
             flagged = frozenset(flagged_indices(tokens))
-            rev = getattr(instance.buffer, "rev", 0)
-            instance.shape_assignments = compute_shape_assignments(
+            rev = getattr(instance.state.buffer, "rev", 0)
+            instance.state.shape_assignments = compute_shape_assignments(
                 tokens=tokens,
                 flagged=flagged,
                 rev=rev,
-                prior=instance.shape_assignments,
+                prior=instance.state.shape_assignments,
             )
         else:
-            instance.shape_assignments = {}
+            instance.state.shape_assignments = {}
 
     # Slice A of docs/PHONES_SPEC.md — per-flagged-token cycle state.
     # next_alt_assignments + position_assignments are recomputed on every
@@ -163,23 +163,23 @@ def _recompute_hats():
         pos = current_position_in_group(word)
         if pos is not None:
             new_positions[idx] = pos
-    instance.next_alt_assignments = new_next_alt
-    instance.position_assignments = new_positions
+    instance.state.next_alt_assignments = new_next_alt
+    instance.state.position_assignments = new_positions
 
     # Slice C of docs/PHONES_SPEC.md — per-shape-hatted-token panel.
-    # compute_panel_alts walks instance.shape_assignments and builds the
+    # compute_panel_alts walks instance.state.shape_assignments and builds the
     # color → alt_word mapping that the panel renderer paints and the
     # color-addressed swap action looks up. Cheap (O(shape_count) with
     # small constants); no memoization needed for the same reason as
     # next_alt_assignments above.
-    if shapes_on and instance.shape_assignments:
-        instance.homophone_panel_alts = compute_panel_alts(
+    if shapes_on and instance.state.shape_assignments:
+        instance.state.homophone_panel_alts = compute_panel_alts(
             tokens=tokens,
             flagged=flagged_for_cycle,
-            shape_assignments=instance.shape_assignments,
+            shape_assignments=instance.state.shape_assignments,
         )
     else:
-        instance.homophone_panel_alts = {}
+        instance.state.homophone_panel_alts = {}
 
     from ..internal.debug import emit_if_changed
     emit_if_changed("recompute_hats")
@@ -188,15 +188,15 @@ def _recompute_hats():
 def _sync_tags():
     """Sync context tags to match current canvas + auto-dictation state.
 
-    Ground truth is instance.canvas.is_showing — tags follow canvas state, never the
+    Ground truth is instance.runtime.canvas.is_showing — tags follow canvas state, never the
     reverse. Calling this after any state change keeps tags consistent.
     """
-    if instance.canvas.is_showing:
-        instance.ctx.tags = ["user.prose_overlay_active"]
-        instance.ctx_auto.tags = []  # auto tag off while overlay is open
+    if instance.runtime.canvas.is_showing:
+        instance.runtime.ctx.tags = ["user.prose_overlay_active"]
+        instance.runtime.ctx_auto.tags = []  # auto tag off while overlay is open
     else:
-        instance.ctx.tags = []
-        instance.ctx_auto.tags = ["user.prose_overlay_auto"] if instance.auto_dictation else []
+        instance.runtime.ctx.tags = []
+        instance.runtime.ctx_auto.tags = ["user.prose_overlay_auto"] if instance.state.auto_dictation else []
 
 
 def _hat_to_index(letter: str, color: str = "gray") -> int:
@@ -206,4 +206,4 @@ def _hat_to_index(letter: str, color: str = "gray") -> int:
     that's actually visible. Color defaults to "gray" — the no-prefix case.
     Returns -1 if the (letter, color) pair is not currently assigned.
     """
-    return instance.hat_to_token.get((letter.lower(), color), -1)
+    return instance.state.hat_to_token.get((letter.lower(), color), -1)

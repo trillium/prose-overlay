@@ -44,11 +44,11 @@ mod = Module()
 def _shape_to_index(shape_name: str) -> int:
     """Return the token_idx currently wearing the given shape hat, or -1.
 
-    Walks instance.shape_assignments (set by shim.actions_core._recompute_hats).
+    Walks instance.state.shape_assignments (set by shim.actions_core._recompute_hats).
     No-op when shapes are disabled or the shape is not assigned to any token
     (Scenarios 7 + 9 + 13 all collapse to this branch).
     """
-    for idx, sname in instance.shape_assignments.items():
+    for idx, sname in instance.state.shape_assignments.items():
         if sname == shape_name:
             return idx
     return -1
@@ -61,7 +61,7 @@ def _swap_token(idx: int, new_word: str, label: str) -> bool:
     old and new words are identical (degenerate 1-member group), or the
     buffer is missing (defensive — shouldn't happen in normal flow).
     """
-    buf = instance.buffer
+    buf = instance.state.buffer
     if buf is None:
         return False
     tokens = buf.get_tokens()
@@ -86,8 +86,8 @@ def _refresh_after_swap() -> None:
     Imported lazily so this module stays importable in headless tests
     that load the shim layer without going through prose_overlay.py.
     """
-    if instance.canvas is not None:
-        instance.canvas.refresh()
+    if instance.runtime.canvas is not None:
+        instance.runtime.canvas.refresh()
     # Recompute happens after the refresh because _recompute_hats pushes
     # the new hat assignments into the canvas, which then refreshes
     # again on the next paint cycle. Two refreshes is fine — the canvas
@@ -110,7 +110,7 @@ class Actions:
         if idx < 0:
             print(f"prose_overlay: phone shape {shape_name!r} — no token has that shape")
             return
-        new_word = instance.next_alt_assignments.get(idx)
+        new_word = instance.state.next_alt_assignments.get(idx)
         if new_word is None:
             print(
                 f"prose_overlay: phone shape {shape_name!r} (idx {idx}) — "
@@ -139,7 +139,7 @@ class Actions:
             <user.homophones_canonical> so the word IS flagged, but the
             action defends anyway).
         """
-        buf = instance.buffer
+        buf = instance.state.buffer
         if buf is None:
             return
         target_key = normalize_token(word)
@@ -198,7 +198,7 @@ class Actions:
                 f"prose_overlay: phone letter {color}-{letter} — no hat assigned"
             )
             return
-        buf = instance.buffer
+        buf = instance.state.buffer
         if buf is None:
             return
         tokens = buf.get_tokens()
@@ -236,7 +236,7 @@ class Actions:
 
         `prose_hat_color` is the normalised form from prose_hat_color
         capture (gold→yellow, plum→purple). The panel mapping in
-        instance.homophone_panel_alts is keyed on the same normalised
+        instance.state.homophone_panel_alts is keyed on the same normalised
         form, so the lookup is direct.
 
         No-ops with log hint when:
@@ -254,7 +254,7 @@ class Actions:
                 f"prose_overlay: {prose_hat_color} {shape_name} — no token has that shape"
             )
             return
-        panel_entry = instance.homophone_panel_alts.get(idx)
+        panel_entry = instance.state.homophone_panel_alts.get(idx)
         if not panel_entry:
             print(
                 f"prose_overlay: {prose_hat_color} {shape_name} (idx {idx}) — "

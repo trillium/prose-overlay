@@ -110,13 +110,18 @@ def _selection_to_gap(active_char: int, tokens: list[str]) -> int:
     return gap
 
 
-def _apply_edit_plan(plan: dict) -> None:
+def _apply_edit_plan(plan: dict, *, manage_undo_group: bool = True) -> None:
     """Apply the JS-shim edit plan to instance.state.buffer and update the cursor.
 
     Edits are applied in reverse character-offset order so later edits don't
     shift earlier offsets. Supported edit types: delete, insert, replace.
     Buffer is rebuilt from the modified flat string; newSelections (active
     char offset) becomes the cursor gap position.
+
+    ``manage_undo_group`` — default ``True`` for single-plan callers, which
+    matches historical behavior. Pass ``False`` when the caller has already
+    opened its own outer ``commit_start``/``commit_end`` bracket around
+    multiple ``_apply_edit_plan`` calls (multi-range wrap does this).
     """
     if "error" in plan:
         print(f"prose_overlay: JS action error: {plan['error']}")
@@ -127,7 +132,16 @@ def _apply_edit_plan(plan: dict) -> None:
 
     # Bracket the whole edit-plan application as one undo step. set_tokens_raw
     # records the full-buffer delta into the open group automatically.
-    instance.state.buffer.commit_start("cursorless_edit", EditKind.STRUCTURAL)
+    #
+    # ``manage_undo_group`` — when the caller has already opened its own
+    # outer bracket (e.g. multi-range wrap loops N ``_apply_edit_plan`` calls
+    # inside one wrap-scoped ``commit_start``/``commit_end`` pair), pass
+    # ``False`` so this function does NOT seal the caller's group. Otherwise
+    # ``commit_end`` here unconditionally closes the outer bracket and the
+    # remaining iterations open fresh groups — producing N undo records
+    # instead of one atomic operation. Reported by CodeRabbit on PR #2.
+    if manage_undo_group:
+        instance.state.buffer.commit_start("cursorless_edit", EditKind.STRUCTURAL)
     try:
         text = instance.state.buffer.get_text()
         for edit in sorted(edits, key=_edit_start, reverse=True):
@@ -135,7 +149,8 @@ def _apply_edit_plan(plan: dict) -> None:
         new_tokens = text.strip().split() if text.strip() else []
         instance.state.buffer.set_tokens_raw(new_tokens)
     finally:
-        instance.state.buffer.commit_end()
+        if manage_undo_group:
+            instance.state.buffer.commit_end()
 
     if new_selections:
         active_char = new_selections[0].get("active", {}).get("character", None)

@@ -394,8 +394,28 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
                     )
                 )
 
-            # 2. Shape hat glyph (Cursorless SVG shape above token) — a
-            #    later commit wires this via ShapeGlyphOp; keep placeholder.
+            # 2. Shape hat glyph (Cursorless SVG shape above token).
+            #    Mirrors ui/draw_tokens.py:222-256. The ShapeMark's
+            #    position rect is the 2*DOT_RADIUS anchor centered at
+            #    (position.x+r, position.y+r). draw_hat_shape centers the
+            #    SVG glyph on (cx, cy) at the given scale. Emit a
+            #    ShapeGlyphOp — the sink resolves the SVG path from the
+            #    shape name.
+            shape = tok.shape
+            if shape is not None:
+                shape_cx = shape.position.x + shape.position.w / 2.0
+                shape_cy = shape.position.y + shape.position.h / 2.0
+                ops.append(
+                    ShapeGlyphOp(
+                        shape_name=shape.shape_name,
+                        cx=shape_cx,
+                        cy=shape_cy,
+                        scale=shape.scale,
+                        color=shape.color,
+                        alpha=255,
+                        outline=None,
+                    )
+                )
 
             # 3. Token text.
             ops.append(

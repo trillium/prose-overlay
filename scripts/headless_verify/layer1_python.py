@@ -4941,6 +4941,49 @@ def run_layer_1() -> None:
         assert len(ops) == 1, f"expected 1 op (text only) when hat is None; got {len(ops)}: {ops!r}"
         assert isinstance(ops[0], _TextOp)
 
+    def _mk_token_with_shape(index, text, x, y, shape_mark, w=30.0, h=20.0):
+        return _TokenLayout(
+            index=index,
+            text=text,
+            rect=_Rect_layout(x=x, y=y, w=w, h=h),
+            hat=None,
+            shape=shape_mark,
+            underline_segments=[],
+            flagged=False,
+            on_visible_row=True,
+        )
+
+    with test(
+        "L1",
+        "L1.163",
+        "to_paint_ops: shape mark → ShapeGlyphOp between hat and token text",
+    ):
+        r = _DC_PO.DOT_RADIUS
+        shape_pos = _Rect_layout(x=20.0, y=30.0, w=r * 2.0, h=r * 2.0)
+        shape_mark = _ShapeMark(
+            shape_name="bolt",
+            position=shape_pos,
+            scale=_DC_PO.HOMOPHONE_SHAPE_SCALE,
+            color=_DC_PO.HOMOPHONE_SHAPE_COLOR_HEX,
+        )
+        tok = _mk_token_with_shape(0, "there", 10.0, 30.0, shape_mark)
+        model = _mk_empty_model_po(tokens=[tok])
+        ops = _to_paint_ops(model)
+        # Expect: [ShapeGlyphOp, TextOp] (no hat)
+        assert len(ops) == 2, f"expected 2 ops (shape + text); got {len(ops)}: {ops!r}"
+        assert isinstance(ops[0], _ShapeGlyphOp), (
+            f"first op should be ShapeGlyphOp; got {type(ops[0]).__name__}"
+        )
+        s = ops[0]
+        assert s.shape_name == "bolt"
+        assert s.cx == 20.0 + r
+        assert s.cy == 30.0 + r
+        assert s.scale == _DC_PO.HOMOPHONE_SHAPE_SCALE
+        assert s.color == _DC_PO.HOMOPHONE_SHAPE_COLOR_HEX
+        assert s.alpha == 255
+        assert s.outline is None
+        assert isinstance(ops[1], _TextOp)
+
     def _mk_token_with_underline(index, text, x, y, segments, w=30.0, h=20.0):
         return _TokenLayout(
             index=index,

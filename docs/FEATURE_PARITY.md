@@ -242,8 +242,8 @@ Items 2 ✅ + 3 are the meaningful coverage leaps. Items 1, 4, 5 are quick wins.
 | `[x]` | Pre-execution flash on scope verbs | "chuck sentence" flashes before delete | ISC-15 |
 | `[x]` | Hat-JS-fallback orange chrome | when JS allocator throws | ISC-10 |
 | `[x]` | Cursor blink + change-mode amber zone | visible | shipped |
-| `[~]` | Shape hats on flagged tokens | Slice 1 of HOMOPHONE_SHAPES_PLAN | Forge bg agent in flight |
-| `[ ]` | Shape panel with alternates | Slice 3 of HOMOPHONE_SHAPES_PLAN | future |
+| `[x]` | Shape hats on flagged tokens | HOMOPHONE_SHAPES_PLAN Slices 1+2+3 all shipped: renderer (ISC-14a), per-token stability (ISC-14b), same-group-same-shape allocation (ISC-14c) |
+| `[x]` | Shape panel with alternates | PHONES_SPEC Slice C shipped as ISC-14d — bubble panel with color-coded chips per shape-hatted token, `<color> <shape>` swap grammar wired |
 | `[ ]` | Mid-token cursor render | character-level cursor visible inside a word | depends on §2 mid-token cursor |
 | `[ ]` | Sub-word highlight | within "one_two_three", just "two" highlighted | depends on sub-word resolver |
 

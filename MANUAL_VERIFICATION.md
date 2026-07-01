@@ -69,6 +69,9 @@ showing the overlay (5 tokens, hats t/a/b/d/e on each token respectively).
 | 31 | #13 | `reverse air and drum` | std | Buffer becomes `the drum ball air echo` — list target: tokens 1 & 3 texts swapped | | f9-31.png | |
 | 32 | #3 | `swap air with drum` | std | Buffer becomes `the drum ball air echo` — token 1 and token 3 texts exchanged | | f9-32.png | |
 | 33 | #3 | `swap with drum` | std, cursor on `air` | Same result as row 32 — implicit source resolves to cursor's containing token | | f9-33.png | |
+| 34 | #5 | `round wrap air` | std | `air` at chars [4,7) gets parens — buffer reads `the (air) ball drum echo` | | f9-34.png | |
+| 35 | #5 | `curly wrap air past drum` | std | Range [4,17) gets curly braces — buffer reads `the {air ball drum} echo` | | f9-35.png | |
+| 36 | #5 | `quad wrap air` | std | `air` gets double-quotes — buffer reads `the "air" ball drum echo` | | f9-36.png | |
 
 (Buffer key: `std` = `the air ball drum echo` with default-color hats.)
 

@@ -257,6 +257,119 @@ class Actions:
 
         _flash_tokens(all_indices, _action_color("swapTargets"), _execute)
 
+    def prose_overlay_wrap_with_paired_delimiter(
+        cursorless_wrap_action: str,
+        cursorless_target: Any,
+        cursorless_wrapper_paired_delimiter: list,
+    ):
+        """Wrap the resolved target with a paired delimiter (wishlist #5).
+
+        Bound to the C7 rule shape mirrored from cursorless.talon:
+          <user.cursorless_wrapper_paired_delimiter>
+          {user.cursorless_wrap_action}
+          <user.cursorless_target>
+
+        The three captures/list correspond to:
+        - cursorless_wrap_action:               str from LIST — for prose overlay
+                                                only `wrapWithPairedDelimiter`
+                                                is supported (upstream also
+                                                exposes `rewrap`, which is a
+                                                Cursorless-VSCode-only edit
+                                                that requires round-tripping
+                                                the current surrounding pair
+                                                — out of scope on the flat
+                                                prose buffer).
+        - cursorless_wrapper_paired_delimiter:  list[str] of [left, right] from
+                                                cursorless-talon's
+                                                paired_delimiter capture (see
+                                                paired_delimiter.py:45-56).
+        - cursorless_target:                    the target dict — resolved via
+                                                the standard target-resolution
+                                                path.
+
+        Multi-range targets (list or range) wrap EACH resolved range with the
+        same delimiter pair, one wrap per range — matches upstream's `Wrap.ts`
+        behaviour where the action applies to every target the resolver
+        returns. Applied in reverse document order so earlier offsets stay
+        valid as later ones shift.
+        """
+        # Rewrap is a VSCode-specific edit path (round-trips the current
+        # surrounding pair via the language service). Not supported on prose.
+        # Same escape route as the other unsupported actions — dispatch back
+        # to cursorless proper.
+        if cursorless_wrap_action != "wrapWithPairedDelimiter":
+            print(
+                f"prose_overlay: unsupported wrap action "
+                f"'{cursorless_wrap_action}' (VSCode-only?)"
+            )
+            return
+
+        if not instance.canvas.is_showing:
+            _po_matcher_misfire(
+                "wrap_with_paired_delimiter",
+                cursorless_wrap_action,
+                cursorless_target,
+            )
+            actions.user.cursorless_command(
+                cursorless_wrap_action,
+                cursorless_target,
+                cursorless_wrapper_paired_delimiter,
+            )
+            return
+
+        # paired_delimiter capture returns list[str] of length 2 (see
+        # ~/.talon/user/cursorless-talon/src/paired_delimiter.py:56). Anything
+        # else means the capture got remapped — bail loudly rather than
+        # silently truncating.
+        if (
+            not isinstance(cursorless_wrapper_paired_delimiter, (list, tuple))
+            or len(cursorless_wrapper_paired_delimiter) != 2
+        ):
+            print(
+                "prose_overlay: wrap expected [left, right] delimiter pair, "
+                f"got {cursorless_wrapper_paired_delimiter!r}"
+            )
+            return
+        left = str(cursorless_wrapper_paired_delimiter[0])
+        right = str(cursorless_wrapper_paired_delimiter[1])
+
+        token_ranges = _resolve_target_to_token_range(cursorless_target)
+        if token_ranges is None:
+            print(
+                f"prose_overlay: unresolvable target for wrap "
+                f"({cursorless_wrap_action})"
+            )
+            return
+
+        all_indices: list[int] = []
+        for first_idx, last_idx in token_ranges:
+            all_indices.extend(range(first_idx, last_idx + 1))
+
+        def _execute():
+            # Bracket the multi-range wrap as one STRUCTURAL undo step — the
+            # per-range apply_edit_plan calls each open their own group,
+            # but we want the whole wrap operation to reverse in one `undo`.
+            instance.buffer.commit_start("wrap", EditKind.STRUCTURAL)
+            try:
+                for first_idx, last_idx in sorted(token_ranges, reverse=True):
+                    tokens = instance.buffer.get_tokens()
+                    text = " ".join(tokens)
+                    src_start, _ = _token_char_range(first_idx, tokens)
+                    _, src_end = _token_char_range(last_idx, tokens)
+                    cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+                    plan = _js.run_action_wrap(
+                        src_start, src_end, text, left, right,
+                        cursor_anchor_char=cursor_char,
+                        cursor_active_char=cursor_char,
+                    )
+                    _apply_edit_plan(plan)
+            finally:
+                instance.buffer.commit_end()
+            _recompute_hats()
+            instance.canvas.refresh()
+
+        _flash_tokens(all_indices, _action_color("wrapWithPairedDelimiter"), _execute)
+
     def prose_overlay_bring_move(action_name: str, cursorless_target: Any):
         """replaceWithTarget / moveToTarget — source is resolved from
         cursorless_target, destination is the current cursor gap (no-op if no

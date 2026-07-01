@@ -66,6 +66,17 @@ and not tag: user.clock_ring_showing
 {user.cursorless_reformat_action} <user.formatters> at <user.cursorless_target>:
     user.prose_overlay_apply_formatter(cursorless_target, formatters)
 
+# Wrap target with a paired delimiter (wishlist #5). Matches cursorless.talon C7:
+#   <wrapper_paired_delimiter> {wrap_action} <target>
+# e.g. "round wrap air" surrounds hat 'a' with parens, "curly wrap fox past bat"
+# surrounds the range with curly braces. Reuses cursorless-talon's existing
+# `cursorless_wrapper_paired_delimiter` capture (paired_delimiter.py:45-56) so
+# the 12-entry cursorless delimiter vocabulary flows through unchanged; the
+# prose-side action rejects any wrap_action other than `wrapWithPairedDelimiter`
+# (VSCode-only `rewrap` is not implementable on the flat prose buffer).
+<user.cursorless_wrapper_paired_delimiter> {user.cursorless_wrap_action} <user.cursorless_target>:
+    user.prose_overlay_wrap_with_paired_delimiter(cursorless_wrap_action, cursorless_target, cursorless_wrapper_paired_delimiter)
+
 # ===========================================================================
 # Range deletions -- head (start..hat) and tail (hat..end)
 # ===========================================================================

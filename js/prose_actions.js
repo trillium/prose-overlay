@@ -283,12 +283,27 @@
     editor.setSelections([sel]);
     return editor.getPlan();
   }
-  function proseRunAction(actionNameJson, sourceTargetJson, destTargetJson, documentJson) {
+  function actionWrapWithPairedDelimiter(target, left, right, editor) {
+    const range = rangeFromObj(target.contentRange);
+    editor.edit((b) => {
+      b.insert(range.start, left);
+      b.insert(range.end, right);
+    });
+    const wrappedStart = new ProsePosition(
+      range.start.line,
+      range.start.character + left.length
+    );
+    const sel = new ProseSelection(wrappedStart, wrappedStart);
+    editor.setSelections([sel]);
+    return editor.getPlan();
+  }
+  function proseRunAction(actionNameJson, sourceTargetJson, destTargetJson, documentJson, optionsJson) {
     try {
       const actionName = JSON.parse(actionNameJson);
       const sourceRaw = JSON.parse(sourceTargetJson);
       const dest = JSON.parse(destTargetJson);
       const doc = JSON.parse(documentJson);
+      const options = optionsJson === void 0 ? null : JSON.parse(optionsJson);
       const editor = makeEditor(doc);
       let plan;
       if (actionName === "reverseTargets") {
@@ -346,6 +361,24 @@
             break;
           case "insertCopyAfter":
             plan = actionInsertCopyAfter(source, editor);
+            break;
+          case "wrapWithPairedDelimiter":
+            if (options == null) {
+              throw new Error(
+                "wrapWithPairedDelimiter requires an options blob with {left, right} delimiter strings"
+              );
+            }
+            if (typeof options.left !== "string" || typeof options.right !== "string") {
+              throw new Error(
+                `wrapWithPairedDelimiter options must be strings \u2014 got left=${typeof options.left}, right=${typeof options.right}`
+              );
+            }
+            plan = actionWrapWithPairedDelimiter(
+              source,
+              options.left,
+              options.right,
+              editor
+            );
             break;
           default:
             throw new Error(`Unknown action: ${actionName}`);

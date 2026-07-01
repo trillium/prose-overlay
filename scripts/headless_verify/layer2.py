@@ -244,6 +244,11 @@ process.stdout.write(out);
             # docs/BUNDLE_REST_SCOPE.md §7). Two-target action using
             # the source+dest slots.
             "\"swapTargets\"",
+            # Wishlist #5 Wrap shipped 2026-07-01 (see
+            # docs/BUNDLE_REST_SCOPE.md §7). ABI-widening action —
+            # adds a 5th `options` arg for {left, right} delimiter
+            # strings. See L2.14 for the geometry probe.
+            "\"wrapWithPairedDelimiter\"",
         )
         missing = [name for name in ACTIONS_MUST_HAVE if name not in src]
         assert not missing, (
@@ -263,7 +268,6 @@ process.stdout.write(out);
         # Mapping: docs/BUNDLE_REST_SCOPE.md §7 recommended-order.
         ACTIONS_PLANNED = (
             ("pasteAtDestination", "#4 Paste at destination"),
-            ("wrap", "#5 Wrap paired delimiter"),
         )
         for name, label in ACTIONS_PLANNED:
             state = "PRESENT" if f'"{name}"' in src else "ABSENT — planned"
@@ -457,4 +461,53 @@ process.stdout.write(out);
         assert by_start[13]["text"] == "air", (
             f"expected 'air' at [13,17), got {by_start[13]['text']!r}"
         )
+
+    # L2.14 — Wishlist #5 Wrap (wrapWithPairedDelimiter). ABI-widening
+    # action: proseRunAction grew a 5th `options` slot for {left, right}
+    # delimiter strings. Std buffer: wrap 'air' [4,7) with parens →
+    # one insert "(" at char 4, one insert ")" at char 7.
+    with test(
+        "L2",
+        "L2.14",
+        "wishlist #5 — wrapWithPairedDelimiter emits two insert ops around the target range",
+    ):
+        script = f"""
+const code = require('fs').readFileSync('{ACTIONS_JS}', 'utf8');
+eval(code);
+const out = globalThis.proseRunAction(
+  JSON.stringify('wrapWithPairedDelimiter'),
+  JSON.stringify({{contentRange:{{start:{{line:0,character:4}}, end:{{line:0,character:7}}}}, isReversed:false}}),
+  JSON.stringify(null),
+  JSON.stringify({{text:'the air ball drum echo',selectionAnchorChar:0,selectionActiveChar:0}}),
+  JSON.stringify({{left:'(', right:')'}}),
+);
+process.stdout.write(out);
+"""
+        tmp = pathlib.Path("/tmp/headless-verify-wrap.js")
+        tmp.write_text(script)
+        proc = subprocess.run(
+            ["bun", str(tmp)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert proc.returncode == 0, f"bun exit {proc.returncode}: {proc.stderr[:200]}"
+        plan = json.loads(proc.stdout)
+        assert "error" not in plan, f"unexpected error: {plan!r}"
+        edits = plan.get("edits", [])
+        assert len(edits) == 2, f"expected 2 insert ops, got {len(edits)}: {edits!r}"
+        # Wrap emits `insert` ops (not zero-width `replace`) — each op carries
+        # a single `position: {line, character}` point rather than a `range`.
+        # Left delimiter goes at start-of-target (char 4), right at end (char 7).
+        by_char = {op["position"]["character"]: op for op in edits}
+        assert 4 in by_char, f"missing insert at char 4: {edits!r}"
+        assert 7 in by_char, f"missing insert at char 7: {edits!r}"
+        for char, expected_text in ((4, "("), (7, ")")):
+            op = by_char[char]
+            assert op["type"] == "insert", (
+                f"expected type 'insert' at char {char}, got {op['type']!r}"
+            )
+            assert op["text"] == expected_text, (
+                f"expected {expected_text!r} at char {char}, got {op['text']!r}"
+            )
 

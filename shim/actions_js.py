@@ -1,21 +1,25 @@
 """Prose Overlay JS Action Runner
 
 Loads the bundled Cursorless action geometry shim into Talon's embedded QuickJS
-engine and exposes run_action() (single-target) and run_action_multi()
-(reverseTargets) for computing declarative edit plans.
+engine and exposes run_action() (single-target), run_action_multi()
+(reverseTargets), and run_action_wrap() (wrapWithPairedDelimiter) for
+computing declarative edit plans.
 
-The shim implements ten actions as pure string geometry on a flat single-line
-document — no VS Code / ide() dependency:
-  - remove               → delete target's content range
-  - setSelection         → set cursor to target's content range (no edit)
-  - clearAndSetSelection → delete content, collapse cursor there (change)
-  - replaceWithTarget    → replace destination's range with source's text (bring)
-  - moveToTarget         → replace destination + delete source (move)
-  - setSelectionBefore   → set cursor to start of target range
-  - setSelectionAfter    → set cursor to end of target range
-  - insertCopyBefore     → duplicate target text just before the range (clone up)
-  - insertCopyAfter      → duplicate target text just after the range (clone)
-  - reverseTargets       → reverse text order across N target ranges (multi-target)
+The shim implements twelve actions as pure string geometry on a flat
+single-line document — no VS Code / ide() dependency:
+  - remove                  → delete target's content range
+  - setSelection            → set cursor to target's content range (no edit)
+  - clearAndSetSelection    → delete content, collapse cursor there (change)
+  - replaceWithTarget       → replace destination's range with source's text (bring)
+  - moveToTarget            → replace destination + delete source (move)
+  - setSelectionBefore      → set cursor to start of target range
+  - setSelectionAfter       → set cursor to end of target range
+  - insertCopyBefore        → duplicate target text just before the range (clone up)
+  - insertCopyAfter         → duplicate target text just after the range (clone)
+  - reverseTargets          → reverse text order across N target ranges (multi-target)
+  - swapTargets             → exchange the texts of two target ranges (two-target)
+  - wrapWithPairedDelimiter → insert left/right delimiter strings around a
+                              target's content range (wishlist #5)
 
 All Python→JS arguments are passed as json.dumps() strings and parsed with
 JSON.parse() on the JS side. This avoids the JSException stack overflow bug
@@ -95,11 +99,13 @@ def run_action(
     cursor_active_char: int = 0,
     source_is_reversed: bool = False,
     dest_is_reversed: bool = False,
+    options: dict | None = None,
 ) -> dict:
     """Run a prose shim action and return the edit plan as a Python dict.
 
     Args:
-        action_name:        One of the seven action names (e.g. "remove", "bring").
+        action_name:        One of the twelve action names (e.g. "remove", "bring",
+                            "wrapWithPairedDelimiter").
         source_start_char:  Start character offset of the source target in document_text.
         source_end_char:    End character offset of the source target.
         document_text:      Full text of the prose buffer (single line, space-joined tokens).
@@ -109,6 +115,11 @@ def run_action(
         cursor_active_char: Current cursor active character offset.
         source_is_reversed: Whether the source selection is reversed.
         dest_is_reversed:   Whether the destination selection is reversed.
+        options:            Action-specific scalars — currently only
+                            wrapWithPairedDelimiter reads this, expecting
+                            ``{"left": str, "right": str}``. When None the
+                            5th JS arg is omitted (backward-compat with the
+                            pre-Wishlist-#5 4-arg proseRunAction ABI).
 
     Returns:
         dict with keys:
@@ -130,13 +141,27 @@ def run_action(
 
     doc = _make_document(document_text, cursor_anchor_char, cursor_active_char)
 
-    # All args as JSON strings — avoids Python→QuickJS coercion crash
-    result_json: str = _fn(
-        json.dumps(action_name),
-        json.dumps(source),
-        json.dumps(dest),
-        json.dumps(doc),
-    )
+    # All args as JSON strings — avoids Python→QuickJS coercion crash.
+    # When options is None we call the 4-arg entry point so the bundle's
+    # `optionsJson === undefined` branch fires (never passes the string
+    # "undefined" or "null" — the former is invalid JSON, and the latter
+    # would trigger the wrap-requires-options error path for actions that
+    # legitimately don't need options).
+    if options is None:
+        result_json: str = _fn(
+            json.dumps(action_name),
+            json.dumps(source),
+            json.dumps(dest),
+            json.dumps(doc),
+        )
+    else:
+        result_json = _fn(
+            json.dumps(action_name),
+            json.dumps(source),
+            json.dumps(dest),
+            json.dumps(doc),
+            json.dumps(options),
+        )
 
     return json.loads(str(result_json))
 
@@ -254,3 +279,49 @@ def run_action_multi(
 def action_reverse(ranges: list[tuple[int, int]], text: str) -> dict:
     """Reverse text order across N target ranges (wishlist #13)."""
     return run_action_multi("reverseTargets", ranges, text)
+
+
+# ---------------------------------------------------------------------------
+# wrapWithPairedDelimiter (wishlist #5)
+# ---------------------------------------------------------------------------
+
+def run_action_wrap(
+    source_start_char: int,
+    source_end_char: int,
+    document_text: str,
+    left: str,
+    right: str,
+    *,
+    cursor_anchor_char: int = 0,
+    cursor_active_char: int = 0,
+) -> dict:
+    """Wrap the target range with left/right delimiter strings.
+
+    Convenience wrapper around ``run_action`` that packs ``{left, right}`` into
+    the 5th ``options`` arg. Mirrors upstream cursorless's wrap.py which sends
+    ``{"name": "wrapWithPairedDelimiter", "left", "right", "target"}`` — we
+    keep the target in the source slot and route the delimiter strings through
+    ``options``.
+
+    Args:
+        source_start_char:  Start character offset of the target range.
+        source_end_char:    End character offset of the target range.
+        document_text:      Full text of the prose buffer.
+        left:               Left delimiter string (e.g. "(", '"', "[").
+        right:              Right delimiter string (e.g. ")", '"', "]").
+        cursor_anchor_char: Current cursor anchor character offset.
+        cursor_active_char: Current cursor active character offset.
+
+    Returns:
+        Same dict shape as ``run_action``: edits + newSelections, or
+        ``{"error": str}``.
+    """
+    return run_action(
+        "wrapWithPairedDelimiter",
+        source_start_char,
+        source_end_char,
+        document_text,
+        cursor_anchor_char=cursor_anchor_char,
+        cursor_active_char=cursor_active_char,
+        options={"left": left, "right": right},
+    )

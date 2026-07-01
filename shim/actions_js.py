@@ -1,9 +1,10 @@
 """Prose Overlay JS Action Runner
 
 Loads the bundled Cursorless action geometry shim into Talon's embedded QuickJS
-engine and exposes run_action() for computing declarative edit plans.
+engine and exposes run_action() (single-target) and run_action_multi()
+(reverseTargets) for computing declarative edit plans.
 
-The shim implements seven actions as pure string geometry on a flat single-line
+The shim implements ten actions as pure string geometry on a flat single-line
 document — no VS Code / ide() dependency:
   - remove               → delete target's content range
   - setSelection         → set cursor to target's content range (no edit)
@@ -12,6 +13,9 @@ document — no VS Code / ide() dependency:
   - moveToTarget         → replace destination + delete source (move)
   - setSelectionBefore   → set cursor to start of target range
   - setSelectionAfter    → set cursor to end of target range
+  - insertCopyBefore     → duplicate target text just before the range (clone up)
+  - insertCopyAfter      → duplicate target text just after the range (clone)
+  - reverseTargets       → reverse text order across N target ranges (multi-target)
 
 All Python→JS arguments are passed as json.dumps() strings and parsed with
 JSON.parse() on the JS side. This avoids the JSException stack overflow bug
@@ -196,3 +200,57 @@ def action_set_selection_before(token_start: int, text: str) -> dict:
 def action_set_selection_after(token_end: int, text: str) -> dict:
     """Set cursor to end of target range."""
     return run_action("setSelectionAfter", token_end, token_end, text)
+
+
+# ---------------------------------------------------------------------------
+# Multi-target actions (reverseTargets — wishlist #13)
+# ---------------------------------------------------------------------------
+
+def run_action_multi(
+    action_name: str,
+    ranges: list[tuple[int, int]],
+    document_text: str,
+    *,
+    cursor_anchor_char: int = 0,
+    cursor_active_char: int = 0,
+) -> dict:
+    """Run a multi-target prose shim action (currently just reverseTargets).
+
+    The JS-side proseRunAction accepts an ARRAY of TargetObj in the source
+    slot when the action is a multi-target one (currently reverseTargets —
+    see cursorless proseActionsStandalone.ts). This helper packs the
+    character ranges into that array shape and reuses the existing 4-arg
+    ABI — no bundle-side signature widening.
+
+    Args:
+        action_name:        Currently only 'reverseTargets' is supported;
+                            any other name will fall out with an
+                            'Action ... expects a single target' error
+                            from the bundle.
+        ranges:             List of (start_char, end_char) tuples in
+                            arbitrary order — the bundle sorts them by
+                            document position before extracting texts.
+        document_text:      Full text of the prose buffer.
+        cursor_anchor_char: Current cursor anchor character offset.
+        cursor_active_char: Current cursor active character offset.
+
+    Returns:
+        Same dict shape as run_action: edits + newSelections, or {"error": str}.
+    """
+    _ensure_loaded()
+
+    targets = [_make_target(start, end) for start, end in ranges]
+    doc = _make_document(document_text, cursor_anchor_char, cursor_active_char)
+
+    result_json: str = _fn(
+        json.dumps(action_name),
+        json.dumps(targets),
+        json.dumps(None),
+        json.dumps(doc),
+    )
+    return json.loads(str(result_json))
+
+
+def action_reverse(ranges: list[tuple[int, int]], text: str) -> dict:
+    """Reverse text order across N target ranges (wishlist #13)."""
+    return run_action_multi("reverseTargets", ranges, text)

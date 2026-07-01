@@ -248,50 +248,86 @@
     editor.setSelections([sel]);
     return editor.getPlan();
   }
+  function actionReverse(targets, editor) {
+    if (targets.length === 0) {
+      editor.setSelections([]);
+      return editor.getPlan();
+    }
+    const sorted = [...targets].sort(
+      (a, b) => a.contentRange.start.character - b.contentRange.start.character
+    );
+    const ranges = sorted.map((t) => rangeFromObj(t.contentRange));
+    const texts = ranges.map((r) => editor.document.getText(r));
+    const reversed = [...texts].reverse();
+    editor.edit((b) => {
+      for (let i = 0; i < ranges.length; i++) {
+        b.replace(ranges[i], reversed[i]);
+      }
+    });
+    const firstStart = ranges[0].start;
+    const sel = new ProseSelection(firstStart, firstStart);
+    editor.setSelections([sel]);
+    return editor.getPlan();
+  }
   function proseRunAction(actionNameJson, sourceTargetJson, destTargetJson, documentJson) {
     try {
       const actionName = JSON.parse(actionNameJson);
-      const source = JSON.parse(sourceTargetJson);
+      const sourceRaw = JSON.parse(sourceTargetJson);
       const dest = JSON.parse(destTargetJson);
       const doc = JSON.parse(documentJson);
       const editor = makeEditor(doc);
       let plan;
-      switch (actionName) {
-        case "remove":
-          plan = actionRemove(source, editor);
-          break;
-        case "setSelection":
-          plan = actionSetSelection(source, editor);
-          break;
-        case "clearAndSetSelection":
-          plan = actionClearAndSetSelection(source, editor);
-          break;
-        case "replaceWithTarget":
-          if (dest == null) {
-            throw new Error("replaceWithTarget requires a destination target");
-          }
-          plan = actionReplaceWithTarget(source, dest, editor);
-          break;
-        case "moveToTarget":
-          if (dest == null) {
-            throw new Error("moveToTarget requires a destination target");
-          }
-          plan = actionMoveToTarget(source, dest, editor);
-          break;
-        case "setSelectionBefore":
-          plan = actionSetSelectionBefore(source, editor);
-          break;
-        case "setSelectionAfter":
-          plan = actionSetSelectionAfter(source, editor);
-          break;
-        case "insertCopyBefore":
-          plan = actionInsertCopyBefore(source, editor);
-          break;
-        case "insertCopyAfter":
-          plan = actionInsertCopyAfter(source, editor);
-          break;
-        default:
-          throw new Error(`Unknown action: ${actionName}`);
+      if (actionName === "reverseTargets") {
+        if (!Array.isArray(sourceRaw)) {
+          throw new Error(
+            "reverseTargets requires an array of targets in the source slot"
+          );
+        }
+        plan = actionReverse(sourceRaw, editor);
+      } else {
+        if (Array.isArray(sourceRaw)) {
+          throw new Error(
+            `Action '${actionName}' expects a single target, got an array`
+          );
+        }
+        const source = sourceRaw;
+        switch (actionName) {
+          case "remove":
+            plan = actionRemove(source, editor);
+            break;
+          case "setSelection":
+            plan = actionSetSelection(source, editor);
+            break;
+          case "clearAndSetSelection":
+            plan = actionClearAndSetSelection(source, editor);
+            break;
+          case "replaceWithTarget":
+            if (dest == null) {
+              throw new Error("replaceWithTarget requires a destination target");
+            }
+            plan = actionReplaceWithTarget(source, dest, editor);
+            break;
+          case "moveToTarget":
+            if (dest == null) {
+              throw new Error("moveToTarget requires a destination target");
+            }
+            plan = actionMoveToTarget(source, dest, editor);
+            break;
+          case "setSelectionBefore":
+            plan = actionSetSelectionBefore(source, editor);
+            break;
+          case "setSelectionAfter":
+            plan = actionSetSelectionAfter(source, editor);
+            break;
+          case "insertCopyBefore":
+            plan = actionInsertCopyBefore(source, editor);
+            break;
+          case "insertCopyAfter":
+            plan = actionInsertCopyAfter(source, editor);
+            break;
+          default:
+            throw new Error(`Unknown action: ${actionName}`);
+        }
       }
       return JSON.stringify(plan);
     } catch (err) {

@@ -65,6 +65,8 @@ showing the overlay (5 tokens, hats t/a/b/d/e on each token respectively).
 | 27 | #11 | `chuck trailing air` | std | Same degenerate shape as row 26 — trailing side. | | f9-27.png | |
 | 28 | #12 | `clone air` | std | Buffer becomes `the air air ball drum echo` — token 1 duplicated in place | | f9-28.png | |
 | 29 | #12 | `clone up air` | std | Buffer becomes `the air air ball drum echo` — token 1 duplicated ahead of original | | f9-29.png | |
+| 30 | #13 | `reverse air past drum` | std | Buffer becomes `the drum ball air echo` — tokens 1..3 text order reversed in place | | f9-30.png | |
+| 31 | #13 | `reverse air and drum` | std | Buffer becomes `the drum ball air echo` — list target: tokens 1 & 3 texts swapped | | f9-31.png | |
 
 (Buffer key: `std` = `the air ball drum echo` with default-color hats.)
 

@@ -237,6 +237,9 @@ process.stdout.write(out);
             # docs/BUNDLE_REST_SCOPE.md §7). Both variants land together.
             "\"insertCopyBefore\"",
             "\"insertCopyAfter\"",
+            # Wishlist #13 Reverse shipped 2026-07-01 (see
+            # docs/BUNDLE_REST_SCOPE.md §7). Multi-target action.
+            "\"reverseTargets\"",
         )
         missing = [name for name in ACTIONS_MUST_HAVE if name not in src]
         assert not missing, (
@@ -258,7 +261,6 @@ process.stdout.write(out);
             ("swap", "#3 Swap action"),
             ("pasteAtDestination", "#4 Paste at destination"),
             ("wrap", "#5 Wrap paired delimiter"),
-            ("reverseTargets", "#13 Reverse"),
         )
         for name, label in ACTIONS_PLANNED:
             state = "PRESENT" if f'"{name}"' in src else "ABSENT — planned"
@@ -342,4 +344,66 @@ process.stdout.write(out);
         assert op["position"]["character"] == 4, (
             f"expected insert at char 4 (start of 'air'), got {op['position']!r}"
         )
+
+    # L2.12 — Wishlist #13 Reverse (reverseTargets). Multi-target action.
+    # The JS bundle accepts an ARRAY of TargetObj in the source slot when
+    # the action is reverseTargets — see the ABI note in
+    # cursorless/packages/cursorless-engine/src/actions/proseActionsStandalone.ts.
+    # Std buffer: "the air ball drum echo". Three target ranges pointing
+    # at air/ball/drum should come back as three replace ops with texts
+    # reversed → drum/ball/air.
+    with test(
+        "L2",
+        "L2.12",
+        "wishlist #13 — reverseTargets emits N replace ops with texts reversed",
+    ):
+        script = f"""
+const code = require('fs').readFileSync('{ACTIONS_JS}', 'utf8');
+eval(code);
+const targets = [
+  {{contentRange:{{start:{{line:0,character:4}}, end:{{line:0,character:7}}}}, isReversed:false}},
+  {{contentRange:{{start:{{line:0,character:8}}, end:{{line:0,character:12}}}}, isReversed:false}},
+  {{contentRange:{{start:{{line:0,character:13}}, end:{{line:0,character:17}}}}, isReversed:false}},
+];
+const out = globalThis.proseRunAction(
+  JSON.stringify('reverseTargets'),
+  JSON.stringify(targets),
+  JSON.stringify(null),
+  JSON.stringify({{text:'the air ball drum echo',selectionAnchorChar:0,selectionActiveChar:0}}),
+);
+process.stdout.write(out);
+"""
+        tmp = pathlib.Path("/tmp/headless-verify-reverse.js")
+        tmp.write_text(script)
+        proc = subprocess.run(
+            ["bun", str(tmp)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert proc.returncode == 0, f"bun exit {proc.returncode}: {proc.stderr[:200]}"
+        plan = json.loads(proc.stdout)
+        assert "error" not in plan, f"unexpected error: {plan!r}"
+        edits = plan.get("edits", [])
+        assert len(edits) == 3, f"expected 3 replace ops, got {len(edits)}: {edits!r}"
+        # Bundle sorts targets by document position before extracting texts,
+        # so edits[0] targets the leftmost range with the rightmost text.
+        expected = [
+            ("replace", 4, 7, "drum"),
+            ("replace", 8, 12, "ball"),
+            ("replace", 13, 17, "air"),
+        ]
+        for edit, (etype, start, end, text) in zip(edits, expected):
+            assert edit["type"] == etype, (
+                f"expected {etype} op, got {edit['type']!r}"
+            )
+            assert edit["range"]["start"]["character"] == start, (
+                f"expected start {start}, got {edit['range']!r}"
+            )
+            assert edit["range"]["end"]["character"] == end, (
+                f"expected end {end}, got {edit['range']!r}"
+            )
+            assert edit["text"] == text, (
+                f"expected replace text {text!r}, got {edit['text']!r}"
+            )
 

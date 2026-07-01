@@ -37,6 +37,12 @@ _SUPPORTED_SIMPLE_ACTIONS = frozenset({
     # prose_overlay_run_action. Geometry lives in js/prose_actions.js —
     # see docs/BUNDLE_REST_SCOPE.md §Cluster A / §2 #12.
     "insertCopyBefore", "insertCopyAfter",
+    # Wishlist #13 Reverse — spoken `reverse` → reverseTargets, also in the
+    # cursorless_simple_action LIST. Multi-target: dispatched through a
+    # dedicated batched-call path in prose_overlay_run_action (all resolved
+    # ranges become the JS bundle's target array in one call). See
+    # docs/BUNDLE_REST_SCOPE.md §Cluster A / §2 #13.
+    "reverseTargets",
 })
 _CURSORLESS_TO_PROSE_COLOR = {"default": "gray"}
 _WHOLE_BUFFER_SCOPE_TYPES = frozenset({"document", "line", "paragraph", "fullLine"})

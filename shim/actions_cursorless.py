@@ -62,6 +62,33 @@ class Actions:
         for first_idx, last_idx in token_ranges:
             all_indices.extend(range(first_idx, last_idx + 1))
 
+        # Wishlist #13 Reverse — multi-target action. All ranges are
+        # extracted, texts reversed, then written back in ONE JS call so the
+        # text-order swap happens atomically. Bailing to the per-range loop
+        # would extract-and-replace each range in isolation and never swap
+        # texts between them.
+        if action_name == "reverseTargets":
+            def _execute_reverse():
+                tokens = instance.buffer.get_tokens()
+                text = " ".join(tokens)
+                char_ranges: list[tuple[int, int]] = []
+                for first_idx, last_idx in token_ranges:
+                    start, _ = _token_char_range(first_idx, tokens)
+                    _, end = _token_char_range(last_idx, tokens)
+                    char_ranges.append((start, end))
+                cursor_char = _cursor_to_char(instance.cursor, tokens, text)
+                plan = _js.run_action_multi(
+                    action_name, char_ranges, text,
+                    cursor_anchor_char=cursor_char,
+                    cursor_active_char=cursor_char,
+                )
+                _apply_edit_plan(plan)
+                _recompute_hats()
+                instance.canvas.refresh()
+
+            _flash_tokens(all_indices, _action_color(action_name), _execute_reverse)
+            return
+
         def _execute():
             # Apply each range in reverse order so earlier indices stay valid.
             for first_idx, last_idx in sorted(token_ranges, reverse=True):

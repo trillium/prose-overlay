@@ -25,19 +25,35 @@ def _clear_flash():
         instance.runtime.canvas.refresh()
 
 
+_flash_generation: int = 0
+
+
 def _flash_tokens(indices: list, color: str, callback, duration_ms: int = 150):
     """Highlight the given token indices briefly, then call callback.
 
     Sets instance.state.flash_state so draw_overlay renders the colored highlight rect,
     freezes the canvas for an immediate redraw, then schedules a cron job
     to clear the flash and execute the actual action callback.
+
+    A generation counter guards against overlapping flashes: if a second
+    ``_flash_tokens`` call lands inside the first flash window, the older
+    cron callback fires but its captured generation no longer matches the
+    latest, so it becomes a no-op instead of clearing the newer flash
+    state and firing the newer callback early (reported by CodeRabbit on
+    PR #2).
     """
+    global _flash_generation
+    _flash_generation += 1
+    this_generation = _flash_generation
     instance.state.flash_state = {"indices": indices, "color": color}
     instance.runtime.flash_callback = callback
     if instance.runtime.canvas is not None:
         instance.runtime.canvas.refresh()  # redraw with highlight
 
     def _after_flash():
+        # Ignore stale timers — only the most-recent flash's timer clears state.
+        if this_generation != _flash_generation:
+            return
         instance.state.flash_state = {}
         cb = instance.runtime.flash_callback
         instance.runtime.flash_callback = None

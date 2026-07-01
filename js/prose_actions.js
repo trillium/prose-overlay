@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // src/actions/proseShim.ts
+  // packages/cursorless-engine/src/actions/proseShim.ts
   var ProsePosition = class _ProsePosition {
     constructor(line, character) {
       this.line = line;
@@ -171,7 +171,7 @@
     return new ProseRange(posFromObj(obj.start), posFromObj(obj.end));
   }
 
-  // src/actions/proseActionsStandalone.ts
+  // packages/cursorless-engine/src/actions/proseActionsStandalone.ts
   function makeEditor(doc) {
     const anchor = new ProsePosition(0, doc.selectionAnchorChar);
     const active = new ProsePosition(0, doc.selectionActiveChar);
@@ -228,6 +228,26 @@
     editor.setSelections([new ProseSelection(pos, pos)]);
     return editor.getPlan();
   }
+  function actionInsertCopyBefore(target, editor) {
+    const range = rangeFromObj(target.contentRange);
+    const srcText = editor.document.getText(range);
+    editor.edit((b) => b.insert(range.start, srcText + " "));
+    const sel = new ProseSelection(range.start, range.start);
+    editor.setSelections([sel]);
+    return editor.getPlan();
+  }
+  function actionInsertCopyAfter(target, editor) {
+    const range = rangeFromObj(target.contentRange);
+    const srcText = editor.document.getText(range);
+    editor.edit((b) => b.insert(range.end, " " + srcText));
+    const insertedStart = new ProsePosition(
+      range.end.line,
+      range.end.character + 1
+    );
+    const sel = new ProseSelection(insertedStart, insertedStart);
+    editor.setSelections([sel]);
+    return editor.getPlan();
+  }
   function proseRunAction(actionNameJson, sourceTargetJson, destTargetJson, documentJson) {
     try {
       const actionName = JSON.parse(actionNameJson);
@@ -247,13 +267,15 @@
           plan = actionClearAndSetSelection(source, editor);
           break;
         case "replaceWithTarget":
-          if (dest == null)
+          if (dest == null) {
             throw new Error("replaceWithTarget requires a destination target");
+          }
           plan = actionReplaceWithTarget(source, dest, editor);
           break;
         case "moveToTarget":
-          if (dest == null)
+          if (dest == null) {
             throw new Error("moveToTarget requires a destination target");
+          }
           plan = actionMoveToTarget(source, dest, editor);
           break;
         case "setSelectionBefore":
@@ -261,6 +283,12 @@
           break;
         case "setSelectionAfter":
           plan = actionSetSelectionAfter(source, editor);
+          break;
+        case "insertCopyBefore":
+          plan = actionInsertCopyBefore(source, editor);
+          break;
+        case "insertCopyAfter":
+          plan = actionInsertCopyAfter(source, editor);
           break;
         default:
           throw new Error(`Unknown action: ${actionName}`);

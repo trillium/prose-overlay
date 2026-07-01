@@ -233,6 +233,10 @@ process.stdout.write(out);
             "\"moveToTarget\"",
             "\"setSelectionBefore\"",
             "\"setSelectionAfter\"",
+            # Wishlist #12 Clone shipped 2026-07-01 (see
+            # docs/BUNDLE_REST_SCOPE.md §7). Both variants land together.
+            "\"insertCopyBefore\"",
+            "\"insertCopyAfter\"",
         )
         missing = [name for name in ACTIONS_MUST_HAVE if name not in src]
         assert not missing, (
@@ -254,8 +258,6 @@ process.stdout.write(out);
             ("swap", "#3 Swap action"),
             ("pasteAtDestination", "#4 Paste at destination"),
             ("wrap", "#5 Wrap paired delimiter"),
-            ("insertCopyBefore", "#12 Clone (Before variant)"),
-            ("insertCopyAfter", "#12 Clone (After variant)"),
             ("reverseTargets", "#13 Reverse"),
         )
         for name, label in ACTIONS_PLANNED:
@@ -263,4 +265,81 @@ process.stdout.write(out);
             # DIM-print so this stays visible in the L2 block without
             # cluttering fail summaries. Never asserts.
             print(f"    {DIM}[L2.9 inventory] {name:22s} {state:22s} ({label}){RESET}")
+
+    # L2.10 — Wishlist #12 Clone (insertCopyBefore / insertCopyAfter).
+    # Exercise the JS bundle directly with bun and assert the emitted
+    # edit plan is a single insert op with the correct text + position.
+    # Document: "the air ball drum echo" (std buffer, space-joined).
+    # Target: token 1 "air" at chars [4, 7).
+    with test(
+        "L2",
+        "L2.10",
+        "wishlist #12 — insertCopyAfter emits one insert op with ' air' at end of range",
+    ):
+        script = f"""
+const code = require('fs').readFileSync('{ACTIONS_JS}', 'utf8');
+eval(code);
+const out = globalThis.proseRunAction(
+  JSON.stringify('insertCopyAfter'),
+  JSON.stringify({{contentRange:{{start:{{line:0,character:4}},end:{{line:0,character:7}}}},isReversed:false}}),
+  JSON.stringify(null),
+  JSON.stringify({{text:'the air ball drum echo',selectionAnchorChar:0,selectionActiveChar:0}}),
+);
+process.stdout.write(out);
+"""
+        tmp = pathlib.Path("/tmp/headless-verify-clone-after.js")
+        tmp.write_text(script)
+        proc = subprocess.run(
+            ["bun", str(tmp)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert proc.returncode == 0, f"bun exit {proc.returncode}: {proc.stderr[:200]}"
+        plan = json.loads(proc.stdout)
+        assert "error" not in plan, f"unexpected error: {plan!r}"
+        edits = plan.get("edits", [])
+        assert len(edits) == 1, f"expected 1 edit op, got {len(edits)}: {edits!r}"
+        op = edits[0]
+        assert op["type"] == "insert", f"expected insert op, got {op['type']!r}"
+        assert op["text"] == " air", f"expected ' air' insert, got {op['text']!r}"
+        assert op["position"]["character"] == 7, (
+            f"expected insert at char 7 (end of 'air'), got {op['position']!r}"
+        )
+
+    with test(
+        "L2",
+        "L2.11",
+        "wishlist #12 — insertCopyBefore emits one insert op with 'air ' at start of range",
+    ):
+        script = f"""
+const code = require('fs').readFileSync('{ACTIONS_JS}', 'utf8');
+eval(code);
+const out = globalThis.proseRunAction(
+  JSON.stringify('insertCopyBefore'),
+  JSON.stringify({{contentRange:{{start:{{line:0,character:4}},end:{{line:0,character:7}}}},isReversed:false}}),
+  JSON.stringify(null),
+  JSON.stringify({{text:'the air ball drum echo',selectionAnchorChar:0,selectionActiveChar:0}}),
+);
+process.stdout.write(out);
+"""
+        tmp = pathlib.Path("/tmp/headless-verify-clone-before.js")
+        tmp.write_text(script)
+        proc = subprocess.run(
+            ["bun", str(tmp)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert proc.returncode == 0, f"bun exit {proc.returncode}: {proc.stderr[:200]}"
+        plan = json.loads(proc.stdout)
+        assert "error" not in plan, f"unexpected error: {plan!r}"
+        edits = plan.get("edits", [])
+        assert len(edits) == 1, f"expected 1 edit op, got {len(edits)}: {edits!r}"
+        op = edits[0]
+        assert op["type"] == "insert", f"expected insert op, got {op['type']!r}"
+        assert op["text"] == "air ", f"expected 'air ' insert, got {op['text']!r}"
+        assert op["position"]["character"] == 4, (
+            f"expected insert at char 4 (start of 'air'), got {op['position']!r}"
+        )
 

@@ -175,6 +175,7 @@ Items 2 ✅ + 3 are the meaningful coverage leaps. Items 1, 4, 5 are quick wins.
 | `[x]` | `chuck` / `take` / `change` / `clear` / `replace` on hat target | "chuck air" deletes token at hat 'a' | ISC-1 |
 | `[x]` | `pre`/`post` cursor positioning | "pre air" → cursor before hat 'a' | shipped |
 | `[x]` | Change mode (delete + cursor + dictation insert) | "change air the quick" → deletes hat 'a', inserts "the quick" | shipped |
+| `[x]` | **Clone: `clone <hat>` / `clone up <hat>`** | `clone air` on std → `the air air ball drum echo` | wishlist item #12 (`docs/BUNDLE_REST_SCOPE.md §Cluster A / §2 #12`). Both `insertCopyAfter` (map for `clone`) and `insertCopyBefore` (map for `clone up`) added to `js/prose_actions.js` via `proseActionsStandalone.ts` (cursorless commit — see BUNDLE_REST_SCOPE §7). Zero new grammar — rides the composable `{user.cursorless_simple_action} <user.cursorless_target>` rule at `prose_overlay_cursorless.talon:47` because cursorless-talon's `spoken_forms.json` puts both names in the `simple_action` LIST. Python: added to `_SUPPORTED_SIMPLE_ACTIONS`. Headless: L2.10 / L2.11 (JS bundle probe — insert-op geometry) + L2.9 must-have (bundle inventory ratchet). |
 
 ### 3b. Range and list targets
 

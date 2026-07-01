@@ -6,7 +6,8 @@
  *
  *   bun scripts/build-js.ts targets    # prose_resolve_targets.js  (target/scope resolver)
  *   bun scripts/build-js.ts hats       # prose_allocate_hats.js    (hat allocator)
- *   bun scripts/build-js.ts all        # both
+ *   bun scripts/build-js.ts actions    # prose_actions.js          (action geometries)
+ *   bun scripts/build-js.ts all        # all three
  *
  * Resolves the cursorless source dir from CURSORLESS_DIR (env), defaulting to
  * ~/code/cursorless. Writes bundles into ~/code/prose-overlay/js/; the
@@ -32,7 +33,7 @@ interface BundleSpec {
   outfile: string;         // absolute
 }
 
-const BUNDLES: Record<"targets" | "hats", BundleSpec> = {
+const BUNDLES: Record<"targets" | "hats" | "actions", BundleSpec> = {
   targets: {
     name: "prose_resolve_targets.js",
     source: "packages/cursorless-engine/src/actions/proseTargetsStandalone.ts",
@@ -42,6 +43,11 @@ const BUNDLES: Record<"targets" | "hats", BundleSpec> = {
     name: "prose_allocate_hats.js",
     source: "packages/cursorless-engine/src/util/allocateHats/proseStandalone.ts",
     outfile: `${JS_OUT_DIR}/prose_allocate_hats.js`,
+  },
+  actions: {
+    name: "prose_actions.js",
+    source: "packages/cursorless-engine/src/actions/proseActionsStandalone.ts",
+    outfile: `${JS_OUT_DIR}/prose_actions.js`,
   },
 };
 
@@ -100,8 +106,8 @@ function reportRatio(targets: { rawBytes: number; gzipBytes: number }, hats: { r
 
 function main(): void {
   const arg = process.argv[2];
-  if (!arg || !["targets", "hats", "all"].includes(arg)) {
-    console.error("Usage: bun scripts/build-js.ts <targets|hats|all>");
+  if (!arg || !["targets", "hats", "actions", "all"].includes(arg)) {
+    console.error("Usage: bun scripts/build-js.ts <targets|hats|actions|all>");
     process.exit(2);
   }
 
@@ -113,10 +119,16 @@ function main(): void {
     build(BUNDLES.hats);
     return;
   }
+  if (arg === "actions") {
+    build(BUNDLES.actions);
+    return;
+  }
   // all
   const t = build(BUNDLES.targets);
   console.log();
   const h = build(BUNDLES.hats);
+  console.log();
+  build(BUNDLES.actions);
   reportRatio(t, h);
 }
 

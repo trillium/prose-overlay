@@ -63,6 +63,8 @@ showing the overlay (5 tokens, hats t/a/b/d/e on each token respectively).
 | 25 | #6 | `take next word air` | std | "ball" highlighted (token 2 — the word after 'a' mark) | | f9-25.png | |
 | 26 | #11 | `chuck leading air` | std | Documented degenerate on prose (OQ3 resolved 2026-07-01): bundle returns the 1-char whitespace between tokens. User-facing no-op; should be gated at grammar/shim if wired. See `docs/BUNDLE_REST_SCOPE.md §7 #11`. | | f9-26.png | |
 | 27 | #11 | `chuck trailing air` | std | Same degenerate shape as row 26 — trailing side. | | f9-27.png | |
+| 28 | #12 | `clone air` | std | Buffer becomes `the air air ball drum echo` — token 1 duplicated in place | | f9-28.png | |
+| 29 | #12 | `clone up air` | std | Buffer becomes `the air air ball drum echo` — token 1 duplicated ahead of original | | f9-29.png | |
 
 (Buffer key: `std` = `the air ball drum echo` with default-color hats.)
 

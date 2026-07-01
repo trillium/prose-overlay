@@ -30,6 +30,13 @@ _state = _ResolveState()
 _SUPPORTED_SIMPLE_ACTIONS = frozenset({
     "remove", "setSelection", "clearAndSetSelection",
     "setSelectionBefore", "setSelectionAfter",
+    # Wishlist #12 Clone — cursorless-talon's spoken_forms.json maps
+    # `clone` → insertCopyAfter and `clone up` → insertCopyBefore. Both live
+    # in the cursorless_simple_action LIST so the composable rule at
+    # prose_overlay_cursorless.talon:47 dispatches them through
+    # prose_overlay_run_action. Geometry lives in js/prose_actions.js —
+    # see docs/BUNDLE_REST_SCOPE.md §Cluster A / §2 #12.
+    "insertCopyBefore", "insertCopyAfter",
 })
 _CURSORLESS_TO_PROSE_COLOR = {"default": "gray"}
 _WHOLE_BUFFER_SCOPE_TYPES = frozenset({"document", "line", "paragraph", "fullLine"})

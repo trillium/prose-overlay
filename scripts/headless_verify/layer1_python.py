@@ -5240,3 +5240,57 @@ def run_layer_1() -> None:
         # Corner radius 3 (mirrors draw_tokens.py's draw_rounded_rect(..., 3)).
         assert sel_ops[0].radius == 3.0
         assert sel_ops[1].radius == 3.0
+
+    # ----- L1.167 — flash overlay emission (Step 8 of paint retirement) --
+
+    _FlashOverlay = _po_layout.FlashOverlay
+
+    with test(
+        "L1",
+        "L1.167",
+        "to_paint_ops: flash overlay → RoundedRectOps with model-provided color, BEFORE token text",
+    ):
+        r1 = _Rect_layout(x=10.0, y=50.0, w=40.0, h=18.0)
+        r2 = _Rect_layout(x=60.0, y=50.0, w=35.0, h=18.0)
+        # Flash color already alpha-rewritten by the builder: "ff00004d".
+        flash = _FlashOverlay(rects=[r1, r2], color="ff00004d")
+        tok = _mk_token_with_hat(0, "abc", x=10.0, y=30.0, hat=None)
+        panel = _Rect_layout(x=0.0, y=0.0, w=1000.0, h=200.0)
+        ca = _Rect_layout(x=12.0, y=12.0, w=776.0, h=176.0)
+        model = _LayoutModelPO(
+            panel=panel,
+            content_area=ca,
+            help_area=None,
+            tokens=[tok],
+            selection=None,
+            flash=flash,
+            bubbles=[],
+            help=None,
+            cursor=None,
+            target_label="",
+            using_fallback=False,
+            hints_hidden_by_overflow=False,
+        )
+        ops = _to_paint_ops(model)
+        flash_ops = [o for o in ops if isinstance(o, _RoundedRectOp) and o.color == "ff00004d"]
+        assert len(flash_ops) == 2, (
+            f"expected 2 flash RoundedRectOps; got {len(flash_ops)}: "
+            f"{[type(o).__name__ for o in ops]}"
+        )
+        # Flash must precede token text.
+        first_text = next(
+            (i for i, o in enumerate(ops) if isinstance(o, _TextOp) and o.text == "abc"),
+            None,
+        )
+        assert first_text is not None
+        first_flash = next(
+            (i for i, o in enumerate(ops) if isinstance(o, _RoundedRectOp) and o.color == "ff00004d"),
+            None,
+        )
+        assert first_flash is not None and first_flash < first_text, (
+            f"flash ops must precede token text; "
+            f"first_flash={first_flash}, first_text={first_text}"
+        )
+        assert flash_ops[0].radius == 3.0
+        # Geometry mirrors model rects verbatim.
+        assert (flash_ops[0].x, flash_ops[0].y, flash_ops[0].w, flash_ops[0].h) == (10.0, 50.0, 40.0, 18.0)

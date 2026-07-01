@@ -4941,6 +4941,70 @@ def run_layer_1() -> None:
         assert len(ops) == 1, f"expected 1 op (text only) when hat is None; got {len(ops)}: {ops!r}"
         assert isinstance(ops[0], _TextOp)
 
+    def _mk_token_with_underline(index, text, x, y, segments, w=30.0, h=20.0):
+        return _TokenLayout(
+            index=index,
+            text=text,
+            rect=_Rect_layout(x=x, y=y, w=w, h=h),
+            hat=None,
+            shape=None,
+            underline_segments=list(segments),
+            flagged=True,
+            on_visible_row=True,
+        )
+
+    with test(
+        "L1",
+        "L1.161",
+        "to_paint_ops: single solid underline segment → one RectOp AFTER token text",
+    ):
+        seg = _UnderlineSegment(
+            x0=10.0, x1=40.0, y=50.0, active=False,
+            color=_DC_PO.HOMOPHONE_UNDERLINE_COLOR,
+        )
+        tok = _mk_token_with_underline(0, "here", 10.0, 30.0, [seg])
+        model = _mk_empty_model_po(tokens=[tok])
+        ops = _to_paint_ops(model)
+        # Expect: [TextOp, RectOp]
+        assert len(ops) == 2, f"expected 2 ops; got {len(ops)}: {ops!r}"
+        assert isinstance(ops[0], _TextOp)
+        r = ops[1]
+        assert isinstance(r, _RectOp), (
+            f"underline should be RectOp; got {type(r).__name__}"
+        )
+        assert r.x == 10.0 and r.y == 50.0
+        assert r.w == 30.0
+        assert r.h == _DC_PO.HOMOPHONE_UNDERLINE_HEIGHT
+        assert r.color == _DC_PO.HOMOPHONE_UNDERLINE_COLOR
+
+    with test(
+        "L1",
+        "L1.162",
+        "to_paint_ops: 3-member segmented underline → 3 RectOps, middle one is ACTIVE_HEIGHT",
+    ):
+        base = _DC_PO.HOMOPHONE_UNDERLINE_COLOR[:6]
+        active_color = base + _DC_PO.HOMOPHONE_UNDERLINE_ACTIVE_ALPHA
+        inactive_color = base + _DC_PO.HOMOPHONE_UNDERLINE_INACTIVE_ALPHA
+        segments = [
+            _UnderlineSegment(x0=10.0, x1=18.0, y=50.0, active=False, color=inactive_color),
+            _UnderlineSegment(x0=20.0, x1=28.0, y=50.0, active=True, color=active_color),
+            _UnderlineSegment(x0=30.0, x1=38.0, y=50.0, active=False, color=inactive_color),
+        ]
+        tok = _mk_token_with_underline(0, "there", 10.0, 30.0, segments)
+        model = _mk_empty_model_po(tokens=[tok])
+        ops = _to_paint_ops(model)
+        rects = [o for o in ops if isinstance(o, _RectOp)]
+        assert len(rects) == 3, (
+            f"expected 3 underline RectOps; got {len(rects)}"
+        )
+        assert rects[0].h == _DC_PO.HOMOPHONE_UNDERLINE_HEIGHT
+        assert rects[1].h == _DC_PO.HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT, (
+            f"active segment height should be {_DC_PO.HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT}; got {rects[1].h}"
+        )
+        assert rects[2].h == _DC_PO.HOMOPHONE_UNDERLINE_HEIGHT
+        assert rects[1].color == active_color
+        assert rects[0].color == inactive_color
+
     with test(
         "L1",
         "L1.157",

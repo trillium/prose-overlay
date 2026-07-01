@@ -307,6 +307,8 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
         HAT_COLOR,
         HAT_COLOR_HEX,
         HINT_CMD_COLOR,
+        HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT,
+        HOMOPHONE_UNDERLINE_HEIGHT,
         LISTENING_COLOR,
         PANEL_PAD,
         SEP_COLOR,
@@ -406,7 +408,29 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
                 )
             )
 
-            # 4. Homophone underline segments — wired in a later commit.
+            # 4. Homophone underline segments. Mirrors
+            #    ui/draw_tokens.py:281-352. Each UnderlineSegment carries
+            #    its pre-baked color (base color + active/inactive alpha)
+            #    and the `active` flag which selects between the taller
+            #    ACTIVE_HEIGHT and the base HEIGHT. Segments paint as
+            #    filled rects at (x0, y) with (x1-x0) width and the
+            #    appropriate height.
+            for seg in tok.underline_segments:
+                seg_h = (
+                    HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT
+                    if seg.active
+                    else HOMOPHONE_UNDERLINE_HEIGHT
+                )
+                ops.append(
+                    RectOp(
+                        x=seg.x0,
+                        y=seg.y,
+                        w=seg.x1 - seg.x0,
+                        h=seg_h,
+                        color=seg.color,
+                        stroke=False,
+                    )
+                )
 
     # --- Cursor ---
     # Paint-side blink gate: if blink_on is False, emit nothing so the

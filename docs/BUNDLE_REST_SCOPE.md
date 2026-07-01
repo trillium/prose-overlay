@@ -541,3 +541,60 @@ decisions blocking the modifier cluster.
   assertion). MANUAL_VERIFICATION rows 26, 27 added. FEATURE_PARITY
   §3c row added marked `[—]` (out-of-scope on prose — no token-level
   semantics).
+
+- **Cluster A — Actions rebuild (#3 Swap, #12 Clone, #13 Reverse)** —
+  ✅ shipped 2026-07-01. Six commits across two repos (`~/code/cursorless`
+  and `~/code/prose-overlay`). This is the second cross-repo actions-
+  bundle shipment (Slice 1 `97215cd` on the shape side was the first).
+
+  **Composable-rule finding (OQ-resolution style):** `#12 Clone`
+  (`clone` → `insertCopyAfter`, `clone up` → `insertCopyBefore`) and
+  `#13 Reverse` (`reverse` → `reverseTargets`) both live in
+  cursorless-talon's `cursorless_simple_action` LIST (see
+  `~/.talon/user/cursorless-talon/src/spoken_forms.json`). Both ride
+  the existing composable rule at `prose_overlay_cursorless.talon:47`
+  — **zero new prose-overlay grammar rules**. Only `#3 Swap` needed
+  a new rule because `swapTargets` lives in the dedicated
+  `cursorless_swap_action` LIST + `cursorless_swap_targets` two-target
+  capture, distinct from the simple-action union.
+
+  **Multi-target ABI:** #13 Reverse is the first multi-target action in
+  the bundle. Signature widening kept ABI-clean: the JS bundle's 4-arg
+  `proseRunAction` accepts an ARRAY of TargetObj in the source slot
+  when the action is `reverseTargets`; the dispatcher branches on
+  `Array.isArray(sourceRaw)`. Python side adds
+  `shim/actions_js.py:run_action_multi` + a dedicated branch in
+  `prose_overlay_run_action`. #3 Swap does NOT need this — two targets
+  in source+dest slots (existing two-target ABI).
+
+  **Bundle build:** `scripts/build-js.ts` gained an `actions` target
+  entry. `prose_actions.js` was previously hand-maintained (see
+  `docs/BUNDLE_SHAPE_DECISIONS.md §OQ7`); now built from
+  `packages/cursorless-engine/src/actions/proseActionsStandalone.ts`
+  via `bun scripts/build-js.ts actions`. `proseActionsStandalone.ts`
+  became a tracked file in the cursorless repo for the first time as
+  part of the #12 Clone cursorless commit.
+
+  **§2 #13 OQ resolution (R-6 batched vs widened):** Went with **widened
+  signature** (Array in source slot) rather than batched calls per
+  range. Batched-call approach can't swap texts BETWEEN ranges — each
+  isolated call would extract-and-replace with the same text.
+
+  **Commits (cursorless first, then prose-overlay):**
+  - #12 Clone: `c91b00235` (cursorless) → `ee1779e` (prose-overlay). +
+    `proseActionsStandalone.ts` became tracked in cursorless.
+  - #13 Reverse: `c67da0326` (cursorless) → `129a636` (prose-overlay).
+  - #3 Swap: `0dcda38cd` (cursorless) → `dc3f985` (prose-overlay).
+
+  **Headless:** 134 → 138 green (+ L2.10, L2.11, L2.12, L2.13 — one bun
+  probe per new action geometry, four total). L2.9 fail-closed set went
+  from 7 → 10 must-have actions; `ACTIONS_PLANNED` set went from 6 →
+  2 (only pasteAtDestination + wrap remaining).
+
+  **What's next in §7 order after Cluster A:**
+  - #5 Wrap with paired delimiter (Cluster B in §4 — separate rebuild
+    because it changes `proseRunAction`'s signature and introduces a
+    delimiter LIST).
+  - #8 inside/outside modifier (Cluster D — small independent PR).
+  - #4 Paste at destination (§7 deferred — depends on clipboard
+    plumbing verification).

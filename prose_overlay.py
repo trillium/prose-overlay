@@ -89,16 +89,19 @@ mod.setting(
 mod.setting(
     "prose_overlay_homophone_shapes",
     type=bool,
-    default=True,
+    default=False,
     desc=(
         "When true, paint a Cursorless-style hat shape (bolt, frame, eye, "
         "…) above every flagged token, on top of the existing letter-hat "
-        "dot. Slice 1 of the homophone-shapes exploration "
-        "(docs/HOMOPHONE_SHAPES_PLAN.md). Default ON since 2026-06-30 "
-        "(user keep verdict — mirrors the slice-A homophone-hint default "
-        "flip; rationale per memory feedback_overlay_subtle_hints_wrong: "
-        "must-perceive signals should default loud, not subtle). Toggle "
-        "off via 'overlay shapes homo off'."
+        "dot AND paint the color-coded bubble panel of alternates above/"
+        "below flagged tokens. Slice 1 of the homophone-shapes exploration "
+        "(docs/HOMOPHONE_SHAPES_PLAN.md). Default FLIPPED to False on "
+        "2026-07-01 per user verdict — the 2nd amber hat + the chip "
+        "panel added more visual noise than they saved compared to the "
+        "amber underline alone. Toggle back on for a session via "
+        "'overlay shapes homo on'. The amber underline (Slice A / "
+        "prose_overlay_homophone_hint) stays ON by default and remains "
+        "the load-bearing 'this is a homophone' signal."
     ),
 )
 

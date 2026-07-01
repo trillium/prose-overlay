@@ -276,74 +276,74 @@ def run_layer_1() -> None:
 
     with test("L1", "L1.13", "ProseOverlayState.reset() wipes all data fields to defaults"):
         inst = ProseOverlayState()
-        inst.buffer = ProseBuffer()
-        inst.buffer.add_text("contaminated state")
-        inst.cursor = 5
-        inst.change_mode = True
-        inst.target_window_title = "stale-window"
-        inst.target_recall_name = "stale-recall"
-        inst.help_visible = True
-        inst.help_page = 7
-        inst.auto_dictation = True
-        inst.hat_js_fallback = True
-        inst.hat_js_last_err = "call(7 toks): RuntimeError('stack overflow')"
-        inst.hat_assignments = {0: (0, "c", "gray")}
-        inst.hat_to_token = {("c", "gray"): 0}
-        inst.shape_assignments = {0: "wing"}  # Slice 2 — must also wipe.
+        inst.state.buffer = ProseBuffer()
+        inst.state.buffer.add_text("contaminated state")
+        inst.state.cursor = 5
+        inst.state.change_mode = True
+        inst.state.target_window_title = "stale-window"
+        inst.state.target_recall_name = "stale-recall"
+        inst.state.help_visible = True
+        inst.state.help_page = 7
+        inst.state.auto_dictation = True
+        inst.state.hat_js_fallback = True
+        inst.state.hat_js_last_err = "call(7 toks): RuntimeError('stack overflow')"
+        inst.state.hat_assignments = {0: (0, "c", "gray")}
+        inst.state.hat_to_token = {("c", "gray"): 0}
+        inst.state.shape_assignments = {0: "wing"}  # Slice 2 — must also wipe.
         # Slice A of docs/PHONES_SPEC.md adds two parallel maps that reset()
         # must also clear, otherwise stale cycle state survives an "overlay
         # reset" and the next swap acts on the previous buffer's words.
-        inst.next_alt_assignments = {0: "they're"}
-        inst.position_assignments = {0: (1, 3)}
+        inst.state.next_alt_assignments = {0: "they're"}
+        inst.state.position_assignments = {0: (1, 3)}
         # Slice C of docs/PHONES_SPEC.md adds homophone_panel_alts; reset()
         # must clear it too so a stale panel from the prior session can't
         # leak into the next.
-        inst.homophone_panel_alts = {0: {"yellow": "their", "blue": "they're"}}
-        inst.flash_state = {"indices": [1], "color": "ff0000"}
-        inst.history = ["old", "stuff"]
-        inst.history_page = 3
-        inst._last_input_source = "letters"
+        inst.state.homophone_panel_alts = {0: {"yellow": "their", "blue": "they're"}}
+        inst.state.flash_state = {"indices": [1], "color": "ff0000"}
+        inst.state.history = ["old", "stuff"]
+        inst.state.history_page = 3
+        inst.state._last_input_source = "letters"
         # reset() tries `from .history_persist import load_history` which
         # ImportErrors under this test's spec_from_file_location load (no
         # parent package). reset()'s try/except catches it and leaves
-        # self.history = []. Same outcome as the pre-persistence build —
+        # self.state.history = []. Same outcome as the pre-persistence build —
         # ideal for verifying the OTHER reset fields here. The wiring
         # itself (that reset() DOES call load_history in prod) is
         # verified by L1.13b at the source level.
         inst.reset()
-        assert inst.buffer.get_tokens() == [], "buffer not cleared"
-        assert inst.cursor is None
-        assert inst.change_mode is False
-        assert inst.target_window_title == ""
-        assert inst.target_recall_name is None
-        assert inst.help_visible is False
-        assert inst.help_page == 0
-        assert inst.auto_dictation is False
-        assert inst.hat_js_fallback is False
-        assert inst.hat_js_last_err == "", (
-            f"hat_js_last_err should reset to empty; got {inst.hat_js_last_err!r}"
+        assert inst.state.buffer.get_tokens() == [], "buffer not cleared"
+        assert inst.state.cursor is None
+        assert inst.state.change_mode is False
+        assert inst.state.target_window_title == ""
+        assert inst.state.target_recall_name is None
+        assert inst.state.help_visible is False
+        assert inst.state.help_page == 0
+        assert inst.state.auto_dictation is False
+        assert inst.state.hat_js_fallback is False
+        assert inst.state.hat_js_last_err == "", (
+            f"hat_js_last_err should reset to empty; got {inst.state.hat_js_last_err!r}"
         )
-        assert inst.hat_assignments == {}
-        assert inst.hat_to_token == {}
-        assert inst.shape_assignments == {}, (
-            f"shape_assignments not cleared by reset(): {inst.shape_assignments!r}"
+        assert inst.state.hat_assignments == {}
+        assert inst.state.hat_to_token == {}
+        assert inst.state.shape_assignments == {}, (
+            f"shape_assignments not cleared by reset(): {inst.state.shape_assignments!r}"
         )
-        assert inst.next_alt_assignments == {}, (
+        assert inst.state.next_alt_assignments == {}, (
             f"next_alt_assignments not cleared by reset(): "
-            f"{inst.next_alt_assignments!r}"
+            f"{inst.state.next_alt_assignments!r}"
         )
-        assert inst.position_assignments == {}, (
+        assert inst.state.position_assignments == {}, (
             f"position_assignments not cleared by reset(): "
-            f"{inst.position_assignments!r}"
+            f"{inst.state.position_assignments!r}"
         )
-        assert inst.homophone_panel_alts == {}, (
+        assert inst.state.homophone_panel_alts == {}, (
             f"homophone_panel_alts not cleared by reset(): "
-            f"{inst.homophone_panel_alts!r}"
+            f"{inst.state.homophone_panel_alts!r}"
         )
-        assert inst.flash_state == {}
-        assert inst.history == []
-        assert inst.history_page == 0
-        assert inst._last_input_source == "init"
+        assert inst.state.flash_state == {}
+        assert inst.state.history == []
+        assert inst.state.history_page == 0
+        assert inst.state._last_input_source == "init"
 
     with test("L1", "L1.13b", "reset() wiring: instance.py imports+calls history_persist.load_history"):
         # Runtime coupling: reset() runs under a proper package in prod
@@ -415,17 +415,17 @@ def run_layer_1() -> None:
         # that every field the snapshot reads has a non-trivial value we can
         # assert against. This is the "mocked instance" the task requires.
         inst = ProseOverlayState()
-        inst.buffer = ProseBuffer()
-        inst.buffer.add_text("their there")
-        inst.buffer.set_selection(0, 1)
-        inst.shape_assignments = {0: "wing", 1: "wing"}
-        inst.homophone_panel_alts = {0: {"yellow": "there", "blue": "they're"}}
-        inst.next_alt_assignments = {0: "there"}
-        inst.position_assignments = {0: (0, 3), 1: (1, 3)}
-        inst.help_page = 2
-        inst.flash_state = {"indices": [0], "color": "ff00ff"}
-        inst.hat_assignments = {}
-        inst.cursor = 1
+        inst.state.buffer = ProseBuffer()
+        inst.state.buffer.add_text("their there")
+        inst.state.buffer.set_selection(0, 1)
+        inst.state.shape_assignments = {0: "wing", 1: "wing"}
+        inst.state.homophone_panel_alts = {0: {"yellow": "there", "blue": "they're"}}
+        inst.state.next_alt_assignments = {0: "there"}
+        inst.state.position_assignments = {0: (0, 3), 1: (1, 3)}
+        inst.state.help_page = 2
+        inst.state.flash_state = {"indices": [0], "color": "ff00ff"}
+        inst.state.hat_assignments = {}
+        inst.state.cursor = 1
 
         # Register the parent + internal packages in sys.modules BEFORE any
         # relative-import child loads under them — otherwise
@@ -453,14 +453,14 @@ def run_layer_1() -> None:
         vp_mod = importlib.util.module_from_spec(vp_spec)
         _sys.modules["po_debug_pkg.internal.viewport"] = vp_mod
         vp_spec.loader.exec_module(vp_mod)
-        inst.viewport = vp_mod.Viewport()
-        inst.viewport.set_scroll_offset(3)
-        inst.viewport.set_anchor_rect(vp_mod.Rect(10.0, 20.0, 300.0, 200.0))
-        inst.viewport.set_anchor_position("bottom")
+        inst.runtime.viewport = vp_mod.Viewport()
+        inst.runtime.viewport.set_scroll_offset(3)
+        inst.runtime.viewport.set_anchor_rect(vp_mod.Rect(10.0, 20.0, 300.0, 200.0))
+        inst.runtime.viewport.set_anchor_position("bottom")
 
         class _FakeCanvas:
             is_showing = True
-        inst.canvas = _FakeCanvas()
+        inst.runtime.canvas = _FakeCanvas()
 
         # Wire the fake instance module.
         _inst_stub = _types.ModuleType("po_debug_pkg.internal.instance")
@@ -1197,7 +1197,7 @@ def run_layer_1() -> None:
         b.add_text("hello world")  # neither token is a flagged homophone
         tokens = b.get_tokens()
         # Synthetic hat-to-token map (the live action uses
-        # instance.hat_to_token populated by _recompute_hats).
+        # instance.state.hat_to_token populated by _recompute_hats).
         synthetic_map = {("h", "gray"): 0, ("w", "gray"): 1}
         idx = synthetic_map.get(("h", "gray"), -1)
         assert idx == 0

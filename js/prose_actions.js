@@ -197,24 +197,55 @@
     editor.setSelections([collapsed]);
     return editor.getPlan();
   }
+  function prepareDestChange(destination, srcText) {
+    const contentRange = rangeFromObj(destination.contentRange);
+    const mode = destination.insertionMode;
+    if (mode === "before") {
+      const delimiter = destination.insertionDelimiter ?? " ";
+      const collapsed = new ProseRange(contentRange.start, contentRange.start);
+      return { range: collapsed, text: srcText + delimiter };
+    }
+    if (mode === "after") {
+      const delimiter = destination.insertionDelimiter ?? " ";
+      const collapsed = new ProseRange(contentRange.end, contentRange.end);
+      return { range: collapsed, text: delimiter + srcText };
+    }
+    return { range: contentRange, text: srcText };
+  }
   function actionReplaceWithTarget(source, destination, editor) {
     const srcRange = rangeFromObj(source.contentRange);
-    const dstRange = rangeFromObj(destination.contentRange);
     const srcText = editor.document.getText(srcRange);
-    editor.edit((b) => b.replace(dstRange, srcText));
-    const sel = new ProseSelection(dstRange.start, dstRange.start);
-    editor.setSelections([sel]);
+    const change = prepareDestChange(destination, srcText);
+    editor.edit((b) => b.replace(change.range, change.text));
+    const mode = destination.insertionMode;
+    if (mode === "before" || mode === "after") {
+      const initialCursor = editor.selections[0]?.active ?? null;
+      if (initialCursor != null) {
+        const insertPos = change.range.start.character;
+        const insertLen = change.text.length;
+        const cursorChar = initialCursor.character;
+        const shifted = insertPos < cursorChar ? cursorChar + insertLen : cursorChar;
+        const pos = new ProsePosition(0, shifted);
+        editor.setSelections([new ProseSelection(pos, pos)]);
+      } else {
+        const sel = new ProseSelection(change.range.start, change.range.start);
+        editor.setSelections([sel]);
+      }
+    } else {
+      const sel = new ProseSelection(change.range.start, change.range.start);
+      editor.setSelections([sel]);
+    }
     return editor.getPlan();
   }
   function actionMoveToTarget(source, destination, editor) {
     const srcRange = rangeFromObj(source.contentRange);
-    const dstRange = rangeFromObj(destination.contentRange);
     const srcText = editor.document.getText(srcRange);
+    const change = prepareDestChange(destination, srcText);
     editor.edit((b) => {
-      b.replace(dstRange, srcText);
+      b.replace(change.range, change.text);
       b.delete(srcRange);
     });
-    const sel = new ProseSelection(dstRange.start, dstRange.start);
+    const sel = new ProseSelection(change.range.start, change.range.start);
     editor.setSelections([sel]);
     return editor.getPlan();
   }

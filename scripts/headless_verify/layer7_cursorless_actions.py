@@ -573,18 +573,29 @@ class _FixtureCase:
         )
 
         # Destination handling — only present for two-target actions, and the
-        # bundle's ``dest`` slot expects a TargetObj (contentRange). The
-        # destination may nest another target under ``insertionMode``
-        # ({before, after, to}) — in that case the inner target's range is
-        # collapsed per insertionMode to a zero-width point (before → start,
-        # after → end, to → same as after per cursorless convention).
+        # bundle's ``dest`` slot expects a TargetObj (contentRange +
+        # insertionMode). We pass the target's UNCOLLAPSED contentRange plus
+        # the insertionMode so the bundle can honour the upstream
+        # `DestinationImpl.constructChangeEdit` semantics for `before`/`after`
+        # — collapse to the boundary AND wrap the source text with the
+        # target's `insertionDelimiter` (defaults to a single space for
+        # plaintext), which is what preserves the token boundary on the flat
+        # prose buffer. Doing the collapse in Python (as this harness used to)
+        # dropped the delimiter and produced `"aa"` where cursorless produces
+        # `"a a"` — the top-1 gap surfaced by `bringAirBeforeAir` /
+        # `bringAirAfterAir`.
         dest_range: "tuple[int, int] | None" = None
+        dest_mode: "str | None" = None
         dest_node = action_node.get("destination")
         if dest_node is not None:
-            dest_range = self._resolve_destination(dest_node, doc_text)
+            dest_range, dest_mode = self._resolve_destination(dest_node, doc_text)
 
         source_target = _target_obj(source_range)
-        dest_target = _target_obj(dest_range) if dest_range is not None else None
+        dest_target = (
+            _target_obj(dest_range, insertion_mode=dest_mode)
+            if dest_range is not None
+            else None
+        )
 
         options: "dict | None" = None
         if self.action == "wrapWithPairedDelimiter":
@@ -610,14 +621,20 @@ class _FixtureCase:
 
     def _resolve_destination(
         self, dest_node: dict, doc_text: str,
-    ) -> "tuple[int, int]":
-        """Reduce a destination node to (start_char, end_char).
+    ) -> "tuple[tuple[int, int], str | None]":
+        """Reduce a destination node to ((start_char, end_char), insertion_mode).
 
         Cursorless destination shapes we handle in the MVP:
 
-          * ``{type: implicit}`` — zero-width at cursor.
+          * ``{type: implicit}`` — zero-width at cursor (mode is None; treated
+            as ``to``-semantics by the bundle).
           * ``{type: primitive, insertionMode: before|after|to, target: ...}``
-            — resolve the inner target, then collapse per insertionMode.
+            — resolve the inner target, return its FULL range + the
+            insertionMode. The bundle collapses to a boundary and wraps the
+            source with the target's ``insertionDelimiter`` when the mode is
+            ``before``/``after`` — mirrors upstream
+            ``DestinationImpl.constructChangeEdit`` so the token boundary
+            (`"a a"`) is preserved instead of collapsing to `"aa"`.
           * ``{type: primitive, mark: ..., insertionMode: ...}`` — the
             destination IS a primitive target itself. Resolve inline.
 
@@ -629,7 +646,10 @@ class _FixtureCase:
 
         dtype = dest_node.get("type")
         if dtype == "implicit":
-            return (self.initial_active, self.initial_active)
+            # No insertion mode — bundle treats absent mode as "to" (verbatim
+            # range, no delimiter wrap), same as the shim's live cursor-gap
+            # path.
+            return ((self.initial_active, self.initial_active), None)
         if dtype == "list":
             raise _TargetResolveError("destination-list")
 
@@ -648,33 +668,42 @@ class _FixtureCase:
             inner, self.marks, self.initial_active, doc_text,
         )
 
-        # Collapse per insertionMode. The trio {before, after, to} maps to
-        # {start-point, end-point, end-point} — matches cursorless's
-        # PositionalTarget contentRange collapsing.
+        # Validate + pass through the insertionMode. The bundle is what
+        # actually collapses `before`/`after` to a boundary and wraps the
+        # source text with the delimiter — this harness used to collapse
+        # here and drop the delimiter, producing `"aa"` where cursorless
+        # produces `"a a"`.
         mode = dest_node.get("insertionMode")
-        if mode == "before":
-            return (base[0], base[0])
-        if mode == "after":
-            return (base[1], base[1])
-        if mode == "to":
-            # `to X` cursorless-wise means "into X's range" — for prose we
-            # treat it as a replace into that range (leave it as-is).
-            return base
-        if mode is None:
-            return base
-        raise _TargetResolveError(f"insertion-mode:{mode}")
+        if mode not in (None, "before", "after", "to"):
+            raise _TargetResolveError(f"insertion-mode:{mode}")
+        return (base, mode)
 
 
-def _target_obj(char_range: "tuple[int, int]") -> dict:
-    """Build a JS-bundle TargetObj from a char range on line 0."""
+def _target_obj(
+    char_range: "tuple[int, int]",
+    *,
+    insertion_mode: "str | None" = None,
+) -> dict:
+    """Build a JS-bundle TargetObj from a char range on line 0.
+
+    ``insertion_mode`` is only meaningful when this TargetObj is used as the
+    bundle's ``dest`` slot; when set to ``before`` / ``after`` the bundle
+    collapses the range and wraps the source text with a single-space
+    delimiter (see ``prepareDestChange`` in
+    ``cursorless-engine/src/actions/proseActionsStandalone.ts``). When the
+    mode is ``to`` or None the range is used verbatim.
+    """
     start, end = char_range
-    return {
+    obj: dict = {
         "contentRange": {
             "start": {"line": 0, "character": start},
             "end": {"line": 0, "character": end},
         },
         "isReversed": False,
     }
+    if insertion_mode is not None:
+        obj["insertionMode"] = insertion_mode
+    return obj
 
 
 # =============================================================================

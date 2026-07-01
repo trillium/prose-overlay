@@ -73,6 +73,7 @@ def _snapshot() -> dict:
         "flagged":        flagged,
         "hat_count":      len(hats),
         "hat_js_fallback": instance.hat_js_fallback,
+        "hat_js_last_err": instance.hat_js_last_err,
         "buffer_rev":     instance.buffer.rev,
         "scroll_offset":  instance.viewport.get_scroll_offset(),
         "hints_hidden":   dm._hints_hidden_by_overflow,

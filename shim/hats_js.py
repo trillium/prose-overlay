@@ -30,6 +30,14 @@ _fn = None  # js.Object — the proseAllocateHats function
 # Read by prose_overlay_actions_core._recompute_hats() to sync instance.hat_js_fallback.
 _using_fallback: bool = False
 
+# Repr of the last exception that forced the fallback. Sync'd onto
+# instance.hat_js_last_err so the always-on debug JSONL captures WHY the
+# fallback fired — the 52-events-in-one-session pattern from 2026-06-30
+# had no root-cause data because the exception message only went to
+# stdout (Talon log), not to the diff-based observability stream.
+# Cleared to "" when a JS call succeeds cleanly.
+_last_err: str = ""
+
 
 def _ensure_loaded() -> None:
     global _ctx, _fn
@@ -63,12 +71,13 @@ def compute_hat_assignments(
     Returns:
         dict mapping token_index -> (char_index_within_word, letter, color)
     """
-    global _using_fallback
+    global _using_fallback, _last_err
     try:
         _ensure_loaded()
     except Exception as e:
         print(f"prose_overlay: hat JS load failed ({e}), using Python fallback")
         _using_fallback = True
+        _last_err = f"load: {e!r}"
         return _py_compute_hat_assignments(
             tokens,
             cursor_pos=len(tokens) if cursor_pos is None else cursor_pos,
@@ -137,12 +146,14 @@ def compute_hat_assignments(
                 continue
             result[tok_idx] = (fixed_ci, letter, color)
         _using_fallback = False
+        _last_err = ""
         _trail.end_command(corr_id, ok=True)
         return result
     except Exception as e:
         _trail.end_command(corr_id, ok=False, err=repr(e))
         print(f"prose_overlay: hat JS call failed ({e}), using Python fallback")
         _using_fallback = True
+        _last_err = f"call({len(tokens)} toks): {e!r}"
         return _py_compute_hat_assignments(
             tokens,
             cursor_pos=len(tokens) if cursor_pos is None else cursor_pos,

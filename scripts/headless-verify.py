@@ -219,6 +219,7 @@ def run_layer_1() -> None:
         inst.help_page = 7
         inst.auto_dictation = True
         inst.hat_js_fallback = True
+        inst.hat_js_last_err = "call(7 toks): RuntimeError('stack overflow')"
         inst.hat_assignments = {0: (0, "c", "gray")}
         inst.hat_to_token = {("c", "gray"): 0}
         inst.shape_assignments = {0: "wing"}  # Slice 2 — must also wipe.
@@ -245,6 +246,9 @@ def run_layer_1() -> None:
         assert inst.help_page == 0
         assert inst.auto_dictation is False
         assert inst.hat_js_fallback is False
+        assert inst.hat_js_last_err == "", (
+            f"hat_js_last_err should reset to empty; got {inst.hat_js_last_err!r}"
+        )
         assert inst.hat_assignments == {}
         assert inst.hat_to_token == {}
         assert inst.shape_assignments == {}, (

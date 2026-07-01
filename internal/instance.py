@@ -63,6 +63,12 @@ class ProseOverlayState:
         self.draw_mod = None                # prose_overlay_draw module
         self.viewport = None                # prose_overlay_viewport.Viewport
         self.hat_js_fallback: bool = False  # True when JS allocator failed; triggers orange color scheme
+        # Repr of the exception that forced the most recent fallback. Cleared
+        # to "" on a clean JS call. Surfaced in the debug JSONL via the diff
+        # stream so intermittent JS failures have root-cause data instead
+        # of just a boolean flip — 2026-06-30 observed 52 fallbacks in one
+        # session with no captured cause. See shim/hats_js.py:_last_err.
+        self.hat_js_last_err: str = ""
         # Tracks the source of the most recent input. "letters" when a
         # <user.letters> NATO utterance landed; "text" for any other input
         # (dictation, formatter, symbol_key). Used by prose_overlay_add_letters
@@ -101,6 +107,7 @@ class ProseOverlayState:
         self.history = []
         self.history_page = 0
         self.hat_js_fallback = False
+        self.hat_js_last_err = ""
         self._last_input_source = "init"
         if self.viewport is not None:
             self.viewport.set_scroll_offset(0)

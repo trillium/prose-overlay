@@ -508,7 +508,7 @@ def run_layer_5() -> None:
     # Row 8 — `bring air to drum` — source target is `air` (primitive),
     # destination is `drum` (primitive). The resolver only resolves the
     # source target; the destination is handled by bring/move action logic
-    # (it reads `instance.cursor` which is set by a separate `pre drum`
+    # (it reads `instance.state.cursor` which is set by a separate `pre drum`
     # flow OR the action chains its own resolver call for destination).
     # We test that the SOURCE target resolves the same on both paths.
     with test("L5", "L5.8", "MANUAL_VERIFICATION row 8 — `bring air to drum` (source resolves)"):

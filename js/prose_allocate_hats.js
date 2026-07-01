@@ -12652,7 +12652,7 @@
       const re = new RegExp(GRAPHEME_SPLIT_SOURCE, GRAPHEME_SPLIT_FLAGS);
       const results = [];
       let match;
-      while ((match = re.exec(tokenText)) !== null) {
+      while ((match = re.exec(tokenText)) != null) {
         results.push({
           text: this.normalizeGrapheme(match[0]),
           tokenStartOffset: match.index,
@@ -12670,18 +12670,59 @@
       return val;
     }
   };
-  var PROSE_HAT_STYLES = {
-    gray: { penalty: 0 },
-    blue: { penalty: 1 },
-    green: { penalty: 1 },
-    red: { penalty: 1 },
-    pink: { penalty: 2 },
-    yellow: { penalty: 2 },
-    purple: { penalty: 2 },
-    black: { penalty: 3 },
-    white: { penalty: 3 }
+  var PROSE_COLORS = [
+    "gray",
+    "blue",
+    "green",
+    "red",
+    "pink",
+    "yellow",
+    "purple",
+    "black",
+    "white"
+  ];
+  var PROSE_COLOR_PENALTIES = {
+    gray: 0,
+    blue: 1,
+    green: 1,
+    red: 1,
+    pink: 2,
+    yellow: 2,
+    purple: 2,
+    black: 3,
+    white: 3
   };
-  var ENABLED_HAT_STYLE_NAMES = Object.keys(PROSE_HAT_STYLES);
+  var PROSE_SHAPES = [
+    "ex",
+    "fox",
+    "wing",
+    "hole",
+    "frame",
+    "curve",
+    "eye",
+    "play",
+    "bolt",
+    "crosshairs"
+  ];
+  function buildDefaultProseHatStyles() {
+    const out = {};
+    for (const color of PROSE_COLORS) {
+      out[color] = { penalty: PROSE_COLOR_PENALTIES[color] };
+    }
+    return out;
+  }
+  function buildFullProseHatStyles() {
+    const out = {};
+    for (const color of PROSE_COLORS) {
+      const colorPenalty = PROSE_COLOR_PENALTIES[color];
+      out[color] = { penalty: colorPenalty };
+      for (const shape of PROSE_SHAPES) {
+        out[`${color}-${shape}`] = { penalty: colorPenalty + 1 };
+      }
+    }
+    return out;
+  }
+  var DEFAULT_PROSE_HAT_STYLES = buildDefaultProseHatStyles();
   var FAKE_EDITOR = { id: "prose-overlay" };
   function makeToken(text, index) {
     const start = new Position(0, index);
@@ -12693,7 +12734,7 @@
       offsets: { start: index, end: index + 1 }
     };
   }
-  function getTokenRemainingHatCandidates(splitter, token, graphemeRemainingHatCandidates) {
+  function getTokenRemainingHatCandidates(splitter, token, graphemeRemainingHatCandidates, enabledHatStyles) {
     const candidates = [];
     const graphemes = splitter.getTokenGraphemes(token.text);
     for (const grapheme of graphemes) {
@@ -12701,18 +12742,46 @@
         candidates.push({
           grapheme,
           style,
-          penalty: PROSE_HAT_STYLES[style]?.penalty ?? 99
+          penalty: enabledHatStyles[style]?.penalty ?? 99
         });
       }
     }
     return candidates;
   }
-  function proseAllocateHats(tokensJson, oldAssignmentsJson, stability, cursorGapJson = "-1") {
+  function resolveEnabledHatStyles(enabledStylesJson) {
+    if (enabledStylesJson == null || enabledStylesJson === "" || enabledStylesJson === "null") {
+      return DEFAULT_PROSE_HAT_STYLES;
+    }
+    try {
+      const parsed = JSON.parse(enabledStylesJson);
+      if (parsed == null || typeof parsed !== "object") {
+        return DEFAULT_PROSE_HAT_STYLES;
+      }
+      const validated = {};
+      let count = 0;
+      for (const [k, v] of Object.entries(parsed)) {
+        const p = v?.penalty;
+        if (typeof p === "number" && Number.isFinite(p)) {
+          validated[k] = { penalty: p };
+          count += 1;
+        }
+      }
+      if (count === 0) {
+        return DEFAULT_PROSE_HAT_STYLES;
+      }
+      return validated;
+    } catch (_e) {
+      return DEFAULT_PROSE_HAT_STYLES;
+    }
+  }
+  function proseAllocateHats(tokensJson, oldAssignmentsJson, stability, cursorGapJson = "-1", enabledStylesJson) {
     const tokens = JSON.parse(tokensJson);
     const oldAssignments = JSON.parse(oldAssignmentsJson);
     const cursorGap = JSON.parse(cursorGapJson);
     const hatStability = stability;
     const splitter = new StandaloneGraphemeSplitter();
+    const enabledHatStyles = resolveEnabledHatStyles(enabledStylesJson ?? null);
+    const enabledHatStyleNames = Object.keys(enabledHatStyles);
     const tokenObjects = tokens.map((text, i) => makeToken(text, i));
     const effectiveCursor = cursorGap >= 0 ? cursorGap : tokens.length;
     const fakeEditorWithCursor = {
@@ -12724,11 +12793,12 @@
       ({ editor, offsets }) => [editor.id, offsets.start, offsets.end]
     );
     const oldTokenHats = [];
-    for (const { tokenIdx, letter, color } of oldAssignments) {
+    for (const { tokenIdx, letter, color, styleName } of oldAssignments) {
       if (tokenIdx >= 0 && tokenIdx < tokens.length) {
         const token = tokenObjects[tokenIdx];
+        const hatStyle = styleName != null && styleName !== "" ? styleName : color;
         const hat = {
-          hatStyle: color,
+          hatStyle,
           grapheme: letter,
           token,
           hatRange: token.range
@@ -12743,7 +12813,7 @@
       splitter
     );
     const graphemeRemainingHatCandidates = new DefaultMap(
-      () => [...ENABLED_HAT_STYLE_NAMES]
+      () => [...enabledHatStyleNames]
     );
     const sortedRanked = [...rankedTokens].sort((a, b) => b.rank - a.rank);
     const result = {};
@@ -12751,7 +12821,8 @@
       const candidates = getTokenRemainingHatCandidates(
         splitter,
         token,
-        graphemeRemainingHatCandidates
+        graphemeRemainingHatCandidates,
+        enabledHatStyles
       );
       const chosen = chooseTokenHat(
         context,
@@ -12760,21 +12831,31 @@
         tokenOldHatMap.get(token),
         candidates
       );
-      if (chosen == null)
+      if (chosen == null) {
         continue;
+      }
       graphemeRemainingHatCandidates.set(
         chosen.grapheme.text,
         graphemeRemainingHatCandidates.get(chosen.grapheme.text).filter((s) => s !== chosen.style)
       );
+      const styleStr = String(chosen.style);
+      const dashIdx = styleStr.indexOf("-");
+      const color = dashIdx >= 0 ? styleStr.slice(0, dashIdx) : styleStr;
       result[String(token.offsets.start)] = {
         charIdx: chosen.grapheme.tokenStartOffset,
         letter: chosen.grapheme.text,
-        color: chosen.style
+        color,
+        styleName: styleStr
       };
     }
     return JSON.stringify(result);
   }
+  function proseBuildEnabledHatStyles(includeShapes = false) {
+    const map2 = includeShapes ? buildFullProseHatStyles() : buildDefaultProseHatStyles();
+    return JSON.stringify(map2);
+  }
   globalThis.proseAllocateHats = proseAllocateHats;
+  globalThis.proseBuildEnabledHatStyles = proseBuildEnabledHatStyles;
 })();
 /*! Bundled license information:
 

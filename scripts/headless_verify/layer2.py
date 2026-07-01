@@ -75,3 +75,78 @@ def run_layer_2() -> None:
         assert {"0", "1", "2"}.issubset(r.keys()), f"missing keys: {sorted(r.keys())}"
         assert r["2"]["letter"] == "1", f"123 should hat letter '1', got {r['2']!r}"
 
+    # L2.6 — post-2026-07-01 un-strip: shape identifiers and WordScopeHandler
+    # survive esbuild's tree-shake into the shipped bundle. If either grep
+    # returns 0 the bundle was built from the pre-un-strip source (or the
+    # tree-shaker aggressively dropped the shape vocabulary) and the shim
+    # can't opt into shape-suffixed style names. See docs/BUNDLE_SHAPE_SCOPE.md
+    # §3 and docs/SUBWORD_INVESTIGATION.md §1 for the referenced patterns.
+    with test(
+        "L2",
+        "L2.6",
+        "bundle contains shape identifiers (frame, crosshairs) and proseBuildEnabledHatStyles",
+    ):
+        bundle_text = pathlib.Path(HAT_JS).read_text()
+        # Shape suffix vocabulary — un-stripped 2026-07-01.
+        assert "frame" in bundle_text, "shape identifier 'frame' missing from bundle — un-strip regressed"
+        assert "crosshairs" in bundle_text, "shape identifier 'crosshairs' missing from bundle"
+        # New helper name is a strong signal the bundle was rebuilt from
+        # the post-un-strip source (it's a globalThis attach, not a
+        # tree-shakeable local).
+        assert (
+            "proseBuildEnabledHatStyles" in bundle_text
+        ), "proseBuildEnabledHatStyles missing — bundle predates un-strip"
+        # New styleName field on the return dict — Slice 1 contract.
+        assert "styleName" in bundle_text, "styleName field missing — bundle predates un-strip"
+
+    # L2.7 — 5th arg round-trip. Backward-compat and shape-enabled paths.
+    with test(
+        "L2",
+        "L2.7",
+        "proseAllocateHats accepts 5th enabledStylesJson arg + returns styleName",
+    ):
+        # Default (no 5th arg) — styleName present, no shape suffix.
+        r_default = _run_bun_probe(["hello", "world"])
+        assert (
+            "styleName" in r_default["0"]
+        ), f"styleName field missing on default: {r_default['0']!r}"
+        assert (
+            "-" not in r_default["0"]["styleName"]
+        ), f"default should have no shape suffix, got {r_default['0']['styleName']!r}"
+
+        # Shape-enabled (5th arg = full map from proseBuildEnabledHatStyles).
+        script = f"""
+const code = require('fs').readFileSync('{HAT_JS}', 'utf8');
+eval(code);
+const enabled = globalThis.proseBuildEnabledHatStyles(true);
+const parsed = JSON.parse(enabled);
+if (Object.keys(parsed).length !== 99) {{
+  process.stderr.write('expected 99 entries, got ' + Object.keys(parsed).length);
+  process.exit(2);
+}}
+if (!('blue-frame' in parsed)) {{
+  process.stderr.write('blue-frame missing from full map');
+  process.exit(2);
+}}
+const out = globalThis.proseAllocateHats(
+  JSON.stringify(['hello']),
+  JSON.stringify([]),
+  'balanced',
+  '-1',
+  enabled
+);
+process.stdout.write(out);
+"""
+        tmp = pathlib.Path("/tmp/headless-verify-bun-shape.js")
+        tmp.write_text(script)
+        proc = subprocess.run(
+            ["bun", str(tmp)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert proc.returncode == 0, f"bun exit {proc.returncode}: {proc.stderr[:200]}"
+        r_shape = json.loads(proc.stdout)
+        assert "0" in r_shape, f"missing hat: {r_shape}"
+        assert "styleName" in r_shape["0"], f"styleName absent under shape-enabled: {r_shape}"
+

@@ -598,3 +598,30 @@ decisions blocking the modifier cluster.
   - #8 inside/outside modifier (Cluster D — small independent PR).
   - #4 Paste at destination (§7 deferred — depends on clipboard
     plumbing verification).
+
+- **2026-07-01 — Cluster B closed — wishlist item #5 Wrap shipped.**
+  ABI-widening cross-repo work. `proseRunAction` grew a 5th `options`
+  arg for `{left, right}` delimiter strings; the bundle branches on
+  `optionsJson === undefined` for backward compat with pre-#5 4-arg
+  callers.
+  - #5 Wrap: `986554267` (cursorless — `actionWrapWithPairedDelimiter`
+    geometry in `proseActionsStandalone.ts`) → prose-overlay commit
+    lands the rebuilt bundle + `prose_overlay_wrap_with_paired_delimiter`
+    action in `shim/actions_cursorless.py` + `run_action_wrap` helper
+    in `shim/actions_js.py` + grammar rule at `prose_overlay_cursorless.talon`
+    mirroring cursorless.talon C7 (`<wrapper_paired_delimiter> {wrap_action}
+    <target>`). OQ1 resolution: reuse cursorless-talon's existing
+    `cursorless_wrapper_paired_delimiter` capture so the full delimiter
+    vocabulary flows through unchanged rather than shadowing with a
+    prose-side subset. VSCode-only `rewrap` action dispatches back to
+    cursorless proper.
+
+  **Headless:** 138 → 139 green (+ L2.14 — the wrap bundle probe emits
+  two `insert` ops (`position` + `text`), one for each delimiter, at
+  start-of-target and end-of-target). L2.9 must-have set went 10 → 11;
+  `ACTIONS_PLANNED` shrank to `pasteAtDestination` only.
+
+  **What's next in §7 order after Cluster B:**
+  - #8 inside/outside modifier (Cluster D — small independent PR).
+  - #4 Paste at destination (§7 deferred — depends on clipboard
+    plumbing verification).

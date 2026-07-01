@@ -223,6 +223,7 @@ Items 2 ✅ + 3 are the meaningful coverage leaps. Items 1, 4, 5 are quick wins.
 | `[x]` | applyFormatter on a hat target | "format snake at fox past bat" | ISC-7 |
 | `[x]` | Prose formatters (say/sentence/title) routed to buffer | "sentence the quick brown fox" → "The quick brown fox" | `5652b0e` |
 | `[x]` | Code formatters (snake/camel/dotted/...) routed to buffer | "snake the quick brown fox" → "the_quick_brown_fox" | `31df606` |
+| `[x]` | **wrap target with paired delimiter** | `round wrap air` on std → `the (air) ball drum echo`; `curly wrap air past drum` → `the {air ball drum} echo` | wishlist item #5 (`docs/BUNDLE_REST_SCOPE.md §Cluster B`). ABI-widening: `proseRunAction` grew a 5th `options` arg for `{left, right}` delimiter strings; backward-compat preserved via `optionsJson === undefined` branch in the bundle. Cursorless-side geometry: `actionWrapWithPairedDelimiter` in `proseActionsStandalone.ts` (`986554267`). Grammar rule at `prose_overlay_cursorless.talon` mirrors cursorless.talon C7: `<user.cursorless_wrapper_paired_delimiter> {user.cursorless_wrap_action} <user.cursorless_target>` — reuses cursorless-talon's existing paired_delimiter capture so the 12-entry cursorless delimiter vocabulary flows through unchanged. Multi-range targets wrap each resolved range with the same delimiter pair (matches upstream `Wrap.ts`). VSCode-only `rewrap` action dispatches back to cursorless proper. Headless: L2.14 (two insert ops around target range) + L2.9 must-have. |
 
 ### 3f. JS resolver migration
 

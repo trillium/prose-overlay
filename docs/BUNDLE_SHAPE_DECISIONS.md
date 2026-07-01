@@ -71,5 +71,22 @@ Slice 3 gates the projection path behind a new opt-in setting (default OFF) so t
 ## Slice status
 
 - **Slice 1 (bundle un-strip + 5th arg)** — landed.
+  - cursorless SHA: `a590950f7` on branch `generate-examples`.
+  - prose-overlay SHA: `97215cd` (bundle rebuild + docs + L2.6/L2.7 tests).
+  - Headless: 118 → 120 green.
 - **Slice 2 (shim projection wrapper + stability schema migration)** — landed.
-- **Slice 3 (opt-in setting + retire Python allocator body)** — landed.
+  - prose-overlay SHA: `e7322f3` (shim/shape_bridge.py + hats_js migration + L1.58–L1.62 tests).
+  - Headless: 120 → 125 green.
+- **Slice 3 (opt-in setting + Python allocator kept as authoritative)** — landed.
+  - prose-overlay SHA: `c6c735c` (setting + caller-side switch in shim/actions_core.py + L1.63–L1.64).
+  - Python allocator retirement DEFERRED: docs/BUNDLE_SHAPE_SCOPE.md §5 recommends option (b) keeps the Python group-allocator as authoritative for ISC-14c indefinitely. The Slice 3 opt-in just adds the *choice* to route letter+color through the bundle; it does not remove the classic path. A future slice can flip the default and delete the classic path once the bridge is live-verified across ≥3 sessions.
+  - Headless: 125 → 127 green. Layer audit unchanged (0 fail, 2 pre-existing warns on UI bypassing SHIM).
+
+## Retirement of the Python allocator body
+
+The parent instruction for Slice 3 read: "Retire the Python allocator body ONLY behind that setting — the caller-side switches between `compute_shape_assignments` (current) and the bridged path. Do NOT delete the Python allocator; keep it as a fallback."
+
+Per the scope's Slice 3 note, this Slice 3 lands the caller-side switch (`_recompute_hats` in `shim/actions_core.py` now branches on `_cursorless_shape_allocator_enabled()`). The Python allocator body (`compute_shape_assignments` in `shim/shapes.py`) is UNCHANGED — it remains the source of truth for group -> shape mapping in BOTH branches. In the bridge branch it runs first, and its output is projected through cursorless via `shape_bridge.compute_hat_assignments_with_group_shapes`. In the classic branch nothing changes.
+
+No file was deleted. The classic path is the fallback per the parent instruction.
+

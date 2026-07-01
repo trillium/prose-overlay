@@ -193,8 +193,70 @@ class EllipseOp:
     stroke: bool = False
 
 
+@dataclass(frozen=True)
+class RoundedRectOp:
+    """A single rounded-rectangle paint op.
+
+    Used for selection / flash overlays (25-30% alpha wash) and for
+    the homophone bubble chip backgrounds. The sink routes to
+    ``overlay_kit.draw_rounded_rect`` which builds a Skia ``Path`` for
+    the corner radius. Non-rounded rects should use ``RectOp``.
+
+    Fields:
+        x, y   : top-left corner in absolute screen coordinates.
+        w, h   : width and height in px.
+        radius : corner radius in px (clamped by the sink helper to
+                 ``min(radius, w/2, h/2)``).
+        color  : hex color with or without alpha.
+        stroke : False → filled rect (the common case). True → outlined.
+        stroke_width : line width when ``stroke=True``. Ignored otherwise.
+    """
+
+    x: float
+    y: float
+    w: float
+    h: float
+    radius: float
+    color: str
+    stroke: bool = False
+    stroke_width: float = 1.0
+
+
+@dataclass(frozen=True)
+class ShapeGlyphOp:
+    """A single Cursorless-style hat-shape glyph paint op.
+
+    Used for homophone shape hats above tokens and for the shape
+    glyph inside the homophone bubble panel. The sink resolves the
+    named shape via ``shim.shapes.draw_hat_shape`` which walks a
+    cached Skia ``Path`` for the SVG vocabulary (bolt, frame, wing,
+    …). The op carries only pure data (name + placement + color) —
+    the impure lookup lives in the sink.
+
+    Fields:
+        shape_name : spoken shape name (``"bolt"``, ``"frame"``, …)
+                     that ``shim.shapes.draw_hat_shape`` accepts.
+        cx, cy     : center in absolute screen coordinates. The
+                     glyph is centered on this point at ``scale``.
+        scale      : multiplier applied to the native 12x9 viewBox.
+        color      : 6-char hex fill color (no alpha).
+        alpha      : 0-255 alpha for the glyph fill + stroke.
+        outline    : optional 6-char hex outline color. ``None`` →
+                     stroke uses the same hex as fill (matches
+                     ``draw_hat_shape``'s default).
+    """
+
+    shape_name: str
+    cx: float
+    cy: float
+    scale: float
+    color: str
+    alpha: int = 255
+    outline: str | None = None
+
+
 # Union alias. New op types get added here.
-PaintOp = Union[RectOp, TextOp, LineOp, EllipseOp]
+PaintOp = Union[RectOp, RoundedRectOp, TextOp, LineOp, EllipseOp, ShapeGlyphOp]
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +435,21 @@ def execute(ops: list[PaintOp], canvas) -> None:
                 canvas.paint.style = canvas.paint.Style.FILL
                 canvas.paint.color = op.color
                 canvas.draw_rect(_TalonRect(op.x, op.y, op.w, op.h))
+        elif isinstance(op, RoundedRectOp):
+            # Rounded rect. Routes through overlay_kit.draw_rounded_rect
+            # which builds a Skia Path for the corner radius. Set style +
+            # color first so the helper paints with the right attributes.
+            from ....utils.overlay_kit import draw_rounded_rect as _drr
+            if op.stroke:
+                canvas.paint.style = canvas.paint.Style.STROKE
+                canvas.paint.stroke_width = op.stroke_width
+                canvas.paint.color = op.color
+                _drr(canvas, _TalonRect(op.x, op.y, op.w, op.h), op.radius)
+                canvas.paint.style = canvas.paint.Style.FILL
+            else:
+                canvas.paint.style = canvas.paint.Style.FILL
+                canvas.paint.color = op.color
+                _drr(canvas, _TalonRect(op.x, op.y, op.w, op.h), op.radius)
         elif isinstance(op, TextOp):
             canvas.paint.color = op.color
             canvas.paint.textsize = op.font_size
@@ -393,6 +470,22 @@ def execute(ops: list[PaintOp], canvas) -> None:
             # need canvas.draw_path with a Skia Path — deferred.
             canvas.draw_circle(op.cx, op.cy, max(op.rx, op.ry))
             canvas.paint.style = canvas.paint.Style.FILL
+        elif isinstance(op, ShapeGlyphOp):
+            # Shape glyph — routes through shim.shapes.draw_hat_shape
+            # which owns the SVG path cache + FILL+STROKE compositing.
+            # Lazy import for the same reason as talon.ui: keep the
+            # module headless-importable.
+            from ..shim import shapes as _shapes_sink
+            _shapes_sink.draw_hat_shape(
+                canvas,
+                shape_name=op.shape_name,
+                color=op.color,
+                cx=op.cx,
+                cy=op.cy,
+                scale=op.scale,
+                alpha=op.alpha,
+                outline=op.outline,
+            )
         else:
             raise TypeError(
                 f"execute(): unknown PaintOp type {type(op).__name__!r}"
@@ -401,9 +494,11 @@ def execute(ops: list[PaintOp], canvas) -> None:
 
 __all__ = [
     "RectOp",
+    "RoundedRectOp",
     "TextOp",
     "LineOp",
     "EllipseOp",
+    "ShapeGlyphOp",
     "PaintOp",
     "to_paint_ops",
     "execute",

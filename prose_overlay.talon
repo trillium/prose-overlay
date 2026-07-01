@@ -175,7 +175,13 @@ change <user.prose_hat_color> <user.letter>:
 # Without this, command-mode-only forms like "dot", "point", "semi", "slash", "dash" etc.
 # fire key() in the background window instead of routing to the overlay.
 # {user.symbol_key} includes all spoken forms — both command-and-dictation and command-only.
-{user.symbol_key}: user.prose_overlay_add_chars(symbol_key)
+#
+# End-anchored ($) so the ENTIRE utterance must be exactly one symbol_key. Without
+# the anchor, Talon can match {symbol_key} as a substring of a prose phrase — e.g.
+# "slash the budget" partially matches "slash" as symbol_key and leaks the tail.
+# SCENARIOS.md §S8. When user wants a symbol inline with prose, formatters or
+# raw_prose fall-through carry it through the buffer correctly.
+{user.symbol_key}$: user.prose_overlay_add_chars(symbol_key)
 
 # Prose formatters (say / sentence / title) — "say hello world" → "hello world".
 # Mirrors text.talon:8 scoped to overlay-active so it fires in dictation mode
@@ -199,7 +205,16 @@ change <user.prose_hat_color> <user.letter>:
 # by community dictation. Routes through prose_overlay_add_letters so
 # consecutive letter utterances ("air" then "bat cap") EXTEND the last
 # token into one ("abc") rather than producing two tokens ("a","bc").
-<user.letters>: user.prose_overlay_add_chars(letters)
+#
+# End-anchored ($) so the ENTIRE utterance must be exactly a run of NATO
+# letters. Without the anchor, community's letters capture can match a
+# substring of a prose phrase — e.g. "is made of cardboard" could partial-
+# match on a letter-shaped word within the phrase and leak the rest to
+# other handlers ("ism of cardboard"-style regressions). Live-repro
+# reported 2026-07-01. When the whole phrase is not letters, this rule
+# doesn't fire; raw_prose in prose_overlay_dictation.talon catches the
+# utterance as pure prose.
+<user.letters>$: user.prose_overlay_add_chars(letters)
 
 # Viewport alignment — Helix/Emacs-style
 overlay show top: user.prose_overlay_align_top()

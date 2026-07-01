@@ -188,6 +188,23 @@ def _resolve_primitive_to_token_range(target) -> "tuple[int, int] | None":
         return None
     mark = target.mark
     modifiers = target.modifiers or []
+
+    # Cursorless "this" mark (mark.type == "cursor") refers to the ACTIVE
+    # SELECTION when one is present, not just the cursor gap. Without this
+    # short-circuit, `take air` followed by `chuck this` would delete the
+    # token at `_state.cursor` (advanced past the selection) instead of the
+    # selected token. Live-repro reported 2026-07-01. Only applies when
+    # there are no modifiers — with modifiers we still want the base_idx
+    # path so the modifier can extend/shrink around a cursor position.
+    if (
+        isinstance(mark, dict)
+        and mark.get("type") == "cursor"
+        and not modifiers
+    ):
+        selection = _state.buffer.get_selection()
+        if selection is not None:
+            return selection
+
     base = _resolve_mark_to_base_idx(mark, tokens)
     if base == "error":
         return None

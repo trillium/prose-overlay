@@ -1309,3 +1309,191 @@ def run_layer_1() -> None:
             f"non-shape token's style must pass through unchanged; got {p2[3]!r}"
         )
 
+
+    # -----------------------------------------------------------------------
+    # Move 4 (LayoutModel target shape) — ui/layout.py
+    # Pure-data model produced by a future `layout(state) -> LayoutModel`
+    # and consumed by `to_paint_ops` (Move 5). These tests lock in the
+    # dataclass tree's constructability and JSON serialization contract
+    # so downstream agents can rely on the shape.
+    # -----------------------------------------------------------------------
+    import dataclasses as _dc
+    import json as _json
+    layout_spec = importlib.util.spec_from_file_location(
+        "po_ui_layout",
+        REPO / "ui" / "layout.py",
+    )
+    layout_mod = importlib.util.module_from_spec(layout_spec)
+    # Register in sys.modules BEFORE exec_module — required because the
+    # file uses `from __future__ import annotations` and @dataclass, which
+    # under Python 3.13 asks sys.modules[cls.__module__] for the class
+    # namespace during KW_ONLY detection. Without this pre-registration
+    # the exec raises AttributeError('NoneType' has no '__dict__').
+    _sys.modules["po_ui_layout"] = layout_mod
+    layout_spec.loader.exec_module(layout_mod)
+
+    with test("L1", "L1.65", "LayoutModel + children construct with minimal args"):
+        # Minimal-args smoke: every dataclass in ui/layout.py must be
+        # constructible without runtime errors given only its declared
+        # types. Catches accidental __post_init__ additions, unresolved
+        # forward refs from `from __future__ import annotations`, and
+        # any drift where a field's declared type doesn't match what
+        # the producer would realistically pass.
+        r = layout_mod.Rect(x=0.0, y=0.0, w=100.0, h=20.0)
+        assert r.x == 0.0 and r.w == 100.0
+        h = layout_mod.HatMark(
+            char_index=1, letter="h", color="gray",
+            position=layout_mod.Rect(1.0, 1.0, 4.0, 4.0),
+        )
+        s = layout_mod.ShapeMark(
+            shape_name="wing",
+            position=layout_mod.Rect(2.0, 1.0, 10.0, 7.0),
+            scale=0.5, color="ffaa00ff",
+        )
+        u = layout_mod.UnderlineSegment(
+            x0=0.0, x1=10.0, y=20.0, active=True, color="ff0000ff",
+        )
+        tok = layout_mod.TokenLayout(
+            index=0, text="there", rect=r,
+            hat=h, shape=s, underline_segments=[u],
+            flagged=True, on_visible_row=True,
+        )
+        sel = layout_mod.SelectionOverlay(rects=[r])
+        fl = layout_mod.FlashOverlay(rects=[r], color="ff00004d")
+        b = layout_mod.BubbleLayout(
+            token_idx=0, x=10.0, y=100.0, w=60.0, h=18.0,
+            shape_name="wing", shape_scale=0.55,
+            left_chip=("yellow", "their", 30.0),
+            right_chip=("blue", "they're", 34.0),
+            band=0,
+        )
+        hr = layout_mod.HelpRow(left="cmd", right="desc", y=50.0)
+        hp = layout_mod.HelpLayout(rows=[hr], page=0, total_pages=3)
+        cur = layout_mod.CursorLayout(
+            rect=r, change_mode=False, blink_on=True,
+        )
+
+        # Minimum-viable LayoutModel — all optional fields None, all
+        # list fields empty. Represents the "listening..." placeholder
+        # frame with no tokens, no cursor, no help zone.
+        m_min = layout_mod.LayoutModel(
+            panel=r, content_area=r, help_area=None,
+            tokens=[], selection=None, flash=None,
+            bubbles=[], help=None, cursor=None,
+            target_label="", using_fallback=False,
+            hints_hidden_by_overflow=False,
+        )
+        assert m_min.tokens == [] and m_min.help is None
+
+        # Fully-populated LayoutModel — every optional slot filled,
+        # every list has at least one entry. Represents a typical
+        # active draw with tokens, hats, shapes, homophone bubbles,
+        # selection, flash, help side panel, and cursor.
+        m_full = layout_mod.LayoutModel(
+            panel=r, content_area=r, help_area=r,
+            tokens=[tok], selection=sel, flash=fl,
+            bubbles=[b], help=hp, cursor=cur,
+            target_label="window: Terminal",
+            using_fallback=False,
+            hints_hidden_by_overflow=False,
+        )
+        assert len(m_full.tokens) == 1
+        assert m_full.tokens[0].hat is not None
+        assert m_full.tokens[0].shape is not None
+        assert m_full.bubbles[0].right_chip is not None
+
+        # Immutability contract — every dataclass must be frozen. Attempt
+        # to mutate one field on each root-level record; the FrozenInstance
+        # error is the desired outcome. If any of these silently succeeds
+        # the frozen=True decorator got dropped somewhere.
+        for obj, attr in [
+            (r, "x"), (h, "char_index"), (s, "shape_name"),
+            (u, "active"), (tok, "index"), (sel, "rects"),
+            (fl, "color"), (b, "band"), (hr, "y"), (hp, "page"),
+            (cur, "blink_on"), (m_full, "target_label"),
+        ]:
+            try:
+                setattr(obj, attr, "should-not-take")
+            except _dc.FrozenInstanceError:
+                continue
+            raise AssertionError(
+                f"{type(obj).__name__}.{attr} accepted mutation — "
+                f"missing @dataclass(frozen=True)?"
+            )
+
+    with test(
+        "L1",
+        "L1.66",
+        "LayoutModel round-trips via dataclasses.asdict -> json.dumps -> json.loads",
+    ):
+        # Serialization contract: the model must be JSON-safe so debug
+        # snapshots, headless test fixtures, and Move 5's paint-op emitter
+        # can dump the model to disk and reload it. tuple-typed fields
+        # (BubbleLayout.left_chip / right_chip) become JSON arrays on the
+        # wire — that's expected; we compare structural equivalence after
+        # normalizing tuples -> lists on the source side.
+        r = layout_mod.Rect(x=1.0, y=2.0, w=3.0, h=4.0)
+        h = layout_mod.HatMark(
+            char_index=0, letter="a", color="gray",
+            position=layout_mod.Rect(0.0, 0.0, 1.0, 1.0),
+        )
+        s = layout_mod.ShapeMark(
+            shape_name="wing", position=r, scale=0.55, color="ffaa00ff",
+        )
+        u = layout_mod.UnderlineSegment(
+            x0=0.0, x1=1.0, y=0.0, active=False, color="00000000",
+        )
+        tok = layout_mod.TokenLayout(
+            index=0, text="a", rect=r, hat=h, shape=s,
+            underline_segments=[u], flagged=True, on_visible_row=True,
+        )
+        b = layout_mod.BubbleLayout(
+            token_idx=0, x=0.0, y=0.0, w=10.0, h=5.0,
+            shape_name="wing", shape_scale=0.55,
+            left_chip=("yellow", "alt1", 5.0),
+            right_chip=("blue", "alt2", 5.0),
+            band=0,
+        )
+        cur = layout_mod.CursorLayout(
+            rect=r, change_mode=True, blink_on=True,
+        )
+        hp = layout_mod.HelpLayout(
+            rows=[layout_mod.HelpRow(left="l", right="r", y=0.0)],
+            page=1, total_pages=2,
+        )
+        m = layout_mod.LayoutModel(
+            panel=r, content_area=r, help_area=r,
+            tokens=[tok],
+            selection=layout_mod.SelectionOverlay(rects=[r]),
+            flash=layout_mod.FlashOverlay(rects=[r], color="ff00004d"),
+            bubbles=[b], help=hp, cursor=cur,
+            target_label="x", using_fallback=True,
+            hints_hidden_by_overflow=False,
+        )
+        d = _dc.asdict(m)
+        # asdict preserves tuples; json converts them to lists. Normalize
+        # so the structural-equivalence check reflects what a real caller
+        # sees on the far side of the JSON boundary.
+        def _tuples_to_lists(x):
+            if isinstance(x, tuple):
+                return [_tuples_to_lists(v) for v in x]
+            if isinstance(x, list):
+                return [_tuples_to_lists(v) for v in x]
+            if isinstance(x, dict):
+                return {k: _tuples_to_lists(v) for k, v in x.items()}
+            return x
+        expected = _tuples_to_lists(d)
+        actual = _json.loads(_json.dumps(d))
+        assert actual == expected, (
+            "JSON round-trip diverged from asdict (post tuple-normalize)."
+        )
+        # Sanity that the wire form is JSON-parseable string (i.e. no
+        # non-serializable values like sets or floats-as-NaN slipped in).
+        wire = _json.dumps(d)
+        assert isinstance(wire, str) and len(wire) > 0
+        # And a spot check on a specific tuple-typed field to lock in the
+        # documented "tuple becomes list" wire contract.
+        assert actual["bubbles"][0]["left_chip"] == ["yellow", "alt1", 5.0], (
+            f"left_chip wire form should be a JSON array; got "
+            f"{actual['bubbles'][0]['left_chip']!r}"
+        )

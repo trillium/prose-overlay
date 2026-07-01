@@ -908,3 +908,30 @@ def run_layer_5() -> None:
             f"L5.20 (#7): ordinalScope first word — got {js_result!r}, "
             f"expected {expected!r}"
         )
+
+    # Wishlist #10 — first/last modifiers via ordinalScope with negative
+    # start. Cursorless's `cursorless_first_last` capture at
+    # `~/.talon/user/cursorless-talon/src/modifiers/ordinal_scope.py:46-68`
+    # returns an ordinalScope dict with `start=-N` for "last N". Cursor at
+    # end of buffer + ordinalScope start=-1 length=1 word → token 4
+    # ("echo"). Same OrdinalScopeStage as #7 — this row confirms the
+    # negative-index branch of `startIndex = start + (start < 0 ? length : 0)`
+    # at bundle line 18910.
+    with test("L5", "L5.21", "wishlist #10 — `take last word` (ordinalScope start=-1)"):
+        target = {
+            "type": "primitive",
+            "mark": {"type": "cursor"},
+            "modifiers": [
+                {"type": "ordinalScope", "scopeType": {"type": "word"},
+                 "start": -1, "length": 1},
+            ],
+        }
+        hat_entries = _build_hat_map_for_js(_STD_TOKENS, _STD_LETTERS, color="default")
+        # Cursor at end of buffer (char 22 = end of "echo").
+        end_char = len(" ".join(_STD_TOKENS))
+        js_result = _run_js_resolver(target, _STD_TOKENS, hat_entries, cursor_char=end_char)
+        expected = [(4, 4)]
+        assert js_result == expected, (
+            f"L5.21 (#10): ordinalScope last word — got {js_result!r}, "
+            f"expected {expected!r}"
+        )

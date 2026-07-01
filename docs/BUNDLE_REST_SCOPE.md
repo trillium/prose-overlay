@@ -478,14 +478,21 @@ decisions blocking the modifier cluster.
   ZERO new prose-overlay grammar rules. The cluster is grammar routing +
   Python-fallback stance + L5 test rows per item — no shim captures.
 
-- **#7 OrdinalScope** — ✅ shipped 2026-07-01 (SHA recorded when #10 commits).
+- **#7 OrdinalScope** — ✅ shipped commit `08288db` (2026-07-01).
   Zero-grammar rebuild per OQ2=YES. Python-fallback documented as
   JS-only per `§Cluster C` — matches sub-word / ISC-9 direction. L5.20
   added (JS-only shape probe: `ordinalScope start=0 length=1 word` from
   cursor → token 0). MANUAL_VERIFICATION row 21 added
   (`take first word` → "the"). FEATURE_PARITY §3c row added.
 
-- **Next up per §7 order:** #10 first/last (rolls into #7 semantically —
-  `take last word`), then #9 every, #6 RelativeScope, #11
+- **#10 first/last** — ✅ shipped 2026-07-01 (SHA recorded when #9 commits).
+  Semantically covered by OrdinalScopeStage — cursorless-talon's
+  `cursorless_first_last` capture returns `{type:"ordinalScope",
+  start:-N|0, length:N}`. Same bundle line 18899 + zero-grammar routing
+  as #7. L5.21 added (JS-only: `ordinalScope start=-1 length=1 word`
+  from cursor-at-end → token 4). MANUAL_VERIFICATION row 22 added.
+  FEATURE_PARITY §3c row added.
+
+- **Next up per §7 order:** #9 every, then #6 RelativeScope, #11
   leading/trailing (semantics degenerate on prose per OQ3 —
   see item shipping notes).

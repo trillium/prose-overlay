@@ -5076,3 +5076,106 @@ def run_layer_1() -> None:
             f"separator color mismatch: expected SEP_COLOR={_DC_PO.SEP_COLOR}, got {sep.color!r}"
         )
         assert sep.width == 1.0
+
+    # ----- L1.164-L1.165 — bubble emission (Step 6 of paint retirement) --
+
+    _BubbleLayout = _po_layout.BubbleLayout
+
+    def _mk_model_with_bubbles(bubbles):
+        """Model carrying only bubbles (empty tokens, no cursor)."""
+        panel = _Rect_layout(x=0.0, y=0.0, w=1000.0, h=200.0)
+        ca = _Rect_layout(x=12.0, y=12.0, w=776.0, h=176.0)
+        return _LayoutModelPO(
+            panel=panel,
+            content_area=ca,
+            help_area=None,
+            tokens=[],
+            selection=None,
+            flash=None,
+            bubbles=list(bubbles),
+            help=None,
+            cursor=None,
+            target_label="",
+            using_fallback=False,
+            hints_hidden_by_overflow=False,
+        )
+
+    with test(
+        "L1",
+        "L1.164",
+        "to_paint_ops: bubble WITH right chip → 6 ops (2 chips × [rect+text] + backdrop + shape) in order",
+    ):
+        b = _BubbleLayout(
+            token_idx=0,
+            x=100.0, y=250.0, w=80.0, h=22.0,
+            shape_name="bolt",
+            shape_scale=_DC_PO.BUBBLE_SHAPE_SCALE,
+            left_chip=("yellow", "their", 30.0),
+            right_chip=("blue", "they're", 34.0),
+            band=0,
+        )
+        model = _mk_model_with_bubbles([b])
+        ops = _to_paint_ops(model)
+        # Filter out listening TextOp (empty tokens branch): we assert on the
+        # bubble ops after the placeholder.
+        bubble_ops = [o for o in ops if not (isinstance(o, _TextOp) and o.text == "listening...")]
+        assert len(bubble_ops) == 6, (
+            f"expected 6 bubble ops (left rect+text, right rect+text, backdrop, shape); "
+            f"got {len(bubble_ops)}: {[type(o).__name__ for o in bubble_ops]}"
+        )
+        # Order: left rounded rect → left text → right rounded rect → right text → backdrop ellipse → shape glyph
+        assert isinstance(bubble_ops[0], _RoundedRectOp), f"op0 should be left chip RoundedRectOp; got {type(bubble_ops[0]).__name__}"
+        assert isinstance(bubble_ops[1], _TextOp) and bubble_ops[1].text == "their"
+        assert isinstance(bubble_ops[2], _RoundedRectOp), f"op2 should be right chip RoundedRectOp; got {type(bubble_ops[2]).__name__}"
+        assert isinstance(bubble_ops[3], _TextOp) and bubble_ops[3].text == "they're"
+        assert isinstance(bubble_ops[4], _EllipseOp), f"op4 should be backdrop EllipseOp; got {type(bubble_ops[4]).__name__}"
+        assert bubble_ops[4].color == _DC_PO.BUBBLE_SHAPE_BACKDROP_COLOR
+        assert isinstance(bubble_ops[5], _ShapeGlyphOp), f"op5 should be ShapeGlyphOp; got {type(bubble_ops[5]).__name__}"
+        assert bubble_ops[5].shape_name == "bolt"
+        assert bubble_ops[5].color == _DC_PO.HOMOPHONE_SHAPE_COLOR_HEX
+        # Left chip fg: yellow is a LIGHT bg → black text ("000000ff").
+        assert bubble_ops[1].color == "000000ff", (
+            f"yellow chip fg should be black; got {bubble_ops[1].color!r}"
+        )
+        # Right chip fg: blue is a DARK bg → white text.
+        assert bubble_ops[3].color == "ffffffff", (
+            f"blue chip fg should be white; got {bubble_ops[3].color!r}"
+        )
+        # Left chip bg = HAT_COLOR_HEX["yellow"].
+        assert bubble_ops[0].color == _DC_PO.HAT_COLOR_HEX["yellow"]
+        # Right chip bg = HAT_COLOR_HEX["blue"].
+        assert bubble_ops[2].color == _DC_PO.HAT_COLOR_HEX["blue"]
+        # Left chip x/y match bubble.x, chip_y (centered vertically).
+        chip_h = _DC_PO.BUBBLE_CHIP_FONT_SIZE + _DC_PO.BUBBLE_CHIP_PAD_Y * 2
+        expected_chip_y = 250.0 + (22.0 - chip_h) / 2.0
+        assert bubble_ops[0].x == 100.0
+        assert bubble_ops[0].y == expected_chip_y
+        assert bubble_ops[0].w == 30.0 and bubble_ops[0].h == chip_h
+
+    with test(
+        "L1",
+        "L1.165",
+        "to_paint_ops: bubble WITHOUT right chip (2-member group) → 4 ops (chip + backdrop + shape)",
+    ):
+        b = _BubbleLayout(
+            token_idx=0,
+            x=100.0, y=250.0, w=40.0, h=22.0,
+            shape_name="frame",
+            shape_scale=_DC_PO.BUBBLE_SHAPE_SCALE,
+            left_chip=("green", "your", 28.0),
+            right_chip=None,
+            band=0,
+        )
+        model = _mk_model_with_bubbles([b])
+        ops = _to_paint_ops(model)
+        bubble_ops = [o for o in ops if not (isinstance(o, _TextOp) and o.text == "listening...")]
+        assert len(bubble_ops) == 4, (
+            f"expected 4 bubble ops (left rect+text, backdrop, shape); "
+            f"got {len(bubble_ops)}: {[type(o).__name__ for o in bubble_ops]}"
+        )
+        assert isinstance(bubble_ops[0], _RoundedRectOp)
+        assert isinstance(bubble_ops[1], _TextOp) and bubble_ops[1].text == "your"
+        assert isinstance(bubble_ops[2], _EllipseOp)
+        assert isinstance(bubble_ops[3], _ShapeGlyphOp)
+        # Green is DARK → white fg.
+        assert bubble_ops[1].color == "ffffffff"

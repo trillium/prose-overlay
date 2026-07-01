@@ -260,6 +260,37 @@ PaintOp = Union[RectOp, RoundedRectOp, TextOp, LineOp, EllipseOp, ShapeGlyphOp]
 
 
 # ---------------------------------------------------------------------------
+# Bubble emission helpers — shape footprint + chip foreground picker.
+#
+# Native SVG viewBox is 12 wide × 9 tall (mouse-clock conventions, mirrored
+# in ``shim/shapes.py:_SVG_W`` / ``_SVG_H``). Hard-coded rather than imported
+# so this module has no dependency on ``shim/shapes.py`` (which guards Skia
+# imports behind a try/except); mirrors the same trick used in
+# ``ui/draw_panels.py`` and ``ui/layout_bubbles.py``.
+# ---------------------------------------------------------------------------
+
+_SHAPE_NATIVE_W = 12.0
+_SHAPE_NATIVE_H = 9.0
+
+# Foreground text color picked per chip background. The chip background is a
+# saturated Cursorless palette color; the text needs to read against it.
+# Light backgrounds (yellow, white) take BLACK; the rest take WHITE. Mirrors
+# ``ui/draw_panels.py:_LIGHT_BG_COLORS`` verbatim.
+_LIGHT_BG_COLORS = {"yellow", "white"}
+
+
+def _chip_fg_for(color_name: str) -> str:
+    """Return the chip foreground text color for a given background color.
+
+    Mirrors ``ui/draw_panels.py:_chip_fg_for`` exactly. Light backgrounds
+    (``yellow``, ``white``) take black text; the rest take white.
+    """
+    if color_name in _LIGHT_BG_COLORS:
+        return "000000ff"
+    return "ffffffff"
+
+
+# ---------------------------------------------------------------------------
 # Pure builder — LayoutModel → list[PaintOp]
 # ---------------------------------------------------------------------------
 
@@ -297,6 +328,13 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
     # in isolation for the paint-ops-only tests and keeps the constants
     # pipeline explicit.
     from ..internal.draw_constants import (
+        BUBBLE_CHIP_FONT_SIZE,
+        BUBBLE_CHIP_PAD_X,
+        BUBBLE_CHIP_PAD_Y,
+        BUBBLE_CHIP_RADIUS,
+        BUBBLE_INNER_GAP,
+        BUBBLE_SHAPE_BACKDROP_COLOR,
+        BUBBLE_SHAPE_BACKDROP_FACTOR,
         CURSOR_CHANGE_ZONE_ALPHA,
         CURSOR_CHANGE_ZONE_WIDTH,
         CURSOR_COLOR_CHANGE,
@@ -307,6 +345,7 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
         HAT_COLOR,
         HAT_COLOR_HEX,
         HINT_CMD_COLOR,
+        HOMOPHONE_SHAPE_COLOR_HEX,
         HOMOPHONE_UNDERLINE_ACTIVE_HEIGHT,
         HOMOPHONE_UNDERLINE_HEIGHT,
         LISTENING_COLOR,
@@ -534,6 +573,122 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
                 y1=line_y1,
                 color=SEP_COLOR,
                 width=1.0,
+            )
+        )
+
+    # --- Homophone bubble band (Slice C of docs/PHONES_SPEC.md) ---
+    # Mirrors ui/draw_panels.py:draw_homophone_panels + _draw_one_bubble.
+    # Paint order per _draw_one_bubble: left chip → right chip →
+    # backdrop disc → shape glyph. The chips paint FIRST so the black
+    # backdrop disc lands ON TOP of any chip edge it overhangs (spec:
+    # "shape sits in front of both").
+    #
+    # Bubble geometry (mirror of ui/draw_panels.py:_draw_one_bubble):
+    #   shape_w      = _SHAPE_NATIVE_W * bubble.shape_scale
+    #   chip_h       = BUBBLE_CHIP_FONT_SIZE + BUBBLE_CHIP_PAD_Y * 2
+    #   chip_y       = bubble.y + (bubble.h - chip_h) / 2
+    #   chip_mid_y   = chip_y + chip_h / 2
+    #   left_x       = bubble.x
+    #   shape_x_left = left_x + left_chip_w + BUBBLE_INNER_GAP
+    #   right_x      = shape_x_left + shape_w + BUBBLE_INNER_GAP
+    #   shape_cx     = shape_x_left + shape_w / 2
+    #   shape_cy     = chip_mid_y
+    #
+    # Chip text baseline: `y + BUBBLE_CHIP_PAD_Y + BUBBLE_CHIP_FONT_SIZE`
+    # (mirrors _draw_chip's `c.draw_text(text, x + BUBBLE_CHIP_PAD_X,
+    #  y + BUBBLE_CHIP_PAD_Y + BUBBLE_CHIP_FONT_SIZE)`).
+    for bubble in layout.bubbles:
+        shape_w = _SHAPE_NATIVE_W * bubble.shape_scale
+        chip_h = BUBBLE_CHIP_FONT_SIZE + BUBBLE_CHIP_PAD_Y * 2
+        chip_y = bubble.y + (bubble.h - chip_h) / 2.0
+        chip_mid_y = chip_y + chip_h / 2.0
+
+        left_color_name, left_alt, left_chip_w = bubble.left_chip
+        left_x = bubble.x
+
+        # Left chip — filled RoundedRectOp + TextOp on top.
+        left_bg = HAT_COLOR_HEX.get(left_color_name, HAT_COLOR)
+        left_fg = _chip_fg_for(left_color_name)
+        ops.append(
+            RoundedRectOp(
+                x=left_x,
+                y=chip_y,
+                w=left_chip_w,
+                h=chip_h,
+                radius=BUBBLE_CHIP_RADIUS,
+                color=left_bg,
+                stroke=False,
+            )
+        )
+        ops.append(
+            TextOp(
+                x=left_x + BUBBLE_CHIP_PAD_X,
+                y=chip_y + BUBBLE_CHIP_PAD_Y + BUBBLE_CHIP_FONT_SIZE,
+                text=left_alt,
+                font_size=float(BUBBLE_CHIP_FONT_SIZE),
+                color=left_fg,
+            )
+        )
+
+        # Right chip (when present — 3+ member groups). Painted BEFORE the
+        # backdrop + shape so the shape's backdrop disc lands on top of
+        # this chip's inner edge (matches _draw_one_bubble ordering).
+        shape_x_left = left_x + left_chip_w + BUBBLE_INNER_GAP
+        if bubble.right_chip is not None:
+            right_color_name, right_alt, right_chip_w = bubble.right_chip
+            right_x = shape_x_left + shape_w + BUBBLE_INNER_GAP
+            right_bg = HAT_COLOR_HEX.get(right_color_name, HAT_COLOR)
+            right_fg = _chip_fg_for(right_color_name)
+            ops.append(
+                RoundedRectOp(
+                    x=right_x,
+                    y=chip_y,
+                    w=right_chip_w,
+                    h=chip_h,
+                    radius=BUBBLE_CHIP_RADIUS,
+                    color=right_bg,
+                    stroke=False,
+                )
+            )
+            ops.append(
+                TextOp(
+                    x=right_x + BUBBLE_CHIP_PAD_X,
+                    y=chip_y + BUBBLE_CHIP_PAD_Y + BUBBLE_CHIP_FONT_SIZE,
+                    text=right_alt,
+                    font_size=float(BUBBLE_CHIP_FONT_SIZE),
+                    color=right_fg,
+                )
+            )
+
+        # Backdrop disc — filled EllipseOp centered on the shape's (cx, cy)
+        # at radius = shape_radius * BUBBLE_SHAPE_BACKDROP_FACTOR. Mirrors
+        # _draw_shape_with_backdrop math exactly.
+        shape_cx = shape_x_left + shape_w / 2.0
+        shape_cy = chip_mid_y
+        shape_radius = _SHAPE_NATIVE_W * bubble.shape_scale / 2.0
+        backdrop_radius = shape_radius * BUBBLE_SHAPE_BACKDROP_FACTOR
+        ops.append(
+            EllipseOp(
+                cx=shape_cx,
+                cy=shape_cy,
+                rx=backdrop_radius,
+                ry=backdrop_radius,
+                color=BUBBLE_SHAPE_BACKDROP_COLOR,
+                stroke=False,
+            )
+        )
+
+        # Shape glyph — routes through shim.shapes.draw_hat_shape via the
+        # sink. Painted LAST so it sits on top of the backdrop and chips.
+        ops.append(
+            ShapeGlyphOp(
+                shape_name=bubble.shape_name,
+                cx=shape_cx,
+                cy=shape_cy,
+                scale=bubble.shape_scale,
+                color=HOMOPHONE_SHAPE_COLOR_HEX,
+                alpha=255,
+                outline=None,
             )
         )
 

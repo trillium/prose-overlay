@@ -58,7 +58,6 @@ MVP scope OUT (deferred per the layer charter):
 import json
 import pathlib
 import subprocess
-from typing import Any
 
 import yaml
 

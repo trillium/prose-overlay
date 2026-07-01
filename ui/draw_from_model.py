@@ -87,15 +87,8 @@ from __future__ import annotations
 from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect as _TalonRect
 
-from ....utils.overlay_kit import DismissibleOverlay, draw_panel_frame
-from ..internal.draw_constants import (
-    BG_COLOR,
-    BG_COLOR_FALLBACK,
-    BORDER_COLOR,
-    BORDER_COLOR_FALLBACK,
-    PANEL_PAD,
-    PANEL_RADIUS,
-)
+from ....utils.overlay_kit import DismissibleOverlay
+from ..internal.draw_constants import PANEL_PAD
 from .layout import LayoutModel
 from .paint_ops import execute, to_paint_ops
 
@@ -123,14 +116,13 @@ def draw_from_model(
     if panel_rect.width <= 0 or panel_rect.height <= 0:
         return panel_rect
 
-    # --- Panel frame (direct — rounded corners stay outside PaintOps) ---
-    # Rounded rects require a Skia Path. Introducing a RoundedRectOp is
-    # scope creep for Move 5; the frame stays through draw_panel_frame.
-    # See ui/paint_ops.py module docstring "Scope for Move 5".
+    # --- Font typeface ---
+    # Panel frame + border move into the PaintOp pipeline (Step 10 of
+    # paint-pipeline retirement). to_paint_ops emits two RoundedRectOps
+    # (filled bg + stroked border) at the top of its op list; the sink's
+    # RoundedRectOp dispatch routes through overlay_kit.draw_rounded_rect
+    # for byte-equivalent output.
     c.paint.typeface = "Menlo"
-    bg = BG_COLOR_FALLBACK if model.using_fallback else BG_COLOR
-    border = BORDER_COLOR_FALLBACK if model.using_fallback else BORDER_COLOR
-    draw_panel_frame(c, panel_rect, PANEL_RADIUS, bg, border)
 
     # --- Close hint (direct — helper composes text + X-mark lines) ---
     # overlay.draw_close_hint calls Skia internally to paint text plus

@@ -365,6 +365,54 @@ def to_paint_ops(layout: LayoutModel) -> list[PaintOp]:
 
     ops: list[PaintOp] = []
 
+    # --- Panel frame (bg + border) ---
+    # Mirrors ui/draw.py:draw_overlay line 207 (draw_panel_frame call).
+    # Painted FIRST so all content lands on top. The old paint uses
+    # utils/overlay_kit.py:draw_panel_frame which composes fill + stroke
+    # against a rounded-rect Skia Path; we emit two RoundedRectOps
+    # (filled bg + stroked border) that route through the sink's
+    # RoundedRectOp dispatch (also using overlay_kit.draw_rounded_rect).
+    # Byte-equivalent output verified via the ops-dispatch tests.
+    #
+    # Gate on positive panel size (matches draw_from_model's
+    # zero-panel short-circuit at line 123). The screen-rect guard in
+    # ui/layout_root.py:layout produces a zero panel when
+    # state.screen_rect is None; skip emission entirely so the paint is
+    # a no-op.
+    from ..internal.draw_constants import (
+        BG_COLOR,
+        BG_COLOR_FALLBACK,
+        BORDER_COLOR,
+        BORDER_COLOR_FALLBACK,
+        PANEL_RADIUS,
+    )
+    if layout.panel.w > 0 and layout.panel.h > 0:
+        bg = BG_COLOR_FALLBACK if layout.using_fallback else BG_COLOR
+        border = BORDER_COLOR_FALLBACK if layout.using_fallback else BORDER_COLOR
+        ops.append(
+            RoundedRectOp(
+                x=layout.panel.x,
+                y=layout.panel.y,
+                w=layout.panel.w,
+                h=layout.panel.h,
+                radius=PANEL_RADIUS,
+                color=bg,
+                stroke=False,
+            )
+        )
+        ops.append(
+            RoundedRectOp(
+                x=layout.panel.x,
+                y=layout.panel.y,
+                w=layout.panel.w,
+                h=layout.panel.h,
+                radius=PANEL_RADIUS,
+                color=border,
+                stroke=True,
+                stroke_width=1.0,
+            )
+        )
+
     # --- Selection overlay (paints BEHIND token text) ---
     # Mirrors ui/draw_tokens.py:_draw_token_rows lines 259-274. The old
     # paint code emits highlight-then-text per token so the selection wash
